@@ -1,5 +1,5 @@
 #include "game_utils.c"
-
+#include "globals.h"
 
 SDL_Renderer *renderer;
 SDL_Window *window;
@@ -8,8 +8,7 @@ SDL_Window *window;
 #define WINDOW_HEIGHT 720
 #define FPS 60
 #define TPS 60
-#define ROOM_WIDTH 30
-#define ROOM_HEIGHT 20
+
 
 
 // enum Tiles {
@@ -18,15 +17,6 @@ SDL_Window *window;
 //     PLAYER,
 //     FLOOR
 // };
-
-typedef enum Placeables {
-    IDK = -1,
-    WALL,
-    DOOR,
-    PLAYER,
-    FLOOR,
-    CEILING
-} Placeable;
 
 typedef enum PlaceMode {
     PLACEMODE_FLOOR,
@@ -42,8 +32,10 @@ typedef enum PlaceMode {
 
 typedef struct Entity {
     v2 pos;
-    int id;
+    EntityID id;
 } Entity;
+
+v2 getMousePos(); 
 
 void tick(u64 delta);
 
@@ -51,9 +43,9 @@ void render(u64 delta);
 
 void handle_input(SDL_Event event);
 
-void place(v2 pos);
+void placeObject(v2 pos);
 
-void remove(v2 pos);
+void removeObject(v2 pos);
 
 void init();
 
@@ -63,6 +55,10 @@ void saveLevel();
 
 void loadLevel();
 
+void mouse_just_pressed(int button);
+
+Placeable getCurrentSelection();
+
 bool running = true;
 int currentSelection;
 int **wallTileMap;
@@ -70,10 +66,11 @@ int **floorTileMap;
 int **ceilingTileMap;
 bool lMouseDown = false;
 bool rMouseDown = false;
-const int tileSize = WINDOW_WIDTH / ROOM_WIDTH;
+const int tileSize = WINDOW_WIDTH / TILEMAP_WIDTH;
 PlaceMode placeMode;
 char *levelFile;
-
+arraylist *entityList;
+Entity *player;
 
 int main(int argc, char **argv) {
     if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
@@ -135,21 +132,28 @@ void test() {
 }
 
 void init() {
-    init_grid(int, ROOM_HEIGHT, ROOM_WIDTH, -1, &wallTileMap);
-    init_grid(int, ROOM_HEIGHT, ROOM_WIDTH, -1, &floorTileMap);
-    init_grid(int, ROOM_HEIGHT, ROOM_WIDTH, -1, &ceilingTileMap);
+    init_grid(int, TILEMAP_HEIGHT, TILEMAP_WIDTH, -1, &wallTileMap);
+    init_grid(int, TILEMAP_HEIGHT, TILEMAP_WIDTH, -1, &floorTileMap);
+    init_grid(int, TILEMAP_HEIGHT, TILEMAP_WIDTH, -1, &ceilingTileMap);
+    entityList = create_arraylist(5);
 
     placeMode = PLACEMODE_CEILING;
 
+    player = malloc(sizeof(Entity));
+    player->pos = (v2){WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2};
+    player->id = ENTITY_PLAYER;
+
     loadLevel();
+
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
 }
 // _______
 // | | | |
 
 void printTileMap() {
-    for (int i = 0; i < ROOM_HEIGHT; i++) {
-        for (int j = 0; j < ROOM_WIDTH; j++) {
+    for (int i = 0; i < TILEMAP_HEIGHT; i++) {
+        for (int j = 0; j < TILEMAP_WIDTH; j++) {
             printf("%d ", wallTileMap[i][j]);
         }
         printf("\n");
@@ -157,8 +161,8 @@ void printTileMap() {
 }
 
 void removePlayer() {
-    for (int i = 0; i < ROOM_WIDTH; i++) {
-        for (int j = 0; j < ROOM_HEIGHT; j++) {
+    for (int i = 0; i < TILEMAP_WIDTH; i++) {
+        for (int j = 0; j < TILEMAP_HEIGHT; j++) {
             if (wallTileMap[j][i] == (int)PLAYER) {
                 wallTileMap[j][i] = -1;
                 return;
@@ -167,30 +171,69 @@ void removePlayer() {
     }
 }
 
-void place(v2 pos) {
+void placeObject(v2 pos) {
     v2 tileMapPos = v2_floor(v2_div(pos, to_vec(tileSize)));
     int x = tileMapPos.x;
     int y = tileMapPos.y;
-    
-    switch (currentSelection) {
+
+    switch (getCurrentSelection()) {
         case (int)WALL:
             wallTileMap[y][x] = WALL;
             break;
         case (int)CEILING:
             ceilingTileMap[y][x] = CEILING;
             break;
+        case (int)FLOOR:
+            floorTileMap[y][x] = FLOOR;
+            break;
         case (int)PLAYER:
-            removePlayer();
-            wallTileMap[y][x] = PLAYER;
+            player->pos = pos;
+            break;
+        case (int)SHOOTER: ;
+            Entity *shooter = malloc(sizeof(Entity));
+            shooter->id = ENTITY_SHOOTER;
+            shooter->pos = pos;
+            arraylist_add(entityList, shooter, -1);
+            break;
     }
 }
 
-void remove(v2 pos) {
+void removeEntitiesAt(v2 pos, double radius) {
+    arraylist *entitiesToRemove = create_arraylist(10);
+    for (int i = 0; i < entityList->length; i++) {
+        Entity *entity = (Entity *)arraylist_get(entityList, i)->val;
+        if (v2_distance_squared(pos, entity->pos) < radius * radius) {
+            arraylist_add(entitiesToRemove, entity, -1);
+        }
+    }
+
+    for (int i = 0; i < entitiesToRemove->length; i++) {
+        Entity *entity = arraylist_get(entitiesToRemove, i)->val;
+        free(entity);
+        arraylist_remove(entityList, arraylist_find(entityList, entity));
+    }
+}
+
+void removeObject(v2 pos) {
     v2 tileMapPos = v2_floor(v2_div(pos, to_vec(tileSize)));
     int x = tileMapPos.x;
     int y = tileMapPos.y;
 
-    wallTileMap[y][x] = -1;
+    switch (placeMode) {
+        case PLACEMODE_ENTITY:
+            removeEntitiesAt(pos, 10);
+            break;
+        case PLACEMODE_WALL:
+            wallTileMap[y][x] = -1;
+            break;
+        case PLACEMODE_CEILING:
+            ceilingTileMap[y][x] = -1;
+            break;
+        case PLACEMODE_FLOOR:
+            floorTileMap[y][x] = -1;
+            break;
+    }
+    
 }
 
 
@@ -221,10 +264,18 @@ void key_pressed(SDL_Keycode key) {
 }
 
 void mouse_down(int button) {
+    mouse_just_pressed(button);
     if (button == SDL_BUTTON_LEFT) {
         lMouseDown = true;
+        
     } else if (button == SDL_BUTTON_RIGHT) {
         rMouseDown = true;
+    }
+}
+
+void mouse_just_pressed(int button) {
+    if (button == SDL_BUTTON_LEFT && placeMode == PLACEMODE_ENTITY) {
+        placeObject(getMousePos());
     }
 }
 
@@ -257,38 +308,49 @@ void handle_input(SDL_Event event) {
 }
 
 Placeable getCurrentSelection() {
-    switch (currentSelection) {
-        case 0:
-            switch (placeMode) {
-                case (int)PLACEMODE_WALL:
+    switch (placeMode) {
+        case PLACEMODE_WALL:
+            switch(currentSelection) {
+                case 0:
                     return WALL;
                     break;
-                case (int)PLACEMODE_FLOOR:
-                    return FLOOR;
+                default:
+                    return IDK;
                     break;
-                case (int)PLACEMODE_ENTITY:
+            }
+            break;
+        case PLACEMODE_ENTITY:
+            switch(currentSelection) {
+                case 0:
                     return PLAYER;
                     break;
-                case (int)PLACEMODE_CEILING:
+                case 1:
+                    return SHOOTER;
+                    break;
+                default:
+                    return IDK;
+                    break;
+            }
+            break;
+        case PLACEMODE_FLOOR:
+            switch(currentSelection) {
+                case 0:
+                    return FLOOR;
+                    break;
+                default:
+                    return IDK;
+                    break;
+            }
+            break;
+        case PLACEMODE_CEILING:
+            switch(currentSelection) {
+                case 0:
                     return CEILING;
                     break;
                 default:
                     return IDK;
                     break;
             }
-            break;
-        case 1:
-            switch (placeMode) {
-                case (int)PLACEMODE_WALL:
-                    return DOOR;
-                    break;
-                default:
-                    return IDK;
-                    break;
-            }
-            break;
-        default:
-            return IDK;
             break;
     }
 }
@@ -305,6 +367,9 @@ char *getCurrentSelectionString() {
     switch (getCurrentSelection()) {
         case PLAYER:
             return "Current selection: Player";
+            break;
+        case SHOOTER:
+            return "Current selection: Shooter";
             break;
         case WALL:
             return "Current selection: wall";
@@ -324,16 +389,17 @@ char *getCurrentSelectionString() {
     }
 }
 
+v2 getMousePos() {
+    int x, y;
+    SDL_GetMouseState(&x, &y);
+    return (v2){x, y};
+}
 
 void tick(u64 delta) {
-    if (lMouseDown) {
-        int x, y;
-        SDL_GetMouseState(&x, &y);
-        place((v2){x, y});
+    if (lMouseDown && placeMode != PLACEMODE_ENTITY) {
+        placeObject(getMousePos());
     } else if (rMouseDown) {
-        int x, y;
-        SDL_GetMouseState(&x, &y);
-        remove((v2){x, y});
+        removeObject(getMousePos());
     }
 
     char *title;
@@ -363,6 +429,38 @@ void tick(u64 delta) {
     SDL_SetWindowTitle(window, title);
 }
 
+void drawPlayer() {
+    SDL_Rect rect = {
+        player->pos.x - 10,
+        player->pos.y - 10,
+        20,
+        20
+    };
+
+    SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+
+    SDL_RenderFillRect(renderer, &rect);
+}
+
+void drawEntity(v2 pos, EntityID id) {
+    SDL_Rect rect = {
+        pos.x - 10,
+        pos.y - 10,
+        20,
+        20
+    };
+
+    switch (id) {
+        case ENTITY_SHOOTER:
+            SDL_SetRenderDrawColor(renderer, 10, 80, 10, 255);
+            break;
+        default:
+            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+            break;
+    }
+
+    SDL_RenderFillRect(renderer, &rect);
+}
 
 void drawGridLines() {
     switch (placeMode) {
@@ -380,22 +478,42 @@ void drawGridLines() {
             break;
     }
 
-    for (int i = 0; i < ROOM_WIDTH; i++) {
+    for (int i = 0; i < TILEMAP_WIDTH; i++) {
         SDL_RenderDrawLine(renderer, i * tileSize, 0, i * tileSize, WINDOW_HEIGHT);
     }
-    for (int i = 0; i < ROOM_HEIGHT; i++) {
+    for (int i = 0; i < TILEMAP_HEIGHT; i++) {
         SDL_RenderDrawLine(renderer, 0, i * tileSize, WINDOW_WIDTH, i * tileSize);        
     }
 }
 
 
 void setColorByType(Placeable type) {
+    int opacity = 125;
     switch (type) {
         case WALL:
-            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+            if (placeMode == PLACEMODE_WALL) {
+                opacity = 255;
+            }
+            SDL_SetRenderDrawColor(renderer, 255, 255, 255, opacity);
+            
             break;
         case PLAYER:
-            SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+            if (placeMode == PLACEMODE_ENTITY) {
+                opacity = 255;
+            }
+            SDL_SetRenderDrawColor(renderer, 255, 0, 0, opacity);
+            break;
+        case FLOOR:
+            if (placeMode == PLACEMODE_FLOOR) {
+                opacity = 255;
+            }
+            SDL_SetRenderDrawColor(renderer, 200, 100, 0, opacity);
+            break;
+        case CEILING:
+            if (placeMode == PLACEMODE_CEILING) {
+                opacity = 255;
+            }
+            SDL_SetRenderDrawColor(renderer, 200, 200, 200, opacity);
             break;
         case DOOR:
             SDL_SetRenderDrawColor(renderer, 255, 255, 0, 255);
@@ -403,34 +521,49 @@ void setColorByType(Placeable type) {
     }
 } 
 
-void drawPlacedTiles() {
-    for (int i = 0; i < ROOM_WIDTH; i++) {
-        for (int j = 0; j < ROOM_HEIGHT; j++) {
+void draw() {
+    for (int x = 0; x < TILEMAP_WIDTH; x++) {
+        for (int y = 0; y < TILEMAP_HEIGHT; y++) {
             SDL_Rect rect = {
-                i * tileSize,
-                j * tileSize,
+                x * tileSize,
+                y * tileSize,
                 tileSize,
                 tileSize
             };
 
-            switch (wallTileMap[j][i]) {
-                case PLAYER:
-                    SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
-                    break;
-                case WALL:
-                    SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
-                    break;
-                case DOOR:
-                    SDL_SetRenderDrawColor(renderer, 255, 255, 0, 255);
-                    break;
-                default:
-                    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0);
-                    break;
-            }
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+
+
+
+            setColorByType(floorTileMap[y][x]);
 
             SDL_RenderFillRect(renderer, &rect);
+
+            setColorByType(wallTileMap[y][x]);
+
+            SDL_RenderFillRect(renderer, &rect);
+
+            setColorByType(ceilingTileMap[y][x]);
+
+            SDL_RenderFillRect(renderer, &rect);
+
+            
+
+            
         }
     }
+
+    if (placeMode == PLACEMODE_ENTITY) {
+        for (int i = 0; i < entityList->length; i++) {
+            Entity *entity = arraylist_get(entityList, i)->val;
+            drawEntity(entity->pos, entity->id);
+        }
+    }
+
+    drawPlayer();
+
+    drawGridLines();
+
 }
 
 void render(u64 delta) {
@@ -442,9 +575,9 @@ void render(u64 delta) {
 
     
 
-    drawPlacedTiles();
+    draw();
 
-    drawGridLines();
+    
 
     SDL_RenderPresent(renderer);
 }
@@ -456,7 +589,7 @@ void saveLevel() {
         return;
     }
 
-    char *str = malloc(sizeof(char) * (ROOM_HEIGHT * ROOM_WIDTH + 1));
+    char *str = malloc(sizeof(char) * (TILEMAP_HEIGHT * TILEMAP_WIDTH + 1));
     if (str == NULL) {
         printf("malloc failed.\n");
         fclose(fh); // Close the file stream before returning
@@ -464,8 +597,8 @@ void saveLevel() {
     }
 
     int strIdx = 0;
-    for (int i = 0; i < ROOM_HEIGHT; i++) {
-        for (int j = 0; j < ROOM_WIDTH; j++) {
+    for (int i = 0; i < TILEMAP_HEIGHT; i++) {
+        for (int j = 0; j < TILEMAP_WIDTH; j++) {
             if (wallTileMap[i][j] == -1) {
                 str[strIdx++] = '-';
             } else {
@@ -490,12 +623,12 @@ void loadLevel() {
         return;
     }
 
-    char *str = malloc(ROOM_HEIGHT * ROOM_WIDTH + 1);
-    fgets(str, ROOM_WIDTH * ROOM_HEIGHT, fh);
+    char *str = malloc(TILEMAP_HEIGHT * TILEMAP_WIDTH + 1);
+    fgets(str, TILEMAP_WIDTH * TILEMAP_HEIGHT, fh);
 
-    for (int row = 0; row < ROOM_HEIGHT; row++) {
-        for (int col = 0; col < ROOM_WIDTH; col++) {
-            char tile = str[row * ROOM_WIDTH + col];
+    for (int row = 0; row < TILEMAP_HEIGHT; row++) {
+        for (int col = 0; col < TILEMAP_WIDTH; col++) {
+            char tile = str[row * TILEMAP_WIDTH + col];
             if (tile == '-') {
                 wallTileMap[row][col] = -1;
             } else {

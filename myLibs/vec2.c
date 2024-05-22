@@ -16,6 +16,67 @@ typedef struct v2 {
 #define V2_RIGHT ((v2){1, 0})
 #define to_vec(a) ((v2){a, a})
 
+#define min(a, b) a < b ? a : b
+#define max(a, b) a > b ? a : b
+
+// double sin_table[10800];
+// double cos_table[10800];
+// double tan_table[10800];
+// int initialized_fast_trig = 0;
+// const double DEG_TO_RAD = PI / 180;
+// const double RAD_TO_DEG = 180 / PI;
+
+
+
+
+
+// double init_fast_trig() {
+//     for (int i = 0; i < 10800; i++) {
+//         double angle = deg_to_rad((double)i / 30);
+//         sin_table[i] = sin(angle);
+//         cos_table[i] = cos(angle);
+//         tan_table[i] = tan(angle);
+//     }
+//     initialized_fast_trig = 1;
+// }
+
+
+// double fast_sin(double angleRads) {
+//     int idx = (int)(rad_to_deg(angleRads) * 30);
+//     return sin_table[(int)clamp(idx, 0, 10800 - 1)];
+// }
+
+// double fast_cos(double angleRads) {
+//     int idx = (int)(rad_to_deg(angleRads) * 30);
+//     return cos_table[(int)clamp(idx, 0, 10800 - 1)];    
+// }
+
+// double fast_tan(double angleRads) {
+//     int idx = (int)(rad_to_deg(angleRads) * 30);
+//     return tan_table[(int)clamp(idx, 0, 10800 - 1)];
+// }
+
+// double default_sin(double angleRads) {
+//     if (initialized_fast_trig) {
+//         return fast_sin(angleRads);
+//     }
+//     return sin(angleRads);
+// }
+
+// double default_cos(double angleRads) {
+//     if (initialized_fast_trig) {
+//         return fast_cos(angleRads);
+//     }
+//     return cos(angleRads);
+// }
+
+// double default_tan(double angleRads) {
+//     if (initialized_fast_trig) {
+//         return fast_tan(angleRads);
+//     }
+//     return tan(angleRads);
+// }
+
 v2 v2_add(v2 a, v2 b) {
     return (v2){a.x + b.x, a.y + b.y};
 }

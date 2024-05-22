@@ -1,24 +1,23 @@
 
 #include "game_utils.c"
+#include "globals.h"
 
 SDL_Renderer *renderer;
 SDL_Window *window;
 
 // #DEFINITIONS
 
-#define TPS 60
-#define FPS 60
+#define TPS 300
+#define FPS 300
 #define WINDOW_WIDTH 1080
 #define WINDOW_HEIGHT 720
-#define RESOLUTION_X 180
+#define RESOLUTION_X 360
+#define RESOLUTION_Y 180
 #define X_SENSITIVITY 0.1
 #define Y_SENSITIVITY 0.5
-#define FLOOR_RES_Y 120
 #define COLOR_BLACK (SDL_Color){0, 0, 0}
 #define TRANSPARENT (SDL_Color){0, 0, 0, 0}
 #define RENDER_DISTANCE 350
-#define TILEMAP_WIDTH 30
-#define TILEMAP_HEIGHT 20
 #define WALL_HEIGHT 36
 #define NUM_WALL_THREADS 4
 
@@ -352,7 +351,7 @@ double fov = 80;
 double printCooldownTimer = 0.05;
 const char *font = "font.ttf";
 const SDL_Color floorColor = {50, 50, 50, 255};
-const SDL_Color skyColor = {50, 180, 250, 255};
+const SDL_Color skyColor = {0, 0, 0, 255};
 const SDL_Color fogColor = {0, 0, 0, 255};
 SDL_Texture *wallTexture;
 SDL_Texture *floorTexture;
@@ -413,6 +412,7 @@ int main(int argc, char* argv[]) {
     // test();
     // return;
 
+    // init_fast_trig();
     init();
 
 
@@ -535,10 +535,6 @@ Enemy *createEnemy() {
 
 void init() { // #INIT
 
-    init_grid(FloorPixel, FLOOR_RES_Y, RESOLUTION_X, (FloorPixel){true}, &floorPixelsToRender);
-    init_grid(FloorPixel, FLOOR_RES_Y, RESOLUTION_X, (FloorPixel){true}, &ceilingPixelsToRender);
-
-
     tanHalfFOV = tan(deg_to_rad(fov / 2));
     tanHalfStartFOV = tan(deg_to_rad(startFov / 2));
 
@@ -604,7 +600,7 @@ void init() { // #INIT
 
     for (int i = 0; i < 26; i++) keyPressArr[i] = false;
     
-    loadLevel("scarylevel.txt");
+    loadLevel("test.txt");
 
     entityTexture = make_texture(renderer, "scary_monster.bmp");
 
@@ -1026,8 +1022,8 @@ v2 floorToScreen(v2 pos) {
     
     int x = idx * WINDOW_WIDTH;
 
-    double fovFactor = tanHalfStartFOV/tanHalfFOV;
-    double wallSize = WALL_HEIGHT * WINDOW_HEIGHT/dist / fovFactor;
+    //double fovFactor = tanHalfStartFOV/tanHalfFOV;
+    double wallSize = WALL_HEIGHT * WINDOW_HEIGHT/dist;
 
     int y = WINDOW_HEIGHT / 2 + wallSize / 2; 
 
@@ -1058,167 +1054,83 @@ v2 screenToFloor(v2 pos) {
     return v2_add(player->pos, v2_mul(rayDir, to_vec(dist)));
 }
 
-void renderSky() {
-    for (int row = 0; row < FLOOR_RES_Y; row++) {
+
+void renderFloorAndCeiling() {
+    // render by scanlines.
+    // interpolate between left and right points and put the correct texture
+
+    v2 pixelSize = v2_div((v2){WINDOW_WIDTH, WINDOW_HEIGHT}, (v2){RESOLUTION_X, RESOLUTION_Y});
+
+
+    for (int row = RESOLUTION_Y / 2; row < RESOLUTION_Y; row++) {
+
+        
+        int screenY = row * WINDOW_HEIGHT / RESOLUTION_Y;
+
+        v2 left = screenToFloor((v2){0, screenY});
+        v2 right = screenToFloor((v2){RESOLUTION_X - 1, screenY});
         for (int col = 0; col < RESOLUTION_X; col++) {
+
+            int screenX = col * WINDOW_WIDTH / RESOLUTION_X;
             
-            FloorPixel current = ceilingPixelsToRender[row][col];
-            if (current.empty) continue;
-
-            SDL_Texture *t = current.texture;
-            double lerpToFog = current.lerpToFog;
-            SDL_Rect srcRect = current.srcRect;
-            SDL_Rect dstRect = current.dstRect;
-
-
-            SDL_SetTextureColorMod(t, lerp(fogColor.r, 255, lerpToFog), lerp(fogColor.g, 255, lerpToFog), lerp(fogColor.b, 255, lerpToFog));
-            SDL_RenderCopy(renderer, t, &srcRect, &dstRect);
-            SDL_SetTextureColorMod(t, 255, 255, 255);
-
-        }
-    }
-
-}
-
-int calcCeilingPixels_Threaded(void *data) {
-    for (int i = 0; i < RESOLUTION_X; i++) {
-        int x = i;
-
-        int topBound = clamp(player->height, -INFINITY, 0);
-        int bottomBound = FLOOR_RES_Y - (wallHeights[i] / 2 / (WINDOW_HEIGHT / 2) * FLOOR_RES_Y) + 1;
-
-        for (int j = topBound; j < bottomBound; j++) {
-            int y = j;
+            v2 point = v2_lerp(left, right, (double)col / RESOLUTION_X);
             
-            double light = inverse_lerp(FLOOR_RES_Y, topBound, j);
-            // light *= light;
 
-            v2 worldPos = screenToFloor((v2){x, y * (WINDOW_HEIGHT / 2) / FLOOR_RES_Y});
+            SDL_Texture *floorTex = floorTexture;
 
-            SDL_Rect srcRect = {
-                loop_clamp(worldPos.x, 0, floorTextureSize.x),
-                loop_clamp(worldPos.y, 0, floorTextureSize.y),
+            SDL_Texture *ceilingTex = floorTexture;
+
+            v2 textureSize = getTextureSize(floorTex);
+
+            SDL_Rect srcRectFloor = { 
+                loop_clamp(point.x, 0, 36),
+                loop_clamp(point.y, 0, 36),
                 1,
                 1
             };
 
-            SDL_Rect dstRect = {
-                x * WINDOW_WIDTH / RESOLUTION_X + cameraOffset.x,
-                y * WINDOW_HEIGHT / 2 / FLOOR_RES_Y - player->height + cameraOffset.y,
-                WINDOW_WIDTH / RESOLUTION_X,
-                WINDOW_HEIGHT / 2 / FLOOR_RES_Y
+            v2 offsets = (v2){cameraOffset.x, cameraOffset.y - player->height};
+
+            SDL_Rect dstRectFloor = {
+                screenX + offsets.x,
+                screenY + offsets.y,
+                pixelSize.x,
+                pixelSize.y
             };
+
+            double ceilingY = WINDOW_HEIGHT / 2 - (screenY - WINDOW_HEIGHT / 2);
+
+            SDL_Rect dstRectCeiling = {
+                screenX + offsets.x,
+                ceilingY + offsets.y,
+                pixelSize.x,
+                pixelSize.y
+            };
+
+            double light = inverse_lerp(RESOLUTION_Y / 2, RESOLUTION_Y, row);
 
             int color = light * 255;
 
-            FloorPixel p;
-            p.dstRect = dstRect;
-            p.empty = false;
-            p.lerpToFog = light;
-            p.srcRect = srcRect;
-            p.texture = floorTexture;
-
-    
-
-            ceilingPixelsToRender[(int)clamp(y, 0, FLOOR_RES_Y - 1)][x] = p;
-
-        }
-    }
-}
-
-
-void renderFloor() {
-
-    for (int row = 0; row < FLOOR_RES_Y; row++) {
-        for (int col = 0; col < RESOLUTION_X; col++) {
-            FloorPixel current = floorPixelsToRender[row][col];
-            if (current.empty) continue;
-
-            SDL_Texture *t = current.texture;
-            double lerpToFog = current.lerpToFog;
-            SDL_Rect srcRect = current.srcRect;
-            SDL_Rect dstRect = current.dstRect;
-
-
-            SDL_SetTextureColorMod(t, lerp(fogColor.r, 255, lerpToFog), lerp(fogColor.g, 255, lerpToFog), lerp(fogColor.b, 255, lerpToFog));
-            SDL_RenderCopy(renderer, t, &srcRect, &dstRect);
-            SDL_SetTextureColorMod(t, 255, 255, 255);
-        }
-    }
-    
-}
-
-int calcFloorPixels_Threaded(void *data) {
-    int yEnd = FLOOR_RES_Y * 2 + clamp(player->height, 0, INFINITY);
-
-    for (int i = 0; i < RESOLUTION_X; i++) {
-        int x = i;
-
-        int yStart = FLOOR_RES_Y + (wallHeights[i] / 2 / (WINDOW_HEIGHT / 2) * FLOOR_RES_Y);
-        for (int j = yStart; j < yEnd; j++) {
-            int y = j;
+            SDL_SetTextureColorMod(floorTex, color, color, color);
+            SDL_SetTextureColorMod(ceilingTex, color, color, color);
             
-            v2 worldPos = screenToFloor((v2){x, y * (WINDOW_HEIGHT / 2) / FLOOR_RES_Y});
-            double light = inverse_lerp(FLOOR_RES_Y, yEnd, j);
-            // light *= light;
+            SDL_RenderCopy(renderer, floorTex, &srcRectFloor, &dstRectFloor);
 
-            SDL_Texture *t = floorTexture;
-
-            v2 gridPos = v2_floor(v2_div(worldPos, to_vec(tileSize)));
-            if (in_range((int)gridPos.x, 0, TILEMAP_WIDTH - 1) && in_range((int)gridPos.y, 0, TILEMAP_HEIGHT - 1)) {
-                int tile = floorTileMap[(int)gridPos.y][(int)gridPos.x];
-                switch (tile) {
-                    case 4:
-                        t = floorTexture2;
-                        break;
-                }
-            }
-                
-
-            v2 tSize = getTextureSize(t);
-
-            SDL_Rect srcRect = {
-                loop_clamp(worldPos.x, 0, tSize.x),
-                loop_clamp(worldPos.y, 0, tSize.y),
-                1,
-                1
-            };
-
-            SDL_Rect dstRect = {
-                x * WINDOW_WIDTH / RESOLUTION_X + cameraOffset.x,
-                y * WINDOW_HEIGHT / 2 / FLOOR_RES_Y - player->height + cameraOffset.y,
-                WINDOW_WIDTH / RESOLUTION_X,
-                WINDOW_HEIGHT / 2 / FLOOR_RES_Y
-            };
-
-            double lerpToFog = clamp(light, 0, 1);
-
-            int correctYIdx = y;
-            correctYIdx -= FLOOR_RES_Y;
-
-            floorPixelsToRender[(int)clamp(correctYIdx, 0, FLOOR_RES_Y - 1)][x] = (FloorPixel) {
-                false,
-                t,
-                srcRect,
-                dstRect,
-                lerpToFog
-            };
-
-
-            
+            SDL_RenderCopy(renderer, ceilingTex, &srcRectFloor, &dstRectCeiling);
         }
+        
+        
     }
-
-    return 0;
 }
-
 
 
 void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height) {
 
+    double cosAngleToForward = v2_cos_angle_between(playerForward, v2_sub(pos, player->pos));
+
     v2 screenFloorPos = floorToScreen(pos);
 
-    double cosAngleToForward = v2_cos_angle_between(playerForward, v2_sub(pos, player->pos));
+
 
     double dist = v2_distance(pos, player->pos);
 
@@ -1226,7 +1138,7 @@ void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height) {
 
     //WALL_HEIGHT * WINDOW_HEIGHT/dist * 80/fov;
     double fovFactor = tanHalfStartFOV/tanHalfFOV;
-    double finalSize = WALL_HEIGHT * WINDOW_HEIGHT/dist * fovFactor;
+    double finalSize = WALL_HEIGHT * WINDOW_HEIGHT/dist * fovFactor / cosAngleToForward;
     v2 finalSizeVec = (v2){finalSize * size.x / 100, finalSize * size.y / 100};
 
     SDL_Rect dstRect = {
@@ -1434,13 +1346,12 @@ void renderWallStripe(WallStripe *stripe) {
 
     double angleLightModifier = sin(v2_get_angle(stripe->normal)) * 0.2;
 
-    SDL_SetRenderDrawColor(
-        renderer,
-        clamp(lerp(fogColor.r, 0, brightness) - 35 + (angleLightModifier * 35), 0, 255),
-        clamp(lerp(fogColor.g, 0, brightness) - 35 + (angleLightModifier * 35), 0, 255),
-        clamp(lerp(fogColor.b, 0, brightness) - 35 + (angleLightModifier * 35), 0, 255),
-        lerp(255, 50, brightness) // to override the textures more when far away
-    );
+    SDL_Color colorMode = {
+        clamp(200 - 40 + (angleLightModifier * 80), 0, 255),
+        clamp(200 - 40 + (angleLightModifier * 80), 0, 255),
+        clamp(200 - 40 + (angleLightModifier * 80), 0, 255),
+        lerp(255, 50, brightness)
+    };
 
     SDL_Texture *texture = stripe->texture;
     v2 textureSize = getTextureSize(texture);
@@ -1462,8 +1373,8 @@ void renderWallStripe(WallStripe *stripe) {
     };
 
     
+    SDL_SetTextureColorMod(texture, colorMode.r, colorMode.g, colorMode.b);
     SDL_RenderCopy(renderer, texture, &srcRect, &dstRect);
-    SDL_RenderFillRect(renderer, &dstRect);
     free(stripe);
 
 }
@@ -1527,21 +1438,22 @@ void render(u64 delta) { // #RENDER
 
     SDL_SetWindowTitle(window, concat(newTitle, fps));
 
-    SDL_SetRenderDrawColor(renderer, skyColor.r, skyColor.g, skyColor.b, 255);
+    
 
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     
-    SDL_Thread *piss = SDL_CreateThread(calcFloorPixels_Threaded, "Thread 1", NULL);
-    SDL_Thread *skypiss = SDL_CreateThread(calcCeilingPixels_Threaded, "Thread 2", NULL);
+    // SDL_Thread *piss = SDL_CreateThread(calcFloorPixels_Threaded, "Thread 1", NULL);
+    // SDL_Thread *skypiss = SDL_CreateThread(calcCeilingPixels_Threaded, "Thread 2", NULL);
 
     arraylist *renderList = getRenderList();
 
-    // render the floor and ceiling FIRST so sprites are on top 
+    
+    
 
-    SDL_WaitThread(piss, NULL);
-    SDL_WaitThread(skypiss, NULL);
-    renderFloor();
-    renderSky();
+    SDL_SetRenderDrawColor(renderer, skyColor.r, skyColor.g, skyColor.b, 255);
+    SDL_RenderFillRect(renderer, NULL);
+
+    renderFloorAndCeiling();
 
     for (int i = 0; i < renderList->length; i++) {
 
@@ -1574,6 +1486,7 @@ void render(u64 delta) { // #RENDER
                 if (bullet->dirSprite != NULL) {
                     renderDirSprite(bullet->dirSprite, bullet->entity->pos, bullet->entity->size, bullet->entity->height);
                 } else {
+                    printf("Rendering bullet enetityt \n");
                     renderEntity(bullet->entity);
                 }
                 break;
@@ -1603,7 +1516,7 @@ Player *init_player(v2 pos) {
     player->shootCooldown = PLAYER_SHOOT_COOLDOWN;
     player->shootChargeTimer = 0;
     player->ShootTickTimer = 0.15;
-
+    player->pendingShots = 0;
     player->bulletHitbox = malloc(sizeof(CircleCollider));
     player->bulletHitbox->radius = 5;
     player->bulletHitbox->pos = player->pos;
@@ -2506,6 +2419,7 @@ void bulletTick(EnemyBullet *bullet, u64 delta) {
 
 void shooterEnemyShoot(ShooterEnemy *shooter) {
     EnemyBullet *bullet = createDefaultBullet(shooter->enemy->entity->pos, shooter->enemy->dir);
+    printf("shot bullet! \n");
     add_game_object(bullet, BULLET);
 }
 
