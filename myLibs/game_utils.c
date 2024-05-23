@@ -51,6 +51,8 @@ const double RAD_TO_DEG = 180 / PI;
 //     main2(argc, argv);
 // }
 
+
+
 double mili_to_sec(u64 mili) {
     return (double)mili / 1000;
 }

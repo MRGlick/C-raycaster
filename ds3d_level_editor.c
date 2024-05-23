@@ -1,5 +1,8 @@
 #include "game_utils.c"
 #include "globals.h"
+#include <sys/stat.h>
+#include <unistd.h>
+#include <time.h>
 
 SDL_Renderer *renderer;
 SDL_Window *window;
@@ -30,11 +33,6 @@ typedef enum PlaceMode {
 //     enum Tiles type;
 // } Tile;
 
-typedef struct Entity {
-    v2 pos;
-    EntityID id;
-} Entity;
-
 v2 getMousePos(); 
 
 void tick(u64 delta);
@@ -51,9 +49,11 @@ void init();
 
 void test();
 
-void saveLevel();
+void save(SaveData data, char *file);
 
-void loadLevel();
+void loadLevel(char *file);
+
+SaveData load(char *file);
 
 void mouse_just_pressed(int button);
 
@@ -70,7 +70,7 @@ const int tileSize = WINDOW_WIDTH / TILEMAP_WIDTH;
 PlaceMode placeMode;
 char *levelFile;
 arraylist *entityList;
-Entity *player;
+LevelEditorEntity *player;
 
 int main(int argc, char **argv) {
     if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
@@ -120,15 +120,21 @@ int main(int argc, char **argv) {
         }
     }
 
+    SaveData data;
+    data.wallTilemap = wallTileMap;
+    data.floorTilemap = floorTileMap;
+    data.ceilingTilemap = ceilingTileMap;
+    data.entities = malloc(sizeof(LevelEditorEntity) * entityList->length);
+
+    save(data, levelFile);
+
+    free(data.entities);
+
     SDL_DestroyRenderer(renderer);
 
     SDL_DestroyWindow(window);
 
     SDL_Quit();
-}
-
-void test() {
-    saveLevel();
 }
 
 void init() {
@@ -139,13 +145,14 @@ void init() {
 
     placeMode = PLACEMODE_CEILING;
 
-    player = malloc(sizeof(Entity));
+    player = malloc(sizeof(LevelEditorEntity));
     player->pos = (v2){WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2};
     player->id = ENTITY_PLAYER;
 
-    loadLevel();
-
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+
+
+    loadLevel(levelFile);
 
 }
 // _______
@@ -190,7 +197,7 @@ void placeObject(v2 pos) {
             player->pos = pos;
             break;
         case (int)SHOOTER: ;
-            Entity *shooter = malloc(sizeof(Entity));
+            LevelEditorEntity *shooter = malloc(sizeof(LevelEditorEntity));
             shooter->id = ENTITY_SHOOTER;
             shooter->pos = pos;
             arraylist_add(entityList, shooter, -1);
@@ -201,14 +208,14 @@ void placeObject(v2 pos) {
 void removeEntitiesAt(v2 pos, double radius) {
     arraylist *entitiesToRemove = create_arraylist(10);
     for (int i = 0; i < entityList->length; i++) {
-        Entity *entity = (Entity *)arraylist_get(entityList, i)->val;
+        LevelEditorEntity *entity = (LevelEditorEntity *)arraylist_get(entityList, i)->val;
         if (v2_distance_squared(pos, entity->pos) < radius * radius) {
             arraylist_add(entitiesToRemove, entity, -1);
         }
     }
 
     for (int i = 0; i < entitiesToRemove->length; i++) {
-        Entity *entity = arraylist_get(entitiesToRemove, i)->val;
+        LevelEditorEntity *entity = arraylist_get(entitiesToRemove, i)->val;
         free(entity);
         arraylist_remove(entityList, arraylist_find(entityList, entity));
     }
@@ -249,16 +256,23 @@ void key_pressed(SDL_Keycode key) {
             currentSelection = 2;
             break;
         case SDLK_f:
+            currentSelection = 0;
             placeMode = PLACEMODE_FLOOR;
             break;
         case SDLK_c:
+            currentSelection = 0;
             placeMode = PLACEMODE_CEILING;
             break;
         case SDLK_e:
+            currentSelection = 0;
             placeMode = PLACEMODE_ENTITY;
             break;
         case SDLK_w:
+            currentSelection = 0;
             placeMode = PLACEMODE_WALL;
+            break;
+        case SDLK_F8:
+            running = false;
             break;
     }
 }
@@ -291,7 +305,6 @@ void handle_input(SDL_Event event) {
     switch (event.type)
     {
         case SDL_QUIT:
-            saveLevel();
             running = false;
             break;
         case SDL_KEYDOWN:
@@ -443,6 +456,9 @@ void drawPlayer() {
 }
 
 void drawEntity(v2 pos, EntityID id) {
+
+    int opacity = placeMode == PLACEMODE_ENTITY ? 255 : 30;
+
     SDL_Rect rect = {
         pos.x - 10,
         pos.y - 10,
@@ -451,11 +467,11 @@ void drawEntity(v2 pos, EntityID id) {
     };
 
     switch (id) {
-        case ENTITY_SHOOTER:
-            SDL_SetRenderDrawColor(renderer, 10, 80, 10, 255);
+        case (int)ENTITY_SHOOTER:
+            SDL_SetRenderDrawColor(renderer, 10, 80, 10, opacity);
             break;
         default:
-            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+            SDL_SetRenderDrawColor(renderer, 255, 255, 255, opacity);
             break;
     }
 
@@ -488,7 +504,7 @@ void drawGridLines() {
 
 
 void setColorByType(Placeable type) {
-    int opacity = 125;
+    int opacity = 30;
     switch (type) {
         case WALL:
             if (placeMode == PLACEMODE_WALL) {
@@ -553,11 +569,9 @@ void draw() {
         }
     }
 
-    if (placeMode == PLACEMODE_ENTITY) {
-        for (int i = 0; i < entityList->length; i++) {
-            Entity *entity = arraylist_get(entityList, i)->val;
-            drawEntity(entity->pos, entity->id);
-        }
+    for (int i = 0; i < entityList->length; i++) {
+        LevelEditorEntity *entity = arraylist_get(entityList, i)->val;
+        drawEntity(entity->pos, entity->id);
     }
 
     drawPlayer();
@@ -582,61 +596,117 @@ void render(u64 delta) {
     SDL_RenderPresent(renderer);
 }
 
-void saveLevel() {
-    FILE *fh = fopen(levelFile, "w");
-    if (fh == NULL) {
-        printf("Failed to open file for writing. %d\n", errno);
-        return;
-    }
+void printFileProperties(struct stat stats)
+{
+    struct tm dt;
 
-    char *str = malloc(sizeof(char) * (TILEMAP_HEIGHT * TILEMAP_WIDTH + 1));
-    if (str == NULL) {
-        printf("malloc failed.\n");
-        fclose(fh); // Close the file stream before returning
-        return;
-    }
+    // File permissions
+    printf("\nFile access: ");
+    if (stats.st_mode & R_OK)
+        printf("read ");
+    if (stats.st_mode & W_OK)
+        printf("write ");
+    if (stats.st_mode & X_OK)
+        printf("execute");
+        
 
-    int strIdx = 0;
-    for (int i = 0; i < TILEMAP_HEIGHT; i++) {
-        for (int j = 0; j < TILEMAP_WIDTH; j++) {
-            if (wallTileMap[i][j] == -1) {
-                str[strIdx++] = '-';
-            } else {
-                str[strIdx++] = '0' + wallTileMap[i][j];
-            }
-        }
-    }
+    // File size
+    printf("\nFile size: %d", stats.st_size);
 
+    // Get file creation time in seconds and 
+    // convert seconds to date and time format
+    dt = *(gmtime(&stats.st_ctime));
+    printf("\nCreated on: %d-%d-%d %d:%d:%d", dt.tm_mday, dt.tm_mon, dt.tm_year + 1900, 
+                                              dt.tm_hour, dt.tm_min, dt.tm_sec);
 
-    str[strIdx] = '\0';
+    // File modification time
+    dt = *(gmtime(&stats.st_mtime));
+    printf("\nModified on: %d-%d-%d %d:%d:%d \n", dt.tm_mday, dt.tm_mon, dt.tm_year + 1900, 
+                                              dt.tm_hour, dt.tm_min, dt.tm_sec);
 
-    fputs(str, fh);
-
-    fclose(fh); // Close the file stream
-    free(str); // Free the allocated memory
 }
 
-void loadLevel() {
-    FILE *fh = fopen(levelFile, "r");
 
+
+void save(SaveData saveData, char *file) {
+    FILE *fh = fopen(levelFile, "w");
     if (fh == NULL) {
-        return;
+        printf("Couldn't open file \n");    
     }
-
-    char *str = malloc(TILEMAP_HEIGHT * TILEMAP_WIDTH + 1);
-    fgets(str, TILEMAP_WIDTH * TILEMAP_HEIGHT, fh);
-
-    for (int row = 0; row < TILEMAP_HEIGHT; row++) {
-        for (int col = 0; col < TILEMAP_WIDTH; col++) {
-            char tile = str[row * TILEMAP_WIDTH + col];
-            if (tile == '-') {
-                wallTileMap[row][col] = -1;
-            } else {
-                wallTileMap[row][col] = tile - '0';
-            }
+    
+    size_t dataSize = sizeof(int) * TILEMAP_HEIGHT * TILEMAP_WIDTH * 3 + sizeof(saveData.entities) + sizeof(LevelEditorEntity);
+    char data[dataSize];
+    int idx = 0;
+    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
+        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+            data[idx++] = floorTileMap[r][c];
         }
     }
 
-    free(str);
+    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
+        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+            data[idx++] = wallTileMap[r][c];
+        }
+    }
+
+    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
+        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+            data[idx++] = ceilingTileMap[r][c];
+        }
+    }
+
+    memcpy(&data[idx], saveData.entities, sizeof(saveData.entities));
+
+
+    fwrite(&data, 1, sizeof(data), fh);
+
+    fclose(fh);
+}
+
+void loadLevel(char *file) {
+    FILE *fh = fopen(levelFile, "r");
+    if (fh == NULL) {
+        printf("File probably doesnt exist. \n");
+        return;
+    }
+
+    fseek(fh, 0L, SEEK_END);
+    int fileSize = ftell(fh);
+    rewind(fh);
+
+    char *data = malloc(sizeof(char) * fileSize); // sizeof char is 1 but i do it for clarity
+    fgets(data, fileSize, fh);
+    int idx = 0;
+
+    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
+        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+            floorTileMap[r][c] = data[idx++];
+        }
+    }
+
+    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
+        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+            wallTileMap[r][c] = data[idx++];
+        }
+    }
+
+    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
+        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+            ceilingTileMap[r][c] = data[idx++];
+        }
+    }
+
+    LevelEditorEntity *entities = (LevelEditorEntity *)(data + idx); // get the rest of the bytes as entities
+
+    for (int i = 0; i < sizeof(entities) / sizeof(LevelEditorEntity); i++) {
+        LevelEditorEntity *entity = malloc(sizeof(LevelEditorEntity));
+        *entity = entities[i];
+        printf("entity id: %d, pos: (%.2f, %.2f)", entity->id, entity->pos.x, entity->pos.y);
+        arraylist_add(entityList, entity, -1);
+    }
+
+
+    free(data);
+
     fclose(fh);
 }
