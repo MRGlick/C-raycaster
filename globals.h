@@ -28,6 +28,6 @@ typedef struct SaveData {
     int **wallTilemap;
     int **floorTilemap;
     int **ceilingTilemap;
-    LevelEditorEntity *entities;
+    int **entityTilemap;
 } SaveData;
 

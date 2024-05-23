@@ -63,13 +63,13 @@ bool running = true;
 int currentSelection;
 int **wallTileMap;
 int **floorTileMap;
+int **entityTilemap;
 int **ceilingTileMap;
 bool lMouseDown = false;
 bool rMouseDown = false;
 const int tileSize = WINDOW_WIDTH / TILEMAP_WIDTH;
 PlaceMode placeMode;
 char *levelFile;
-arraylist *entityList;
 LevelEditorEntity *player;
 
 int main(int argc, char **argv) {
@@ -124,11 +124,10 @@ int main(int argc, char **argv) {
     data.wallTilemap = wallTileMap;
     data.floorTilemap = floorTileMap;
     data.ceilingTilemap = ceilingTileMap;
-    data.entities = malloc(sizeof(LevelEditorEntity) * entityList->length);
+    data.entityTilemap = entityTilemap;
+    
 
     save(data, levelFile);
-
-    free(data.entities);
 
     SDL_DestroyRenderer(renderer);
 
@@ -141,7 +140,7 @@ void init() {
     init_grid(int, TILEMAP_HEIGHT, TILEMAP_WIDTH, -1, &wallTileMap);
     init_grid(int, TILEMAP_HEIGHT, TILEMAP_WIDTH, -1, &floorTileMap);
     init_grid(int, TILEMAP_HEIGHT, TILEMAP_WIDTH, -1, &ceilingTileMap);
-    entityList = create_arraylist(5);
+    init_grid(int, TILEMAP_HEIGHT, TILEMAP_WIDTH, -1, &entityTilemap);
 
     placeMode = PLACEMODE_CEILING;
 
@@ -170,8 +169,8 @@ void printTileMap() {
 void removePlayer() {
     for (int i = 0; i < TILEMAP_WIDTH; i++) {
         for (int j = 0; j < TILEMAP_HEIGHT; j++) {
-            if (wallTileMap[j][i] == (int)PLAYER) {
-                wallTileMap[j][i] = -1;
+            if (entityTilemap[j][i] == (int)PLAYER) {
+                entityTilemap[j][i] = -1;
                 return;
             }
         }
@@ -194,32 +193,30 @@ void placeObject(v2 pos) {
             floorTileMap[y][x] = FLOOR;
             break;
         case (int)PLAYER:
-            player->pos = pos;
+            removePlayer();
+            entityTilemap[y][x] = PLAYER;
             break;
         case (int)SHOOTER: ;
-            LevelEditorEntity *shooter = malloc(sizeof(LevelEditorEntity));
-            shooter->id = ENTITY_SHOOTER;
-            shooter->pos = pos;
-            arraylist_add(entityList, shooter, -1);
+            entityTilemap[y][x] = SHOOTER;
             break;
     }
 }
 
-void removeEntitiesAt(v2 pos, double radius) {
-    arraylist *entitiesToRemove = create_arraylist(10);
-    for (int i = 0; i < entityList->length; i++) {
-        LevelEditorEntity *entity = (LevelEditorEntity *)arraylist_get(entityList, i)->val;
-        if (v2_distance_squared(pos, entity->pos) < radius * radius) {
-            arraylist_add(entitiesToRemove, entity, -1);
-        }
-    }
+// void removeEntitiesAt(v2 pos, double radius) {
+//     arraylist *entitiesToRemove = create_arraylist(10);
+//     for (int i = 0; i < entityList->length; i++) {
+//         LevelEditorEntity *entity = (LevelEditorEntity *)arraylist_get(entityList, i)->val;
+//         if (v2_distance_squared(pos, entity->pos) < radius * radius) {
+//             arraylist_add(entitiesToRemove, entity, -1);
+//         }
+//     }
 
-    for (int i = 0; i < entitiesToRemove->length; i++) {
-        LevelEditorEntity *entity = arraylist_get(entitiesToRemove, i)->val;
-        free(entity);
-        arraylist_remove(entityList, arraylist_find(entityList, entity));
-    }
-}
+//     for (int i = 0; i < entitiesToRemove->length; i++) {
+//         LevelEditorEntity *entity = arraylist_get(entitiesToRemove, i)->val;
+//         free(entity);
+//         arraylist_remove(entityList, arraylist_find(entityList, entity));
+//     }
+// }
 
 void removeObject(v2 pos) {
     v2 tileMapPos = v2_floor(v2_div(pos, to_vec(tileSize)));
@@ -228,7 +225,7 @@ void removeObject(v2 pos) {
 
     switch (placeMode) {
         case PLACEMODE_ENTITY:
-            removeEntitiesAt(pos, 10);
+            entityTilemap[y][x] = -1;
             break;
         case PLACEMODE_WALL:
             wallTileMap[y][x] = -1;
@@ -519,6 +516,12 @@ void setColorByType(Placeable type) {
             }
             SDL_SetRenderDrawColor(renderer, 255, 0, 0, opacity);
             break;
+        case SHOOTER:
+            if (placeMode == PLACEMODE_ENTITY) {
+                opacity = 255;
+            }
+            SDL_SetRenderDrawColor(renderer, 20, 120, 20, opacity);
+            break;
         case FLOOR:
             if (placeMode == PLACEMODE_FLOOR) {
                 opacity = 255;
@@ -559,6 +562,10 @@ void draw() {
 
             SDL_RenderFillRect(renderer, &rect);
 
+            setColorByType(entityTilemap[y][x]);
+
+            SDL_RenderFillRect(renderer, &rect);
+
             setColorByType(ceilingTileMap[y][x]);
 
             SDL_RenderFillRect(renderer, &rect);
@@ -568,13 +575,6 @@ void draw() {
             
         }
     }
-
-    for (int i = 0; i < entityList->length; i++) {
-        LevelEditorEntity *entity = arraylist_get(entityList, i)->val;
-        drawEntity(entity->pos, entity->id);
-    }
-
-    drawPlayer();
 
     drawGridLines();
 
@@ -634,9 +634,10 @@ void save(SaveData saveData, char *file) {
         printf("Couldn't open file \n");    
     }
     
-    size_t dataSize = sizeof(int) * TILEMAP_HEIGHT * TILEMAP_WIDTH * 3 + sizeof(saveData.entities) + sizeof(LevelEditorEntity);
+    size_t dataSize = sizeof(int) * TILEMAP_HEIGHT * TILEMAP_WIDTH * 4;
     char data[dataSize];
     int idx = 0;
+
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
             data[idx++] = floorTileMap[r][c];
@@ -655,7 +656,11 @@ void save(SaveData saveData, char *file) {
         }
     }
 
-    memcpy(&data[idx], saveData.entities, sizeof(saveData.entities));
+    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
+        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+            data[idx++] = entityTilemap[r][c];
+        }
+    }
 
 
     fwrite(&data, 1, sizeof(data), fh);
@@ -696,13 +701,10 @@ void loadLevel(char *file) {
         }
     }
 
-    LevelEditorEntity *entities = (LevelEditorEntity *)(data + idx); // get the rest of the bytes as entities
-
-    for (int i = 0; i < sizeof(entities) / sizeof(LevelEditorEntity); i++) {
-        LevelEditorEntity *entity = malloc(sizeof(LevelEditorEntity));
-        *entity = entities[i];
-        printf("entity id: %d, pos: (%.2f, %.2f)", entity->id, entity->pos.x, entity->pos.y);
-        arraylist_add(entityList, entity, -1);
+    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
+        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+            entityTilemap[r][c] = data[idx++];
+        }
     }
 
 
