@@ -364,6 +364,7 @@ double tanHalfStartFOV;
 int floorRenderStart;
 int **levelTileMap;
 int **floorTileMap;
+int **ceilingTileMap;
 const int tileSize = WINDOW_WIDTH / TILEMAP_WIDTH;
 double realFps;
 SDL_Texture **wallFrames;
@@ -414,7 +415,6 @@ int main(int argc, char* argv[]) {
 
     // init_fast_trig();
     init();
-
 
     u64 tick_timer = 0, render_timer = 0;
     u64 last_time = SDL_GetTicks64();
@@ -600,12 +600,11 @@ void init() { // #INIT
 
     for (int i = 0; i < 26; i++) keyPressArr[i] = false;
     
-    loadLevel("test.txt");
+    loadLevel("testlevel3.txt");
+    // entityTexture = make_texture(renderer, "scary_monster.bmp");
 
-    entityTexture = make_texture(renderer, "scary_monster.bmp");
-
-    ShooterEnemy *shooter = createShooterEnemy(player->pos);
-    add_game_object(shooter, ENEMY_SHOOTER);
+    // ShooterEnemy *shooter = createShooterEnemy(player->pos);
+    // add_game_object(shooter, ENEMY_SHOOTER);
 
 
 } // #INIT END
@@ -761,6 +760,7 @@ void checkCollisions() { // supports four directions, but collisions arent good 
 }
 
 void playerTick(u64 delta) {
+
     double deltaSec = mili_to_sec(delta);
     
     player->bulletHitbox->pos = player->pos;
@@ -801,7 +801,6 @@ void playerTick(u64 delta) {
     );
 
     
-
     checkCollisions();
 
     double moveSpeed = player->speed;
@@ -1486,7 +1485,6 @@ void render(u64 delta) { // #RENDER
                 if (bullet->dirSprite != NULL) {
                     renderDirSprite(bullet->dirSprite, bullet->entity->pos, bullet->entity->size, bullet->entity->height);
                 } else {
-                    printf("Rendering bullet enetityt \n");
                     renderEntity(bullet->entity);
                 }
                 break;
@@ -1615,7 +1613,7 @@ RayCollisionData *castRay(v2 pos, v2 dir) {
 
             int t = levelTileMap[(int)currentCell.y][(int)currentCell.x];
 
-            if (t != 0) {
+            if (t != -1) {
                 found = true;
                 tile = t;
             }
@@ -1630,11 +1628,7 @@ RayCollisionData *castRay(v2 pos, v2 dir) {
         data->startpos = pos;
         data->collpos = v2_add(pos, v2_mul(dir, to_vec(dist * tileSize)));
         data->normal = v2_mul(lastStepDir, to_vec(-1));
-        if (tile == WALL1) {
-            data->colliderTexture = wallTexture;
-        } else if (tile == WALL2) {
-            data->colliderTexture = getSpriteCurrentTexture(animatedWallSprite);
-        }
+        data->colliderTexture = wallTexture;
         if (lastStepDir.x != 0) {
             data->collIdx = (data->collpos.y - floor(data->collpos.y / tileSize) * tileSize) / tileSize;
         } else {
@@ -2010,51 +2004,69 @@ void initGrid(int ***gridPtr, int cols, int rows) {
     for (int i = 0; i < rows; i++) {
         (*gridPtr)[i] = malloc(sizeof(int) * cols);
         for (int j = 0; j < cols; j++) {
-            (*gridPtr)[i][j] = 0;
+            (*gridPtr)[i][j] = -1;
         }
     }
 }
 
-void loadLevel(char *levelFile) {
-    arraylist_clear(gameobjects);
-    FILE *fh = fopen(levelFile, "r");
-    if (fh == NULL) {
-        return; // prevent the mother of all undefined behaviour (like wtf?? game speedup?? crash when charging weapon?? generating walls out of thin air??)
-    }
-    char *tiles = malloc(TILEMAP_WIDTH * TILEMAP_HEIGHT);
-    fgets(tiles, TILEMAP_HEIGHT * TILEMAP_WIDTH, fh);
+void loadLevel(char *file) {
 
     initGrid(&levelTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
     initGrid(&floorTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    initGrid(&ceilingTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+
+    FILE *fh = fopen(file, "r");
+    if (fh == NULL) {
+        printf("File doesnt exist. \n");
+        return;
+    }
+
+    fseek(fh, 0L, SEEK_END);
+    int fileSize = ftell(fh);
+    rewind(fh);
+
+
+    char *data = malloc(sizeof(char) * fileSize); // sizeof char is 1 but i do it for clarity
+    fgets(data, fileSize, fh);
+    int idx = 0;
 
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
-            // if (checkedTiles[r][c]) continue;
-            
-            if (tiles[r * TILEMAP_WIDTH + c] == '2') {
-                createTile(r, c, '2', 1, 1);
-                continue;
-            }
+            floorTileMap[r][c] = data[idx++];
+        }
+    }
 
+    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
+        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+            levelTileMap[r][c] = data[idx++];
+        }
+    }
 
-            switch (tiles[r * TILEMAP_WIDTH + c]) {
-                case '0':
-                    if (randi_range(0, 4) == 4) {
-                        levelTileMap[r][c] = WALL2;
-                    } else {
-                        levelTileMap[r][c] = WALL1;
-                    }
-                    break;
-                case '3':
-                    floorTileMap[r][c] = 4;
+    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
+        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+            ceilingTileMap[r][c] = data[idx++];
+        }
+    }
+
+    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
+        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+            int type = data[idx++];
+
+            v2 tileMid = v2_add(v2_mul((v2){c, r}, to_vec(tileSize)), to_vec(tileSize / 2));
+
+            switch (type) {
+                case (int)P_PLAYER:
+                    player = init_player(tileMid);
+                    arraylist_add(gameobjects, player, PLAYER);
                     break;
             }
         }
     }
 
-    fclose(fh);
 
-    free(tiles);
+    free(data);
+
+    fclose(fh);
 }
 
 void freeAnimation(Animation *anim) {
@@ -2419,7 +2431,6 @@ void bulletTick(EnemyBullet *bullet, u64 delta) {
 
 void shooterEnemyShoot(ShooterEnemy *shooter) {
     EnemyBullet *bullet = createDefaultBullet(shooter->enemy->entity->pos, shooter->enemy->dir);
-    printf("shot bullet! \n");
     add_game_object(bullet, BULLET);
 }
 

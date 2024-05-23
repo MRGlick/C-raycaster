@@ -4,13 +4,13 @@
 #define TILEMAP_HEIGHT 20
 
 typedef enum Placeable {
-    IDK = -1,
-    WALL,
-    DOOR,
-    PLAYER,
-    FLOOR,
-    CEILING,
-    SHOOTER
+    P_IDK = -1,
+    P_WALL = 0,
+    P_DOOR = 1,
+    P_PLAYER = 2,
+    P_FLOOR = 3,
+    P_CEILING = 4,
+    P_SHOOTER = 5
 } Placeable;
 
 typedef struct LevelEditorEntity {

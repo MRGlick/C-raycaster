@@ -169,7 +169,7 @@ void printTileMap() {
 void removePlayer() {
     for (int i = 0; i < TILEMAP_WIDTH; i++) {
         for (int j = 0; j < TILEMAP_HEIGHT; j++) {
-            if (entityTilemap[j][i] == (int)PLAYER) {
+            if (entityTilemap[j][i] == (int)P_PLAYER) {
                 entityTilemap[j][i] = -1;
                 return;
             }
@@ -183,21 +183,21 @@ void placeObject(v2 pos) {
     int y = tileMapPos.y;
 
     switch (getCurrentSelection()) {
-        case (int)WALL:
-            wallTileMap[y][x] = WALL;
+        case (int)P_WALL:
+            wallTileMap[y][x] = P_WALL;
             break;
-        case (int)CEILING:
-            ceilingTileMap[y][x] = CEILING;
+        case (int)P_CEILING:
+            ceilingTileMap[y][x] = P_CEILING;
             break;
-        case (int)FLOOR:
-            floorTileMap[y][x] = FLOOR;
+        case (int)P_FLOOR:
+            floorTileMap[y][x] = P_FLOOR;
             break;
-        case (int)PLAYER:
+        case (int)P_PLAYER:
             removePlayer();
-            entityTilemap[y][x] = PLAYER;
+            entityTilemap[y][x] = P_PLAYER;
             break;
-        case (int)SHOOTER: ;
-            entityTilemap[y][x] = SHOOTER;
+        case (int)P_SHOOTER: ;
+            entityTilemap[y][x] = P_SHOOTER;
             break;
     }
 }
@@ -322,43 +322,43 @@ Placeable getCurrentSelection() {
         case PLACEMODE_WALL:
             switch(currentSelection) {
                 case 0:
-                    return WALL;
+                    return P_WALL;
                     break;
                 default:
-                    return IDK;
+                    return P_IDK;
                     break;
             }
             break;
         case PLACEMODE_ENTITY:
             switch(currentSelection) {
                 case 0:
-                    return PLAYER;
+                    return P_PLAYER;
                     break;
                 case 1:
-                    return SHOOTER;
+                    return P_SHOOTER;
                     break;
                 default:
-                    return IDK;
+                    return P_IDK;
                     break;
             }
             break;
         case PLACEMODE_FLOOR:
             switch(currentSelection) {
                 case 0:
-                    return FLOOR;
+                    return P_FLOOR;
                     break;
                 default:
-                    return IDK;
+                    return P_IDK;
                     break;
             }
             break;
         case PLACEMODE_CEILING:
             switch(currentSelection) {
                 case 0:
-                    return CEILING;
+                    return P_CEILING;
                     break;
                 default:
-                    return IDK;
+                    return P_IDK;
                     break;
             }
             break;
@@ -375,25 +375,25 @@ char *getCurrentSelectionString() {
     // CEILING
 
     switch (getCurrentSelection()) {
-        case PLAYER:
+        case P_PLAYER:
             return "Current selection: Player";
             break;
-        case SHOOTER:
+        case P_SHOOTER:
             return "Current selection: Shooter";
             break;
-        case WALL:
+        case P_WALL:
             return "Current selection: wall";
             break;
-        case DOOR:
+        case P_DOOR:
             return "Current selection: Door";
             break;
-        case FLOOR:
+        case P_FLOOR:
             return "Current selection: Floor";
             break;
-        case CEILING:
+        case P_CEILING:
             return "Current selection: Ceiling";
             break;
-        case IDK:
+        case P_IDK:
             return "Current selection: IDK";
             break;
     }
@@ -503,38 +503,38 @@ void drawGridLines() {
 void setColorByType(Placeable type) {
     int opacity = 30;
     switch (type) {
-        case WALL:
+        case P_WALL:
             if (placeMode == PLACEMODE_WALL) {
                 opacity = 255;
             }
             SDL_SetRenderDrawColor(renderer, 255, 255, 255, opacity);
             
             break;
-        case PLAYER:
+        case P_PLAYER:
             if (placeMode == PLACEMODE_ENTITY) {
                 opacity = 255;
             }
             SDL_SetRenderDrawColor(renderer, 255, 0, 0, opacity);
             break;
-        case SHOOTER:
+        case P_SHOOTER:
             if (placeMode == PLACEMODE_ENTITY) {
                 opacity = 255;
             }
             SDL_SetRenderDrawColor(renderer, 20, 120, 20, opacity);
             break;
-        case FLOOR:
+        case P_FLOOR:
             if (placeMode == PLACEMODE_FLOOR) {
                 opacity = 255;
             }
             SDL_SetRenderDrawColor(renderer, 200, 100, 0, opacity);
             break;
-        case CEILING:
+        case P_CEILING:
             if (placeMode == PLACEMODE_CEILING) {
                 opacity = 255;
             }
             SDL_SetRenderDrawColor(renderer, 200, 200, 200, opacity);
             break;
-        case DOOR:
+        case P_DOOR:
             SDL_SetRenderDrawColor(renderer, 255, 255, 0, 255);
             break;
     }
