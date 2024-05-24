@@ -473,14 +473,14 @@ void initParticles() {
     add_game_object(particles, PARTICLES);
 }
 
-Enemy *createEnemy() {
+Enemy *createEnemy(v2 pos) {
     Enemy *enemy = malloc(sizeof(Enemy));
     enemy->maxHealth = 5;
     enemy->health = enemy->maxHealth;
     enemy->dir = (v2){1, 0};
 
     enemy->entity = malloc(sizeof(Entity));
-    enemy->entity->pos = player->pos;
+    enemy->entity->pos = pos;
     enemy->entity->size = to_vec(50);
     enemy->entity->sprite = NULL;
     // enemy->entity->sprite = createSprite(false, 0);
@@ -520,7 +520,7 @@ Enemy *createEnemy() {
     enemy->dirSprite->sprites[15] = createSprite(false, 0);
     enemy->dirSprite->sprites[15]->texture = make_texture(renderer, "dSpriteTest16.bmp");
     enemy->dirSprite->dir = (v2){1, 0};
-    
+
     enemy->entity->height = WINDOW_HEIGHT / 6;
 
     enemy->collider = malloc(sizeof(CircleCollider));
@@ -528,7 +528,9 @@ Enemy *createEnemy() {
     enemy->collider->pos = enemy->entity->pos;
     
     enemy->seeingPlayer = false;
-    enemy->lastSeenPlayerPos = player->pos;
+    enemy->lastSeenPlayerPos = (v2){0, 0};
+
+    printf("Before return \n");
 
     return enemy;
 }
@@ -584,6 +586,7 @@ void init() { // #INIT
     leftHandSprite->animations[1]->frames[3] = make_texture(renderer, "leftHandAnim4.bmp");
     leftHandSprite->animations[1]->frames[4] = make_texture(renderer, "leftHandAnim5.bmp");
     leftHandSprite->animations[1]->fps = 10;
+
     leftHandSprite->animations[1]->loop = false;
     spritePlayAnim(leftHandSprite, 0);
 
@@ -1016,6 +1019,13 @@ v2 floorToScreen(v2 pos) {
     double dist = v2_length(offset);
     
     double signedAngle = v2_signed_angle_between(playerForward, offset);
+
+    double lowBound = fov * -0.5;
+    double highBound = fov * 0.5;
+
+    if (!in_range(rad_to_deg(signedAngle), lowBound, highBound)) {
+        return (v2){WINDOW_WIDTH * 10, WINDOW_HEIGHT * 10}; // just put it out of the screen
+    }
     
     double idx = inverse_lerp(fov * -0.5, fov * 0.5, rad_to_deg(signedAngle));
     
@@ -1128,7 +1138,9 @@ void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height) {
     double cosAngleToForward = v2_cos_angle_between(playerForward, v2_sub(pos, player->pos));
 
     v2 screenFloorPos = floorToScreen(pos);
-
+    if (v2_equal(screenFloorPos, (v2){WINDOW_WIDTH * 10, WINDOW_HEIGHT * 10})) {
+        return;
+    }
 
 
     double dist = v2_distance(pos, player->pos);
@@ -1343,13 +1355,12 @@ void renderWallStripe(WallStripe *stripe) {
 
     double brightness = stripe->brightness;
 
-    double angleLightModifier = sin(v2_get_angle(stripe->normal)) * 0.2;
+    double angleLightModifier = sin(v2_get_angle(stripe->normal));
 
     SDL_Color colorMode = {
-        clamp(200 - 40 + (angleLightModifier * 80), 0, 255),
-        clamp(200 - 40 + (angleLightModifier * 80), 0, 255),
-        clamp(200 - 40 + (angleLightModifier * 80), 0, 255),
-        lerp(255, 50, brightness)
+        clamp(200 + angleLightModifier * 80, 0, 255) * brightness,
+        clamp(200 + angleLightModifier * 80, 0, 255) * brightness,
+        clamp(200 + angleLightModifier * 80, 0, 255) * brightness,
     };
 
     SDL_Texture *texture = stripe->texture;
@@ -2059,6 +2070,10 @@ void loadLevel(char *file) {
                     player = init_player(tileMid);
                     arraylist_add(gameobjects, player, PLAYER);
                     break;
+                case (int)P_SHOOTER: ;
+                    ShooterEnemy *shooter = createShooterEnemy(tileMid);
+                    arraylist_add(gameobjects, shooter, ENEMY_SHOOTER);
+                    break;
             }
         }
     }
@@ -2453,7 +2468,12 @@ void shooterTick(ShooterEnemy *shooter, u64 delta) {
 
 ShooterEnemy *createShooterEnemy(v2 pos) {
     ShooterEnemy *shooter = malloc(sizeof(ShooterEnemy));
-    shooter->enemy = createEnemy();
+    if (shooter == NULL) {
+        printf("Failed to allocate memory \n");
+        return NULL;
+    }
+    shooter->enemy = createEnemy(pos);
+    printf("Created enemy successfully \n");
     shooter->shootCooldown = 2;
     shooter->shootCooldownTimer = 0;
 
