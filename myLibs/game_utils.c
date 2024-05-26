@@ -82,6 +82,10 @@ double randf_range(double min, double max) {
 
 SDL_Texture *make_texture(SDL_Renderer *renderer, char *bmp_file) {
     SDL_Surface *surface = SDL_LoadBMP(bmp_file);
+    if (surface == NULL) {
+        printf(SDL_GetError());
+        return NULL;
+    }
 
     SDL_Texture *texture = SDL_CreateTextureFromSurface(
         renderer,
@@ -128,11 +132,7 @@ void cdPrint(bool activateCooldown, const char *text, ...) {
     va_end(args);
 }
 
-double clamp(double num, double min, double max) {
-    if (num < min) return min;
-    if (num > max) return max;
-    return num;
-}
+
 
 double rad_to_deg(double radians) {
     return radians * RAD_TO_DEG;
@@ -221,3 +221,11 @@ SortObject *mergeSort(SortObject arr[], int arrlen) {
 
 }
 
+int getNumDigits(int num) {
+    int res = 0;
+    while (num > 0) {
+        num /= 10;
+        res++;
+    }
+    return res;
+}

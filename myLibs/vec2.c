@@ -76,6 +76,11 @@ typedef struct v2 {
 //     }
 //     return tan(angleRads);
 // }
+double clamp(double num, double _min, double _max) {
+    if (num < _min) return _min;
+    if (num > _max) return _max;
+    return num;
+}
 
 v2 v2_add(v2 a, v2 b) {
     return (v2){a.x + b.x, a.y + b.y};
@@ -222,4 +227,13 @@ void v2_print(v2 vec, char *postfix) {
 // slide 'a' across the normal 'b'
 v2 v2_slide(v2 a, v2 b) {
     return v2_proj(a, v2_rotate(b, PI/2));
+}
+
+v2 v2_clamp(v2 vec, v2 minVec, v2 maxVec) {
+    v2 result = {
+        clamp(vec.x, minVec.x, maxVec.x),
+        clamp(vec.y, minVec.y, maxVec.y)
+    };
+
+    return result;
 }

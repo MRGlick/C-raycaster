@@ -21,6 +21,8 @@ SDL_Window *window;
 #define WALL_HEIGHT 36
 #define NUM_WALL_THREADS 4
 
+#define OUT_OF_SCREEN_POS (v2){WINDOW_WIDTH * 100, WINDOW_HEIGHT * 100}
+
 enum Types {
     PLAYER,
     RAYCAST,
@@ -137,7 +139,8 @@ typedef struct Player {
     int pendingShots;
     double ShootTickTimer;
     v2 handOffset;
-    CircleCollider *bulletHitbox;
+    int health, maxHealth;
+    CircleCollider *collider;
 } Player;
 
 typedef struct Entity {
@@ -207,6 +210,8 @@ typedef struct EnemyBullet {
     v2 dir;
     double dmg;
     double speed;
+    double lifeTime;
+    double lifeTimer;
 } EnemyBullet;
 
 // ENEMY IDEAS:
@@ -231,7 +236,18 @@ typedef struct FloorPixel {
     double lerpToFog;
 } FloorPixel;
 
+typedef struct CollisionData {
+    v2 offset; // adjusting position by this offset makes the object only touch and not overlap
+    bool didCollide;
+} CollisionData;
+
 // #FUNCTIONS
+
+void updateEntityCollisions(void *val, int type);
+
+void initGrid(int ***gridPtr, int cols, int rows);
+
+void resetGrid(int ***gridPtr, int cols, int rows);
 
 void loadLevel();
 
@@ -252,6 +268,10 @@ RayCollisionData *rayObject(Raycast ray, obj *object);
 RayCollisionData *castRayForEntities(v2 pos, v2 dir);
 
 RayCollisionData *castRay(v2 pos, v2 dir);
+
+CollisionData getCircleTileCollision(CircleCollider circle, v2 tilePos);
+
+CollisionData getCircleTileMapCollision(CircleCollider circle);
 
 void key_pressed(SDL_Keycode key);
 
@@ -331,6 +351,10 @@ ShooterEnemy *createShooterEnemy(v2 pos);
 
 RayCollisionData *castRayForAll(v2 pos, v2 dir);
 
+bool isValidLevel(char *file);
+
+void getTextureFiles(char *fileName, int fileCount, SDL_Texture ***textures);
+
 // #FUNCTIONS END
 
 
@@ -355,6 +379,7 @@ const SDL_Color skyColor = {0, 0, 0, 255};
 const SDL_Color fogColor = {0, 0, 0, 255};
 SDL_Texture *wallTexture;
 SDL_Texture *floorTexture;
+SDL_Texture *ceilingTexture;
 SDL_Texture *floorTexture2;
 SDL_Texture *entityTexture;
 SDL_Texture *crosshair;
@@ -387,6 +412,8 @@ Sprite *leftHandSprite;
 
 v2 playerForward;
 
+char *levelToLoad = NULL;
+
 const double PLAYER_SHOOT_COOLDOWN = 0.5;
 
 // #MAIN
@@ -409,7 +436,10 @@ int main(int argc, char* argv[]) {
         RENDERER_FLAGS
     );
     
-    
+    if (argc >= 2) {
+        levelToLoad = argv[1];
+    }
+
     // test();
     // return;
 
@@ -487,38 +517,49 @@ Enemy *createEnemy(v2 pos) {
     // enemy->entity->sprite->texture = entityTexture;
 
     enemy->dirSprite = createDirSprite(16);
-    enemy->dirSprite->sprites[0] = createSprite(false, 0);
-    enemy->dirSprite->sprites[0]->texture = make_texture(renderer, "dSpriteTest1.bmp");
-    enemy->dirSprite->sprites[1] = createSprite(false, 0);
-    enemy->dirSprite->sprites[1]->texture = make_texture(renderer, "dSpriteTest2.bmp");
-    enemy->dirSprite->sprites[2] = createSprite(false, 0);
-    enemy->dirSprite->sprites[2]->texture = make_texture(renderer, "dSpriteTest3.bmp");
-    enemy->dirSprite->sprites[3] = createSprite(false, 0);
-    enemy->dirSprite->sprites[3]->texture = make_texture(renderer, "dSpriteTest4.bmp");
-    enemy->dirSprite->sprites[4] = createSprite(false, 0);
-    enemy->dirSprite->sprites[4]->texture = make_texture(renderer, "dSpriteTest5.bmp");
-    enemy->dirSprite->sprites[5] = createSprite(false, 0);
-    enemy->dirSprite->sprites[5]->texture = make_texture(renderer, "dSpriteTest6.bmp");
-    enemy->dirSprite->sprites[6] = createSprite(false, 0);
-    enemy->dirSprite->sprites[6]->texture = make_texture(renderer, "dSpriteTest7.bmp");
-    enemy->dirSprite->sprites[7] = createSprite(false, 0);
-    enemy->dirSprite->sprites[7]->texture = make_texture(renderer, "dSpriteTest8.bmp");
-    enemy->dirSprite->sprites[8] = createSprite(false, 0);
-    enemy->dirSprite->sprites[8]->texture = make_texture(renderer, "dSpriteTest9.bmp");
-    enemy->dirSprite->sprites[9] = createSprite(false, 0);
-    enemy->dirSprite->sprites[9]->texture = make_texture(renderer, "dSpriteTest10.bmp");
-    enemy->dirSprite->sprites[10] = createSprite(false, 0);
-    enemy->dirSprite->sprites[10]->texture = make_texture(renderer, "dSpriteTest11.bmp");
-    enemy->dirSprite->sprites[11] = createSprite(false, 0);
-    enemy->dirSprite->sprites[11]->texture = make_texture(renderer, "dSpriteTest12.bmp");
-    enemy->dirSprite->sprites[12] = createSprite(false, 0);
-    enemy->dirSprite->sprites[12]->texture = make_texture(renderer, "dSpriteTest13.bmp");
-    enemy->dirSprite->sprites[13] = createSprite(false, 0);
-    enemy->dirSprite->sprites[13]->texture = make_texture(renderer, "dSpriteTest14.bmp");
-    enemy->dirSprite->sprites[14] = createSprite(false, 0);
-    enemy->dirSprite->sprites[14]->texture = make_texture(renderer, "dSpriteTest15.bmp");
-    enemy->dirSprite->sprites[15] = createSprite(false, 0);
-    enemy->dirSprite->sprites[15]->texture = make_texture(renderer, "dSpriteTest16.bmp");
+    for (int i = 0; i < 16; i++) {
+        char *baseFileName = "Textures/CubeEnemyAnim/CubeEnemy";
+        char num[getNumDigits(i + 1)];
+        sprintf(num, "%d", i + 1);
+        char *fileWithNum = concat(baseFileName, num);
+        char *fileWithExtension = concat(fileWithNum, ".bmp");
+
+
+        enemy->dirSprite->sprites[i] = createSprite(false, 0);
+        enemy->dirSprite->sprites[i]->texture = make_texture(renderer, fileWithExtension);
+    }
+    // enemy->dirSprite->sprites[0] = createSprite(false, 0);
+    // enemy->dirSprite->sprites[0]->texture = make_texture(renderer, "Textures/CubeEnem1.bmp");
+    // enemy->dirSprite->sprites[1] = createSprite(false, 0);
+    // enemy->dirSprite->sprites[1]->texture = make_texture(renderer, "dSpriteTest2.bmp");
+    // enemy->dirSprite->sprites[2] = createSprite(false, 0);
+    // enemy->dirSprite->sprites[2]->texture = make_texture(renderer, "dSpriteTest3.bmp");
+    // enemy->dirSprite->sprites[3] = createSprite(false, 0);
+    // enemy->dirSprite->sprites[3]->texture = make_texture(renderer, "dSpriteTest4.bmp");
+    // enemy->dirSprite->sprites[4] = createSprite(false, 0);
+    // enemy->dirSprite->sprites[4]->texture = make_texture(renderer, "dSpriteTest5.bmp");
+    // enemy->dirSprite->sprites[5] = createSprite(false, 0);
+    // enemy->dirSprite->sprites[5]->texture = make_texture(renderer, "dSpriteTest6.bmp");
+    // enemy->dirSprite->sprites[6] = createSprite(false, 0);
+    // enemy->dirSprite->sprites[6]->texture = make_texture(renderer, "dSpriteTest7.bmp");
+    // enemy->dirSprite->sprites[7] = createSprite(false, 0);
+    // enemy->dirSprite->sprites[7]->texture = make_texture(renderer, "dSpriteTest8.bmp");
+    // enemy->dirSprite->sprites[8] = createSprite(false, 0);
+    // enemy->dirSprite->sprites[8]->texture = make_texture(renderer, "dSpriteTest9.bmp");
+    // enemy->dirSprite->sprites[9] = createSprite(false, 0);
+    // enemy->dirSprite->sprites[9]->texture = make_texture(renderer, "dSpriteTest10.bmp");
+    // enemy->dirSprite->sprites[10] = createSprite(false, 0);
+    // enemy->dirSprite->sprites[10]->texture = make_texture(renderer, "dSpriteTest11.bmp");
+    // enemy->dirSprite->sprites[11] = createSprite(false, 0);
+    // enemy->dirSprite->sprites[11]->texture = make_texture(renderer, "dSpriteTest12.bmp");
+    // enemy->dirSprite->sprites[12] = createSprite(false, 0);
+    // enemy->dirSprite->sprites[12]->texture = make_texture(renderer, "dSpriteTest13.bmp");
+    // enemy->dirSprite->sprites[13] = createSprite(false, 0);
+    // enemy->dirSprite->sprites[13]->texture = make_texture(renderer, "dSpriteTest14.bmp");
+    // enemy->dirSprite->sprites[14] = createSprite(false, 0);
+    // enemy->dirSprite->sprites[14]->texture = make_texture(renderer, "dSpriteTest15.bmp");
+    // enemy->dirSprite->sprites[15] = createSprite(false, 0);
+    // enemy->dirSprite->sprites[15]->texture = make_texture(renderer, "dSpriteTest16.bmp");
     enemy->dirSprite->dir = (v2){1, 0};
 
     enemy->entity->height = WINDOW_HEIGHT / 6;
@@ -530,12 +571,16 @@ Enemy *createEnemy(v2 pos) {
     enemy->seeingPlayer = false;
     enemy->lastSeenPlayerPos = (v2){0, 0};
 
-    printf("Before return \n");
-
     return enemy;
 }
 
 void init() { // #INIT
+
+    player = init_player((v2){0, 0});
+
+    initGrid(&levelTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    initGrid(&floorTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    initGrid(&ceilingTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
 
     tanHalfFOV = tan(deg_to_rad(fov / 2));
     tanHalfStartFOV = tan(deg_to_rad(startFov / 2));
@@ -544,28 +589,14 @@ void init() { // #INIT
 
     heldKeys = create_arraylist(10);
 
-    wallTexture = make_texture(renderer, "wall.bmp");
+    wallTexture = make_texture(renderer, "Textures/wall.bmp");
 
+    printf("Making wall frames \n");
     wallFrames = malloc(sizeof(SDL_Texture *) * 17);
-    wallFrames[0] = make_texture(renderer, "wallAnim1.bmp");
-    wallFrames[1] = make_texture(renderer, "wallAnim2.bmp");
-    wallFrames[2] = make_texture(renderer, "wallAnim3.bmp");
-    wallFrames[3] = make_texture(renderer, "wallAnim4.bmp");
-    wallFrames[4] = make_texture(renderer, "wallAnim5.bmp");
-    wallFrames[5] = make_texture(renderer, "wallAnim6.bmp");
-    wallFrames[6] = make_texture(renderer, "wallAnim7.bmp");
-    wallFrames[7] = make_texture(renderer, "wallAnim8.bmp");
-    wallFrames[8] = make_texture(renderer, "wallAnim9.bmp");
-    wallFrames[9] = make_texture(renderer, "wallAnim10.bmp");
-    wallFrames[10] = make_texture(renderer, "wallAnim11.bmp");
-    wallFrames[11] = make_texture(renderer, "wallAnim12.bmp");
-    wallFrames[12] = make_texture(renderer, "wallAnim13.bmp");
-    wallFrames[13] = make_texture(renderer, "wallAnim14.bmp");
-    wallFrames[14] = make_texture(renderer, "wallAnim15.bmp");
-    wallFrames[15] = make_texture(renderer, "wallAnim16.bmp");
-    wallFrames[16] = make_texture(renderer, "wallAnim17.bmp");
+    getTextureFiles("Textures/WallAnim/wallAnim", 17, &wallFrames);
+    printf("Made wall frames \n");
 
-    crosshair = make_texture(renderer, "crosshair.bmp");
+    crosshair = make_texture(renderer, "Textures/crosshair.bmp");
 
     animatedWallSprite = createSprite(true, 1);
     animatedWallSprite->animations[0] = createAnimation(17);
@@ -573,38 +604,39 @@ void init() { // #INIT
     animatedWallSprite->animations[0]->fps = 10;
     spritePlayAnim(animatedWallSprite, 0);
 
-    floorTexture = make_texture(renderer, "floor.bmp");
-    floorTexture2 = make_texture(renderer, "floor2.bmp");
+    floorTexture = make_texture(renderer, "Textures/floor.bmp");
+    floorTexture2 = make_texture(renderer, "Textures/floor2.bmp");
+    ceilingTexture = make_texture(renderer, "Textures/ceiling.bmp");
 
     leftHandSprite = createSprite(true, 2);
     leftHandSprite->animations[0] = createAnimation(1);
-    leftHandSprite->animations[0]->frames[0] = make_texture(renderer, "leftHandAnim5.bmp");
+    leftHandSprite->animations[0]->frames[0] = make_texture(renderer, "Textures/rightHandAnim/rightHandAnim5.bmp");
     leftHandSprite->animations[1] = createAnimation(5);
-    leftHandSprite->animations[1]->frames[0] = make_texture(renderer, "leftHandAnim1.bmp");
-    leftHandSprite->animations[1]->frames[1] = make_texture(renderer, "leftHandAnim2.bmp");
-    leftHandSprite->animations[1]->frames[2] = make_texture(renderer, "leftHandAnim3.bmp");
-    leftHandSprite->animations[1]->frames[3] = make_texture(renderer, "leftHandAnim4.bmp");
-    leftHandSprite->animations[1]->frames[4] = make_texture(renderer, "leftHandAnim5.bmp");
+    leftHandSprite->animations[1]->frames = malloc(sizeof(SDL_Texture *) * 5);
+    getTextureFiles("Textures/rightHandAnim/rightHandAnim", 5, &leftHandSprite->animations[1]->frames);
+    printf("Made hand frames \n");
     leftHandSprite->animations[1]->fps = 10;
 
     leftHandSprite->animations[1]->loop = false;
     spritePlayAnim(leftHandSprite, 0);
 
     shootHitEffectFrames = malloc(sizeof(SDL_Texture *) * 5);
-    shootHitEffectFrames[0] = make_texture(renderer, "shootHitEffect1.bmp");
-    shootHitEffectFrames[1] = make_texture(renderer, "shootHitEffect2.bmp");
-    shootHitEffectFrames[2] = make_texture(renderer, "shootHitEffect3.bmp");
-    shootHitEffectFrames[3] = make_texture(renderer, "shootHitEffect4.bmp");
-    shootHitEffectFrames[4] = make_texture(renderer, "shootHitEffect5.bmp");
+    getTextureFiles("Textures/ShootEffectAnim/shootHitEffect", 5, &shootHitEffectFrames);
+    printf("Made shoot frames \n");
 
     int x, y;
     SDL_QueryTexture(floorTexture, NULL, NULL, &x, &y);
     floorTextureSize = (v2){x, y};
 
     for (int i = 0; i < 26; i++) keyPressArr[i] = false;
-    
-    loadLevel("testlevel3.txt");
-    // entityTexture = make_texture(renderer, "scary_monster.bmp");
+
+    entityTexture = make_texture(renderer, "Textures/scary_monster.bmp");
+
+    if (isValidLevel(levelToLoad)) {
+        loadLevel(levelToLoad);
+    } else {
+        loadLevel("default_level.hclevel");
+    }
 
     // ShooterEnemy *shooter = createShooterEnemy(player->pos);
     // add_game_object(shooter, ENEMY_SHOOTER);
@@ -649,6 +681,10 @@ void handle_input(SDL_Event event) {
             key_released(event.key.keysym.sym);
             break;
         case SDL_MOUSEMOTION:
+            if (player == NULL) {
+                printf("player is null \n");
+                return;
+            }
             player->angle += event.motion.xrel * X_SENSITIVITY;
             player->handOffset.x = lerp(player->handOffset.x, -event.motion.xrel * 2, 0.06);
             // player->height += event.motion.yrel * Y_SENSITIVITY;
@@ -766,7 +802,7 @@ void playerTick(u64 delta) {
 
     double deltaSec = mili_to_sec(delta);
     
-    player->bulletHitbox->pos = player->pos;
+    player->collider->pos = player->pos;
     
     if (player->pendingShots > 0) {
         player->ShootTickTimer -= deltaSec;
@@ -802,9 +838,6 @@ void playerTick(u64 delta) {
         v2_add(v2_mul(move_dir, to_vec(keyVec.x)), v2_mul(move_dir_rotated, to_vec(keyVec.y))),
         0.15
     );
-
-    
-    checkCollisions();
 
     double moveSpeed = player->speed;
     if (player->sprinting) {
@@ -871,6 +904,7 @@ void chaserTick(Chaser *chaser, u64 delta) {
 }
 
 void objectTick(void *obj, int type, u64 delta) {
+
     switch (type) {
         case (int)PLAYER:
             playerTick(delta);
@@ -902,6 +936,8 @@ void objectTick(void *obj, int type, u64 delta) {
             shooterTick(obj, delta);
             break;
     }
+
+    updateEntityCollisions(obj, type);
 }
 
 void tick(u64 delta) {
@@ -980,7 +1016,7 @@ void renderDebug() { // DEBUG
         for (int col = 0; col < TILEMAP_WIDTH; col++) {
             
             int floorTile = floorTileMap[row][col];
-            if (floorTile != 0) {
+            if (floorTile != -1) {
                 SDL_Rect rect = {
                     col * tileSize,
                     row * tileSize,
@@ -989,6 +1025,19 @@ void renderDebug() { // DEBUG
                 };
 
                 SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+                SDL_RenderFillRect(renderer, &rect);
+            }
+
+            int tile = levelTileMap[row][col];
+            if (tile != -1) {
+                SDL_Rect rect = {
+                    col * tileSize,
+                    row * tileSize,
+                    tileSize,
+                    tileSize
+                };
+
+                SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
                 SDL_RenderFillRect(renderer, &rect);
             }
         }
@@ -1022,12 +1071,14 @@ v2 floorToScreen(v2 pos) {
 
     double lowBound = fov * -0.5;
     double highBound = fov * 0.5;
+    double signedAngleDeg = rad_to_deg(signedAngle);
 
-    if (!in_range(rad_to_deg(signedAngle), lowBound, highBound)) {
-        return (v2){WINDOW_WIDTH * 10, WINDOW_HEIGHT * 10}; // just put it out of the screen
+    if (signedAngleDeg <= lowBound || signedAngleDeg >= highBound) {
+        return OUT_OF_SCREEN_POS;
     }
     
-    double idx = inverse_lerp(fov * -0.5, fov * 0.5, rad_to_deg(signedAngle));
+    
+    double idx = inverse_lerp(lowBound, highBound, signedAngleDeg);
     
     int x = idx * WINDOW_WIDTH;
 
@@ -1063,12 +1114,37 @@ v2 screenToFloor(v2 pos) {
     return v2_add(player->pos, v2_mul(rayDir, to_vec(dist)));
 }
 
+SDL_Texture *getTextureByFloorTile(int tile) {
+    switch (tile) {
+        case (int)P_FLOOR:
+            return floorTexture;
+            break;
+        default:
+            return floorTexture;
+            break;
+    }
+}
+SDL_Texture *getTextureByCeilingTile(int tile) {
+    switch (tile) {
+        case (int)P_CEILING:
+            return ceilingTexture;
+            break;
+        default:
+            return ceilingTexture;
+            break;
+    }
+}
+
+
 
 void renderFloorAndCeiling() {
     // render by scanlines.
     // interpolate between left and right points and put the correct texture
 
     v2 pixelSize = v2_div((v2){WINDOW_WIDTH, WINDOW_HEIGHT}, (v2){RESOLUTION_X, RESOLUTION_Y});
+    SDL_Texture *floorTex = floorTexture;
+    SDL_Texture *ceilingTex = floorTexture;
+    v2 textureSize = getTextureSize(floorTex);
 
 
     for (int row = RESOLUTION_Y / 2; row < RESOLUTION_Y; row++) {
@@ -1084,19 +1160,33 @@ void renderFloorAndCeiling() {
             
             v2 point = v2_lerp(left, right, (double)col / RESOLUTION_X);
             
-
-            SDL_Texture *floorTex = floorTexture;
-
-            SDL_Texture *ceilingTex = floorTexture;
-
-            v2 textureSize = getTextureSize(floorTex);
-
-            SDL_Rect srcRectFloor = { 
+            SDL_Rect srcRect = { 
                 loop_clamp(point.x, 0, 36),
                 loop_clamp(point.y, 0, 36),
                 1,
                 1
             };
+
+            double light = inverse_lerp(RESOLUTION_Y / 2, RESOLUTION_Y, row);
+
+            int color = light * 255;
+
+            int tileRow = point.y / tileSize;
+            int tileCol = point.x / tileSize;
+
+            int floorTile = -1;
+            int ceilingTile = -1;
+            
+            if (in_range(tileRow, 0, TILEMAP_HEIGHT - 1) && in_range(tileCol, 0, TILEMAP_WIDTH - 1)) {
+                floorTile = floorTileMap[tileRow][tileCol];
+                ceilingTile = ceilingTileMap[tileRow][tileCol];
+            }
+
+            if (floorTile == P_FLOOR) {
+                floorTex = floorTexture2;
+            } else {
+                floorTex = floorTexture;
+            }
 
             v2 offsets = (v2){cameraOffset.x, cameraOffset.y - player->height};
 
@@ -1107,6 +1197,14 @@ void renderFloorAndCeiling() {
                 pixelSize.y
             };
 
+            
+            
+            SDL_SetTextureColorMod(floorTex, color, color, color);
+            SDL_RenderCopy(renderer, floorTex, &srcRect, &dstRectFloor);
+
+            
+            // SDL_Texture *ceilingTex = ceilingTexture;
+
             double ceilingY = WINDOW_HEIGHT / 2 - (screenY - WINDOW_HEIGHT / 2);
 
             SDL_Rect dstRectCeiling = {
@@ -1115,17 +1213,13 @@ void renderFloorAndCeiling() {
                 pixelSize.x,
                 pixelSize.y
             };
-
-            double light = inverse_lerp(RESOLUTION_Y / 2, RESOLUTION_Y, row);
-
-            int color = light * 255;
-
-            SDL_SetTextureColorMod(floorTex, color, color, color);
-            SDL_SetTextureColorMod(ceilingTex, color, color, color);
             
-            SDL_RenderCopy(renderer, floorTex, &srcRectFloor, &dstRectFloor);
+            //SDL_SetTextureColorMod(ceilingTex, color, color, color);
 
-            SDL_RenderCopy(renderer, ceilingTex, &srcRectFloor, &dstRectCeiling);
+            SDL_RenderCopy(renderer, ceilingTex, &srcRect, &dstRectCeiling);            
+               
+            
+            
         }
         
         
@@ -1138,8 +1232,10 @@ void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height) {
     double cosAngleToForward = v2_cos_angle_between(playerForward, v2_sub(pos, player->pos));
 
     v2 screenFloorPos = floorToScreen(pos);
-    if (v2_equal(screenFloorPos, (v2){WINDOW_WIDTH * 10, WINDOW_HEIGHT * 10})) {
+    if (v2_equal(screenFloorPos, OUT_OF_SCREEN_POS)) {
         return;
+    } else {
+        // printf("ftoscreen pos: (%.2f, %.2f), out of screen pos; (%.2f, %.2f) \n", screenFloorPos.x, screenFloorPos.y, OUT_OF_SCREEN_POS.x, OUT_OF_SCREEN_POS.y);
     }
 
 
@@ -1526,9 +1622,11 @@ Player *init_player(v2 pos) {
     player->shootChargeTimer = 0;
     player->ShootTickTimer = 0.15;
     player->pendingShots = 0;
-    player->bulletHitbox = malloc(sizeof(CircleCollider));
-    player->bulletHitbox->radius = 5;
-    player->bulletHitbox->pos = player->pos;
+    player->collider = malloc(sizeof(CircleCollider));
+    player->collider->radius = 5;
+    player->collider->pos = player->pos;
+    player->maxHealth = 10;
+    player->health = player->maxHealth;
 
     return player;
 }
@@ -1557,7 +1655,7 @@ RayCollisionData *rayObject(Raycast ray, obj *object) {
             return shooterRayData;
             break;
         case (int)PLAYER: ;
-            RayCollisionData *playerRayData = rayCircle(ray, *player->bulletHitbox);
+            RayCollisionData *playerRayData = rayCircle(ray, *player->collider);
             if (playerRayData != NULL) {
                 playerRayData->collider = player;
             }
@@ -1687,152 +1785,6 @@ RayCollisionData *rayCircle(Raycast ray, CircleCollider circle) {
     return data;
 }
 
-
-// bool pointInBox(v2 point, BoxCollider box) {
-//     return in_range(point.x, box.pos.x, box.pos.x + box.size.x)
-//     &&
-//     in_range(point.y, box.pos.y, box.pos.y + box.size.y);
-// }
-
-
-
-
-// RayCollisionData *rayBox(Raycast ray, BoxCollider box) {
-//     //RayCollisionData data = malloc(sizeof(RayCollisionData));
-//     if (pointInBox(ray.pos, box)) return NULL;
-    
-//     v2 mid = v2_add(box.pos, v2_div(box.size, to_vec(2)));
-
-//     // if the ray is not looking in the general direction of the middle, why even bother
-//     if (v2_dot(v2_sub(mid, ray.pos), ray.dir) < 0) return NULL;
-
-
-
-//     LineSegment A = (LineSegment) {
-//         box.pos,
-//         v2_add(box.pos, (v2){box.size.x, 0}),
-//         box.height,
-//         box.color,
-//         box.sprite
-//     };
-//     LineSegment B = (LineSegment) {
-//         v2_add(box.pos, (v2){box.size.x, 0}),
-//         v2_add(box.pos, (v2){box.size.x, box.size.y}),
-//         box.height,
-//         box.color,
-//         box.sprite
-//     };
-//     LineSegment C = (LineSegment) {
-//         v2_add(box.pos, (v2){box.size.x, box.size.y}),
-//         v2_add(box.pos, (v2){0, box.size.y}),
-//         box.height,
-//         box.color,
-//         box.sprite
-//     };
-//     LineSegment D = (LineSegment) {
-//         box.pos,
-//         v2_add(box.pos, (v2){0, box.size.y}),
-//         box.height,
-//         box.color,
-//         box.sprite
-//     };
-
-//     // Check which side to intersect (dont want to waste calcs)
-//     if (in_range(ray.pos.y, box.pos.y, box.pos.y + box.size.y)) {
-        
-//         if (ray.pos.x < box.pos.x) 
-//             return rayLineSegment(ray, D);
-//         else
-//             return rayLineSegment(ray, B);
-//     } else if (in_range(ray.pos.x, box.pos.x, box.pos.x + box.size.x)) {
-        
-//         if (ray.pos.y < box.pos.y) 
-//             return rayLineSegment(ray, A);
-//         else
-//             return rayLineSegment(ray, C);
-//     } else {
-//         LineSegment l1, l2;
-//         if (ray.pos.x < box.pos.x && ray.pos.y < box.pos.y) {
-//             l1 = A;
-//             l2 = D;
-//         } else if (ray.pos.x < box.pos.x) {
-//             l1 = C;
-//             l2 = D;
-//         } else if (ray.pos.y < box.pos.y) {
-//             l1 = A;
-//             l2 = B;
-//         } else {
-//             l1 = B;
-//             l2 = C;
-//         }
-//         RayCollisionData *l1result = rayLineSegment(ray, l1);
-//         return l1result != NULL ? l1result : rayLineSegment(ray, l2);
-//     }
-// }
-
-// v2 *tu_formula(v2 a1, v2 a2, v2 b1, v2 b2) {
-//     double t, u;
-
-//     double x1 = a1.x;
-//     double x2 = a2.x;
-//     double x3 = b1.x;
-//     double x4 = b2.x;
-//     double y1 = a1.y;
-//     double y2 = a2.y;
-//     double y3 = b1.y;
-//     double y4 = b2.y;
-
-//     double den = ((x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4));
-//     if (den == 0) {
-//         return NULL;
-//     } else {
-//         t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4))
-//         / den;
-//         u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3))
-//         / den;
-//     }
-    
-//     if (t < 0 || t > 1 || u < 0) return NULL;
-
-//     v2 *result = malloc(sizeof(v2));
-//     result->x = x1 + t * (x2 - x1);
-//     result->y = y1 + t * (y2 - y1);
-//     return result;
-// }
-
-// RayCollisionData *rayLineSegment(Raycast ray, LineSegment line) {
-
-//     RayCollisionData *result = malloc(sizeof(RayCollisionData));
-//     v2 *collpos = tu_formula(line.pos1, line.pos2, ray.pos, v2_add(ray.pos, ray.dir));
-//     if (collpos == NULL) {
-//         free(result);
-//         return NULL;
-//     }
-
-//     result->collpos = *collpos;
-//     free(collpos);
-
-//     result->startpos = ray.pos;
-//     result->colliderHeight = line.height;
-//     result->colliderColor = line.color;
-//     result->colliderTexture = getSpriteCurrentTexture(line.sprite);
-
-//     v2 d = v2_dir(line.pos1, line.pos2);
-    
-//     result->normal = v2_rotate(d, deg_to_rad(90));
-//     if (v2_dot(ray.dir, result->normal) < 0) result->normal = v2_mul(result->normal, to_vec(-1));
-
-//     double collIdx;
-//     if (line.pos1.x == line.pos2.x) collIdx = inverse_lerp(line.pos1.y, line.pos2.y, result->collpos.y);
-//     else collIdx = inverse_lerp(line.pos1.x, line.pos2.x, result->collpos.x);
-
-//     result->collIdx = collIdx;
-//     result->wallWidth = v2_distance(line.pos1, line.pos2);
-
-
-//     return result;
-// }
-
 void freeObject(void *val, int type) {
     switch (type) {
         case (int)PARTICLES: ;
@@ -1926,6 +1878,7 @@ void add_game_object(void *val, int type) {
 
 }
 
+// Frees and removes the game object.
 void remove_game_object(void *val, int type) {
     arraylist_remove(gameobjects, arraylist_find(gameobjects, val));
     freeObject(val, type);
@@ -2020,11 +1973,31 @@ void initGrid(int ***gridPtr, int cols, int rows) {
     }
 }
 
+void resetGrid(int ***gridPtr, int cols, int rows) {
+    for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++) {
+            (*gridPtr)[r][c] = -1;
+        }
+    }
+}
+
+void clearLevel() {
+    for (int i = 0; i < gameobjects->length; i++) {
+        obj *object = arraylist_get(gameobjects, i);
+        freeObject(object->val, object->type);
+    }
+
+    arraylist_clear(gameobjects);
+
+}
+
 void loadLevel(char *file) {
 
-    initGrid(&levelTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    initGrid(&floorTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    initGrid(&ceilingTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    clearLevel();
+
+    resetGrid(&levelTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    resetGrid(&floorTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    resetGrid(&ceilingTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
 
     FILE *fh = fopen(file, "r");
     if (fh == NULL) {
@@ -2067,7 +2040,7 @@ void loadLevel(char *file) {
 
             switch (type) {
                 case (int)P_PLAYER:
-                    player = init_player(tileMid);
+                    player->pos = tileMid;
                     arraylist_add(gameobjects, player, PLAYER);
                     break;
                 case (int)P_SHOOTER: ;
@@ -2405,6 +2378,7 @@ double angleDist(double a1, double a2) {
 
 EnemyBullet *createDefaultBullet(v2 pos, v2 dir) {
     EnemyBullet *bullet = malloc(sizeof(EnemyBullet));
+    
 
     bullet->entity = malloc(sizeof(Entity));
     bullet->entity->pos = pos;
@@ -2414,8 +2388,10 @@ EnemyBullet *createDefaultBullet(v2 pos, v2 dir) {
     bullet->entity->height = WINDOW_HEIGHT / 6;
     bullet->dirSprite = NULL;
     bullet->dmg = 1;
-    bullet->speed = 0.5;
+    bullet->speed = 5.5;
     bullet->dir = dir;
+    bullet->lifeTime = 5;
+    bullet->lifeTimer = bullet->lifeTime;
 
     bullet->collider = malloc(sizeof(CircleCollider));
     bullet->collider->pos = bullet->entity->pos;
@@ -2430,14 +2406,23 @@ EnemyBullet *createTestBullet(v2 pos) {
 }
 
 bool intersectCircles(CircleCollider c1, CircleCollider c2) {
-    return v2_distance_squared(c1.pos, c2.pos) < (c1.radius + c2.radius) * (c1.radius + c2.radius); // dist < (r1 + r2)^2
+    return v2_distance_squared(c1.pos, c2.pos) < (c1.radius + c2.radius) * (c1.radius + c2.radius); // dist^2 < (r1 + r2)^2
 }
 
 void bulletTick(EnemyBullet *bullet, u64 delta) {
+    
+    double deltaSec = mili_to_sec(delta);
+
     bullet->entity->pos = v2_add(bullet->entity->pos, v2_mul(bullet->dir, to_vec(bullet->speed)));
     bullet->collider->pos = bullet->entity->pos;
 
-    if (intersectCircles(*bullet->collider, *(player->bulletHitbox))) {
+    bullet->lifeTimer -= deltaSec;
+    if (bullet->lifeTimer <= 0) {
+        remove_game_object(bullet, BULLET);
+        return;
+    }
+
+    if (intersectCircles(*bullet->collider, *(player->collider))) {
         remove_game_object(bullet, BULLET);
         // deal damage to player
     }
@@ -2473,7 +2458,10 @@ ShooterEnemy *createShooterEnemy(v2 pos) {
         return NULL;
     }
     shooter->enemy = createEnemy(pos);
-    printf("Created enemy successfully \n");
+    shooter->enemy->maxHealth = 3;
+    shooter->enemy->health = shooter->enemy->maxHealth;
+
+    
     shooter->shootCooldown = 2;
     shooter->shootCooldownTimer = 0;
 
@@ -2481,3 +2469,109 @@ ShooterEnemy *createShooterEnemy(v2 pos) {
     return shooter;
 }
 
+CollisionData getCircleTileCollision(CircleCollider circle, v2 tilePos) {
+    CollisionData result;
+    result.didCollide = false;
+    result.offset = (v2){0, 0};
+
+    v2 clampedPos;
+    clampedPos.x = clamp(circle.pos.x, tilePos.x, tilePos.x + tileSize);
+    clampedPos.y = clamp(circle.pos.y, tilePos.y, tilePos.y + tileSize);
+    
+    v2 toClamped = v2_sub(clampedPos, circle.pos);
+    double dist = v2_length(toClamped);
+    if (dist == 0) {
+        //printf("Dist is 0 \n");
+        return result;
+    }
+    double overlap = circle.radius - dist;
+    if (overlap == 0) {
+        return result;
+    }
+    
+    v2 dirToClamped = v2_div(toClamped, to_vec(dist));
+    if (overlap > 0) {
+        result.didCollide = true;
+        result.offset = v2_mul(dirToClamped, to_vec(-overlap));
+    }
+
+    
+
+    return result;
+
+}
+
+CollisionData getCircleTileMapCollision(CircleCollider circle) {
+    CollisionData result;
+    result.didCollide = false;
+    result.offset = (v2){0, 0};
+
+    v2 gridCheckStart;
+    v2 gridCheckEnd;
+
+    gridCheckStart.x = (int)((circle.pos.x - circle.radius) / tileSize) - 1;
+    gridCheckStart.y = (int)((circle.pos.y - circle.radius) / tileSize) - 1;
+
+    gridCheckEnd.x = (int)((circle.pos.x + circle.radius) / tileSize) + 2; //+ 2 to account for rounding up
+    gridCheckEnd.y = (int)((circle.pos.y + circle.radius) / tileSize) + 2;
+
+    //printf("Grid check start: (%.2f, %.2f), end: (%.2f, %.2f) \n", gridCheckStart.x, gridCheckStart.y, gridCheckEnd.x, gridCheckEnd.y);
+
+    v2 gridCheckSize = v2_sub(gridCheckEnd, gridCheckStart);
+
+    //printf("Grid check size: (%.2f, %.2f) \n", gridCheckSize.x, gridCheckSize.y);
+
+    for (int row = gridCheckStart.y; row < gridCheckEnd.y; row++) {
+        for (int col = gridCheckStart.x; col < gridCheckEnd.x; col++) {
+            if (levelTileMap[row][col] == -1) continue;
+            CollisionData data = getCircleTileCollision(circle, (v2){col * tileSize, row * tileSize});
+            //printf("Tile pos: %d, %d \n", col, row);
+            if (data.didCollide) {
+                result.didCollide = true;
+                result.offset = v2_add(result.offset, data.offset);
+            }
+        }
+    }
+
+    return result;
+}
+
+void updateEntityCollisions(void *val, int type) {
+    switch (type) {
+        case (int)PLAYER: ;
+            CollisionData colData = getCircleTileMapCollision(*player->collider);
+            if (colData.didCollide) {
+                player->pos = v2_add(player->pos, colData.offset);
+            }
+            break;
+    }
+}
+
+bool isValidLevel(char *file) {
+    if (file == NULL) return false;
+    
+    char *fileExtension = ".hclevel";
+
+    int fileLen = strlen(file);
+    int extLen = strlen(fileExtension);
+    if (strcmp(&file[fileLen - extLen], fileExtension) == 0) {
+        return true;
+    }
+
+    return false;
+}
+
+// Takes a file name with no extension and assumes it's a bmp
+void getTextureFiles(char *fileName, int fileCount, SDL_Texture ***textures) {
+
+    int charCount = getNumDigits(fileCount);
+
+    for (int i = 0; i < fileCount; i++) {
+        char num[charCount];
+        sprintf(num, "%d", i + 1);
+        char *fileWithNum = concat(fileName, num);
+        char *fileWithExtension = concat(fileWithNum, ".bmp");
+        SDL_Texture *tex = make_texture(renderer, fileWithExtension);
+        (*textures)[i] = tex;
+    }
+}

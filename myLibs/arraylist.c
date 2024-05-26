@@ -9,11 +9,33 @@ typedef struct obj {
 
 } obj;
 
-
 typedef struct arraylist {
     obj **objects;
     size_t size, length;
 } arraylist;
+
+
+arraylist *create_arraylist(size_t size);
+
+void extend_list(arraylist *list);
+
+void arraylist_add(arraylist *list, void *val, int type);
+
+void arraylist_insert(arraylist *list, void *val, int type, int idx);
+
+int arraylist_find(arraylist *list, void *val);
+
+void free_object(obj *object);
+
+int arraylist_remove(arraylist *list, int idx);
+
+void arraylist_clear(arraylist *list);
+
+void arraylist_free(arraylist *list);
+
+obj *arraylist_get(arraylist *list, int idx);
+
+bool arraylist_contains(arraylist *list, void *val);
 
 arraylist *create_arraylist(size_t size) {
     arraylist *list = malloc(sizeof(arraylist));
@@ -28,17 +50,22 @@ arraylist *create_arraylist(size_t size) {
 
 
 void extend_list(arraylist *list) {
-    obj **newvals = malloc(sizeof(obj *) * list->size * 2);
-    if (newvals == NULL) {
-        printf("Couldn't allocate memory. Returning \n");
-        return;
-    }
-    for (int i = 0; i < list->size; i++) {
-        newvals[i] = list->objects[i];
-    }
-    free(list->objects);
-    list->objects = newvals;
+
+    list->objects = realloc(list->objects, sizeof(obj *) * list->size * 2);
+
     list->size *= 2;
+
+    // obj **newvals = malloc(sizeof(obj *) * list->size * 2);
+    // if (newvals == NULL) {
+    //     printf("Couldn't allocate memory. Returning \n");
+    //     return;
+    // }
+    // for (int i = 0; i < list->size; i++) {
+    //     newvals[i] = list->objects[i];
+    // }
+    // free(list->objects);
+    // list->objects = newvals;
+    
 }
 
 void arraylist_add(arraylist *list, void *val, int type) {
@@ -52,8 +79,6 @@ void arraylist_add(arraylist *list, void *val, int type) {
     list->objects[list->length] = object;
     list->length++;
 }
-
-// 0 1 2 3 N
 
 void arraylist_insert(arraylist *list, void *val, int type, int idx) {
     if (idx >= list->length || idx < 0) return;
@@ -87,12 +112,13 @@ void free_object(obj *object) {
     free(object->val);
     free(object);
 }
-// doesnt free automatically
+// doesnt free void* val automatically
 int arraylist_remove(arraylist *list, int idx) { 
     if (idx < 0 || idx >= list->length) {
         printf("Index out of bounds while trying to remove. index: %d \n", idx);
         return 0;
     }
+    free(arraylist_get(list, idx));
     memmove(list->objects + idx, list->objects + idx + 1, sizeof(obj *) * list->length - idx);
     list->length--;
     return 1;
