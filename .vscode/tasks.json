@@ -18,7 +18,7 @@
             ],
             "options": {
                 "cwd": "${fileDirname}",
-                "console": "external"
+                "console": "integratedTerminal"
             },
             "problemMatcher": [
                 "$gcc"

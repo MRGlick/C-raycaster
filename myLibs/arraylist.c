@@ -49,8 +49,11 @@ arraylist *create_arraylist(size_t size) {
 }
 
 
-void extend_list(arraylist *list) {
+void extend_list(arraylist *list) { // PROBLEM HERE
 
+    if (list->objects == NULL) {
+        printf("objects are null");
+    }
     list->objects = realloc(list->objects, sizeof(obj *) * list->size * 2);
 
     list->size *= 2;

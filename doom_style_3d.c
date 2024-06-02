@@ -357,7 +357,6 @@ void getTextureFiles(char *fileName, int fileCount, SDL_Texture ***textures);
 
 // #FUNCTIONS END
 
-
 // #VARIABLES
 bool running = true;
 arraylist *gameobjects;
@@ -417,7 +416,7 @@ char *levelToLoad = NULL;
 const double PLAYER_SHOOT_COOLDOWN = 0.5;
 
 // #MAIN
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
     
     if (SDL_Init(SDL_INIT_EVERYTHING) < 0) printf("Shit. \n");
 
@@ -1216,7 +1215,7 @@ void renderFloorAndCeiling() {
             
             //SDL_SetTextureColorMod(ceilingTex, color, color, color);
 
-            SDL_RenderCopy(renderer, ceilingTex, &srcRect, &dstRectCeiling);            
+            SDL_RenderCopy(renderer, floorTex, &srcRect, &dstRectCeiling);            
                
             
             
@@ -1507,7 +1506,12 @@ void renderHUD() {
     }
 
 
+    double redness = pow(0.5, (int)(max(player->shootChargeTimer, player->pendingShots) * 3));// 0.5 0.25 0.125 0.075
+    if (redness == 1) redness = 0;
+    else redness = (0.5 - redness) * 2;
+    Uint8 redness8 = redness * 255;
 
+    SDL_SetTextureColorMod(texture, 255, 255 - redness8, 255 - redness8);
     SDL_RenderCopy(renderer, texture, NULL, &leftHandRect);
 
     SDL_Rect crosshairRect = {
@@ -1872,15 +1876,18 @@ void add_game_object(void *val, int type) {
             arraylist_add(gameobjects, particles, PARTICLES);
             break;
         default:
-            arraylist_add(gameobjects, val, type);            
+            arraylist_add(gameobjects, val, type);
             break;
     }
+
+    printf("Added game object. Length: %d \n", gameobjects->length);
 
 }
 
 // Frees and removes the game object.
 void remove_game_object(void *val, int type) {
     arraylist_remove(gameobjects, arraylist_find(gameobjects, val));
+    printf("Removed game object. Length: %d \n", gameobjects->length);
     freeObject(val, type);
 }
 
@@ -2161,7 +2168,17 @@ void particlesTick(Particles *particles, u64 delta) {
 
 Effect *createEffect(v2 pos, v2 size, Sprite *sprite, double lifeTime) {
     Effect *effect = malloc(sizeof(Effect));
+
+    if (effect == NULL) {
+        printf("Failed to malloc effect \n");
+    }
+
     effect->entity = malloc(sizeof(Entity));
+
+    if (effect == NULL) {
+        printf("Failed to malloc effect entity \n");
+    }
+
     effect->entity->pos = pos;
     effect->entity->size = size;
     effect->entity->sprite = sprite;
@@ -2221,6 +2238,10 @@ void playerShoot() {
 
     Effect *hitEffect = createEffect(effectPos, to_vec(35), createSprite(true, 1), 1);
     
+    if (hitEffect == NULL) {
+        printf("hit effect is null \n");
+        return;
+    }
     
     hitEffect->entity->sprite->animations[0] = createAnimation(5);
     hitEffect->entity->sprite->animations[0]->frames[0] = shootHitEffectFrames[0];
@@ -2431,6 +2452,10 @@ void bulletTick(EnemyBullet *bullet, u64 delta) {
 
 void shooterEnemyShoot(ShooterEnemy *shooter) {
     EnemyBullet *bullet = createDefaultBullet(shooter->enemy->entity->pos, shooter->enemy->dir);
+    if (bullet == NULL) {
+        printf("Bullet is null \n");
+        return;
+    }
     add_game_object(bullet, BULLET);
 }
 
@@ -2523,6 +2548,7 @@ CollisionData getCircleTileMapCollision(CircleCollider circle) {
 
     for (int row = gridCheckStart.y; row < gridCheckEnd.y; row++) {
         for (int col = gridCheckStart.x; col < gridCheckEnd.x; col++) {
+            if (!in_range(row, 0, TILEMAP_HEIGHT - 1) || !in_range(col, 0, TILEMAP_WIDTH - 1)) continue;
             if (levelTileMap[row][col] == -1) continue;
             CollisionData data = getCircleTileCollision(circle, (v2){col * tileSize, row * tileSize});
             //printf("Tile pos: %d, %d \n", col, row);
