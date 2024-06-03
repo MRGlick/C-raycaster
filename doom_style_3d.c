@@ -83,8 +83,6 @@ typedef struct DirectionalSprite {
     int dirCount;
 } DirectionalSprite;
 
-
-
 typedef struct Raycast {
     v2 pos, dir;
 } Raycast;
@@ -100,16 +98,7 @@ typedef struct RayCollisionData {
 typedef struct CircleCollider {
     v2 pos;
     double radius;
-    double height;
-    SDL_Color color;
 } CircleCollider;
-
-typedef struct BoxCollider {
-    v2 pos, size;
-    double height;
-    SDL_Color color;
-    Sprite *sprite;
-} BoxCollider;
 
 typedef struct LineSegment {
     v2 pos1, pos2;
@@ -117,11 +106,6 @@ typedef struct LineSegment {
     SDL_Color color;
     Sprite *sprite;
 } LineSegment;
-
-typedef struct Door {
-    BoxCollider *collider;
-    bool isOpen;
-} Door;
 
 typedef struct FloorTile {
     v2 pos, size;
@@ -229,13 +213,6 @@ typedef struct ShooterEnemy {
 
 // #ENEMIES END
 
-typedef struct FloorPixel {
-    bool empty;
-    SDL_Texture *texture;
-    SDL_Rect srcRect, dstRect;
-    double lerpToFog;
-} FloorPixel;
-
 typedef struct CollisionData {
     v2 offset; // adjusting position by this offset makes the object only touch and not overlap
     bool didCollide;
@@ -249,11 +226,11 @@ void initGrid(int ***gridPtr, int cols, int rows);
 
 void resetGrid(int ***gridPtr, int cols, int rows);
 
-void loadLevel();
+void loadLevel(char *file);
 
 void init();
 
-void render();
+void render(u64 delta);
 
 RayCollisionData *rayCircle(Raycast ray, CircleCollider circle);
 
@@ -279,9 +256,7 @@ void add_game_object(void *val, int type);
 
 void remove_game_object(void *val, int type);
 
-void initialize_level(int id);
-
-Player *init_player();
+Player *init_player(v2 pos);
 
 double mili_to_sec(u64 mili);
 
@@ -337,8 +312,6 @@ double angleDist(double a1, double a2);
 
 void shakeCamera(double strength, int ticks, bool fade);
 
-EnemyBullet *createTestBullet();
-
 ShooterEnemy *createShooterEnemy(v2 pos);
 
 RayCollisionData *castRayForAll(v2 pos, v2 dir);
@@ -376,41 +349,48 @@ const SDL_Color fogColor = {0, 0, 0, 255};
 TextureData *floorTexture;
 TextureData *floorTexture2;
 TextureData *ceilingTexture;
+SDL_Texture *floorAndCeiling;
 
 SDL_Texture *wallTexture;
 SDL_Texture *entityTexture;
 SDL_Texture *crosshair;
+
 double tanHalfFOV;
 double tanHalfStartFOV;
+
 int floorRenderStart;
+
 int **levelTileMap;
 int **floorTileMap;
 int **ceilingTileMap;
+
 const int tileSize = WINDOW_WIDTH / TILEMAP_WIDTH;
+
 double realFps;
+
 SDL_Texture **wallFrames;
 SDL_Texture **shootHitEffectFrames;
+
 bool isCameraShaking = false;
 int cameraShakeTicks;
 int cameraShakeTicksLeft = 0;
 double cameraShakeTimeToNextTick = 0.02;
 double cameraShakeCurrentStrength = 0;
 bool cameraShakeFadeActive = false;
-FloorPixel **floorPixelsToRender;
-FloorPixel **ceilingPixelsToRender;
+
 RenderObject *wallStripesToRender[RESOLUTION_X];
 
 v2 cameraOffset = {0, 0};
 
 double wallHeights[RESOLUTION_X]; // for floor and ceiling optimization
+
 Sprite *animatedWallSprite;
+
 Sprite *leftHandSprite;
 
 v2 playerForward;
 
 char *levelToLoad = NULL;
-
-SDL_Texture *floorAndCeiling;
 
 const double PLAYER_SHOOT_COOLDOWN = 0.5;
 
@@ -438,10 +418,6 @@ int main(int argc, char *argv[]) {
         levelToLoad = argv[1];
     }
 
-    // test();
-    // return;
-
-    // init_fast_trig();
     init();
 
     u64 tick_timer = 0, render_timer = 0;
@@ -456,16 +432,17 @@ int main(int argc, char *argv[]) {
         u64 delta = now - last_time;
         last_time = now;
         tick_timer += delta;
-        render_timer += delta;
+        // render_timer += delta;
         if (tick_timer >= 1000/TPS) {
             realFps = 1000.0 / tick_timer;
             tick(tick_timer);
+            render(tick_timer);
             tick_timer = 0;
         }
-        if (render_timer >= 1000/FPS) {
-            render(render_timer);
-            render_timer = 0;
-        }
+        // if (render_timer >= 1000/FPS) {
+        //     render(render_timer);
+        //     render_timer = 0;
+        // }
     }
 
     fclose(ERROR_LOG);
@@ -513,8 +490,6 @@ Enemy *createEnemy(v2 pos) {
     enemy->entity->pos = pos;
     enemy->entity->size = to_vec(50);
     enemy->entity->sprite = NULL;
-    // enemy->entity->sprite = createSprite(false, 0);
-    // enemy->entity->sprite->texture = entityTexture;
 
     enemy->dirSprite = createDirSprite(16);
     for (int i = 0; i < 16; i++) {
@@ -611,36 +586,12 @@ void init() { // #INIT
         loadLevel("default_level.hclevel");
     }
 
-    // ShooterEnemy *shooter = createShooterEnemy(player->pos);
-    // add_game_object(shooter, ENEMY_SHOOTER);
-
 
 } // #INIT END
 
 v2 getPlayerForward() {
     return v2_rotate_to((v2){1, 0}, deg_to_rad(player->angle));
 }
-
-// // col1 is the top and col2 the bottom
-// void drawGradient(SDL_Rect rect, SDL_Color col1, SDL_Color col2, int gradientExponent) {
-//     for (int i = 0; i < rect.h; i++) {
-//         double w = pow((double)i / rect.h, gradientExponent);
-//         SDL_SetRenderDrawColor(
-//             renderer,
-//             lerp(col1.r, col2.r, w),
-//             lerp(col1.g, col2.g, w),
-//             lerp(col1.b, col2.b, w),
-//             lerp(col1.a, col2.a, w)
-//         );
-//         SDL_RenderDrawLine(
-//             renderer,
-//             rect.x,
-//             rect.y + i,
-//             rect.x + rect.w,
-//             rect.y + i
-//         );
-//     }
-// }
 
 void handle_input(SDL_Event event) {
     switch (event.type) {
@@ -882,10 +833,6 @@ void objectTick(void *obj, int type, u64 delta) {
         case (int)PLAYER:
             playerTick(delta);
             break;
-        case (int)BOX_COLLIDER: ;
-            BoxCollider *coll = obj;
-            spriteTick(coll->sprite, delta);
-            break;
         case (int)CHASER:
             chaserTick(obj, delta);
             break;
@@ -972,7 +919,7 @@ double distance_to_color(double distance, double a) {
     return exp(-a * distance);
 }
 
-void renderDebug() { // DEBUG
+void renderDebug() { // #DEBUG
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 120);
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
@@ -1024,7 +971,7 @@ void renderDebug() { // DEBUG
 v2 getRayDirByIdx(int i) {
     double x = tanHalfFOV;
     double idx = lerp(-x, x, ((double)(i + 1)) / RESOLUTION_X);
-    // double angle = lerp(-0.5 * fov, 0.5 * fov, (double)i / RESOLUTION_X);
+
     v2 temp = (v2){1, idx};
     
     temp = v2_normalize(temp);
@@ -1055,7 +1002,6 @@ v2 floorToScreen(v2 pos) {
     
     int x = idx * WINDOW_WIDTH;
 
-    //double fovFactor = tanHalfStartFOV/tanHalfFOV;
     double wallSize = WALL_HEIGHT * WINDOW_HEIGHT/dist;
 
     int y = WINDOW_HEIGHT / 2 + wallSize / 2; 
@@ -1067,7 +1013,6 @@ v2 screenToFloor(v2 pos) {
 
     v2 rayDir = getRayDirByIdx((int)pos.x);
 
-    //double finalSize = WALL_HEIGHT * WINDOW_HEIGHT/collDist * 80/fov;
     double wallSize = abs(pos.y - WINDOW_HEIGHT / 2) * 2; // size of a wall at that position
     if (wallSize == 0) {
         return to_vec(0);
@@ -1076,10 +1021,8 @@ v2 screenToFloor(v2 pos) {
     double fovFactor = tanHalfStartFOV / tanHalfFOV;
     double dist = (WALL_HEIGHT * WINDOW_HEIGHT) / (wallSize) * fovFactor;
 
-    // CORRECT
     double cosAngleToForward = v2_cos_angle_between(rayDir, playerForward);
     
-    // CORRECT
     dist /= cosAngleToForward;
     
     
@@ -1140,14 +1083,6 @@ void calcFloorAndCeiling() {
             if (ceilingTile == P_CEILING) {
                 ceilingTex = ceilingTexture;
             }
-
-            // v2 offsets = (v2){cameraOffset.x, cameraOffset.y - player->height};
-
-            // v2 correct_offsets = offsets;
-            // correct_offsets.x *= RESOLUTION_X;
-            // correct_offsets.x /= WINDOW_WIDTH;
-            // correct_offsets.y *= RESOLUTION_Y;
-            // correct_offsets.y /= WINDOW_HEIGHT;
 
             int floor_row = row;
             int floor_col = col; 
@@ -1537,9 +1472,6 @@ void render(u64 delta) { // #RENDER
     
 
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-    
-    // SDL_Thread *piss = SDL_CreateThread(calcFloorPixels_Threaded, "Thread 1", NULL);
-    // SDL_Thread *skypiss = SDL_CreateThread(calcCeilingPixels_Threaded, "Thread 2", NULL);
 
     arraylist *renderList = getRenderList();
 
@@ -1694,7 +1626,7 @@ RayCollisionData *castRay(v2 pos, v2 dir) {
 
     bool found = false;
     int tile;
-    double maxDist = 10;
+    double maxDist = 20;
     double dist = 0;
     while (!found && dist < maxDist) {
         if (currentRayLengths.x < currentRayLengths.y) {
@@ -1877,21 +1809,6 @@ void remove_game_object(void *val, int type) {
     printf("Removed game object. Length: %d \n", gameobjects->length);
     freeObject(val, type);
 }
-
-// void openDoor(Door *door) {
-//     door->isOpen = true;
-//     // play animation
-//     remove_game_object(door, DOOR);
-// }
-
-// RayCollisionData *rayDoor(Raycast ray, Door *door) {
-//     RayCollisionData *data = rayBox(ray, *door->collider);
-//     double dist = v2_distance(player->pos, data->collpos);
-//     if (dist < 50) {
-//         openDoor(door);
-//     }
-//     return data;
-// }
 
 Sprite *getRandomWallSprite() {
     Sprite **sprites = malloc(sizeof(Sprite *) * 2);

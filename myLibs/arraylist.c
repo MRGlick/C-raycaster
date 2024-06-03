@@ -54,22 +54,23 @@ void extend_list(arraylist *list) { // PROBLEM HERE
     if (list->objects == NULL) {
         printf("objects are null");
     }
-    printf("%d \n", list->size);
-    list->objects = realloc(list->objects, sizeof(obj *) * list->size * 2);
 
-    list->size *= 2;
+    printf("%d \n", list->objects[0]->type);
 
-    // obj **newvals = malloc(sizeof(obj *) * list->size * 2);
-    // if (newvals == NULL) {
-    //     printf("Couldn't allocate memory. Returning \n");
-    //     return;
-    // }
-    // for (int i = 0; i < list->size; i++) {
-    //     newvals[i] = list->objects[i];
-    // }
-    // free(list->objects);
-    // list->objects = newvals;
     
+
+    obj **newvals = malloc(sizeof(obj *) * list->size * 2);
+    if (newvals == NULL) {
+        printf("Couldn't allocate memory. Returning \n");
+        return;
+    }
+    for (int i = 0; i < list->size; i++) {
+        newvals[i] = list->objects[i];
+    }
+    free(list->objects);
+    list->objects = newvals;
+    
+    list->size *= 2;
 }
 
 void arraylist_add(arraylist *list, void *val, int type) {
@@ -123,7 +124,7 @@ int arraylist_remove(arraylist *list, int idx) {
         return 0;
     }
     free(arraylist_get(list, idx));
-    memmove(list->objects + idx, list->objects + idx + 1, sizeof(obj *) * list->length - idx);
+    memmove(list->objects + idx, list->objects + idx + 1, sizeof(obj *) * (list->length - idx));
     list->length--;
     return 1;
 }
