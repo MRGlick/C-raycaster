@@ -11,7 +11,7 @@
 #include <SDL.h>
 
 
-#define RENDERER_FLAGS (SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC)
+#define RENDERER_FLAGS (SDL_RENDERER_ACCELERATED)
 #define EPSILON 0.001
 #define u64 uint64_t
 #define u32 uint32_t
@@ -37,21 +37,71 @@ typedef struct SortObject {
     double num;
 } SortObject;
 
+typedef struct TextureData { // for anything that involves writing to one big texture
+    int *pixels;
+    int w, h;
+} TextureData;
+
+typedef struct Pixel {
+    Uint8 r, g, b, a;
+} Pixel;
 
 bool canPrint = false;
 const double DEG_TO_RAD = PI / 180;
 const double RAD_TO_DEG = 180 / PI;
 
-// // testing 
-// int main(int argc, char **argv) {
-//     if (TTF_Init() == -1) {
-//         printf("Couldn't init TTF! \n");
-//     }
-//     printf("Test \n");
-//     main2(argc, argv);
-// }
+Pixel TextureData_get_pixel(TextureData *data, int x, int y) {
+    int p = data->pixels[y * data->w + x];
 
+    // 0xRRGGBBAA
 
+    Uint8 r = p >> 24;
+    Uint8 g = p >> 16;
+    Uint8 b = p >> 8;
+    Uint8 a = p;
+
+    return (Pixel){r, g, b, a};
+}
+
+TextureData *TextureData_fromBMP(char *bmp_file) {
+    SDL_Surface* surface = SDL_LoadBMP(bmp_file);
+    if (!surface) {
+        fprintf(stderr, "SDL_LoadBMP Error: %s\n", SDL_GetError());
+        SDL_Quit();
+        return NULL;
+    }
+
+    // Allocate memory for the pixel data
+    int* pixels = (int*)malloc(surface->w * surface->h * sizeof(int));
+    if (!pixels) {
+        fprintf(stderr, "Memory allocation failed\n");
+        SDL_FreeSurface(surface);
+        return NULL;
+    }
+
+    // Access pixel data from the surface
+    int pitch = surface->pitch;
+    Uint32* pixelData = (Uint32*)surface->pixels;
+    SDL_PixelFormat* format = surface->format;
+
+    for (int y = 0; y < surface->h; ++y) {
+        for (int x = 0; x < surface->w; ++x) {
+            Uint32 pixel = pixelData[y * (pitch / 4) + x]; // pitch is in bytes, divide by 4 for Uint32
+            Uint8 r, g, b, a;
+            SDL_GetRGBA(pixel, format, &r, &g, &b, &a);
+            pixels[y * surface->w + x] = (r << 24) | (g << 16) | (b << 8) | a; // 0xRRGGBBAA
+        }
+    }
+
+    TextureData *data = malloc(sizeof(TextureData));
+    data->pixels = pixels;
+    data->w = surface->w;
+    data->h = surface->h;
+
+    SDL_FreeSurface(surface);
+
+    return data;
+}
 
 double mili_to_sec(u64 mili) {
     return (double)mili / 1000;
