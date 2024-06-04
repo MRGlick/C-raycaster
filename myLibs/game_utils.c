@@ -108,7 +108,11 @@ double mili_to_sec(u64 mili) {
 }
 
 char *concat(char *s1, char *s2) {
-    char *result = malloc(sizeof(char) * (strlen(s1) + strlen(s2)));
+    char *result = malloc(strlen(s1) + strlen(s2) + 1);
+    if (result == NULL) {
+        printf("Malloc failed for concat. \n");
+        return NULL;
+    }
 
     strcpy(result, s1);
     strcat(result, s2);

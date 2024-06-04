@@ -220,21 +220,21 @@ typedef struct CollisionData {
 
 // #FUNCTIONS
 
-void updateEntityCollisions(void *val, int type);
+void update_entity_collisions(void *val, int type);
 
-void initGrid(int ***gridPtr, int cols, int rows);
+void init_tilemap(int ***gridPtr, int cols, int rows);
 
-void resetGrid(int ***gridPtr, int cols, int rows);
+void reset_tilemap(int ***gridPtr, int cols, int rows);
 
-void loadLevel(char *file);
+void load_level(char *file);
 
 void init();
 
 void render(u64 delta);
 
-RayCollisionData *rayCircle(Raycast ray, CircleCollider circle);
+RayCollisionData *ray_circle(Raycast ray, CircleCollider circle);
 
-RayCollisionData *rayObject(Raycast ray, obj *object);
+RayCollisionData *ray_object(Raycast ray, obj *object);
 
 RayCollisionData *castRayForEntities(v2 pos, v2 dir);
 
@@ -260,9 +260,9 @@ Player *init_player(v2 pos);
 
 double mili_to_sec(u64 mili);
 
-v2 getPlayerForward();
+v2 get_player_forward();
 
-Animation *createAnimation(int frameCount);
+Animation *create_animation(int frameCount);
 
 void freeAnimation(Animation *anim);
 
@@ -323,8 +323,6 @@ void getTextureFiles(char *fileName, int fileCount, SDL_Texture ***textures);
 // #FUNCTIONS END
 
 // #VARIABLES
-
-FILE *ERROR_LOG;
 
 bool running = true;
 arraylist *gameobjects;
@@ -439,13 +437,7 @@ int main(int argc, char *argv[]) {
             render(tick_timer);
             tick_timer = 0;
         }
-        // if (render_timer >= 1000/FPS) {
-        //     render(render_timer);
-        //     render_timer = 0;
-        // }
     }
-
-    fclose(ERROR_LOG);
 
     SDL_DestroyRenderer(renderer);
 
@@ -519,8 +511,6 @@ Enemy *createEnemy(v2 pos) {
 
 void init() { // #INIT
 
-    ERROR_LOG = fopen("error_log.txt", "w");
-    if (ERROR_LOG == NULL) printf("What the fuck errno: %d\n", errno);
 
     floorAndCeiling = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, RESOLUTION_X, RESOLUTION_Y);
     
@@ -530,9 +520,10 @@ void init() { // #INIT
 
     player = init_player((v2){0, 0});
 
-    initGrid(&levelTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    initGrid(&floorTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    initGrid(&ceilingTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    init_tilemap(&levelTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    init_tilemap(&floorTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    init_tilemap(&ceilingTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+
 
     tanHalfFOV = tan(deg_to_rad(fov / 2));
     tanHalfStartFOV = tan(deg_to_rad(startFov / 2));
@@ -546,18 +537,24 @@ void init() { // #INIT
     wallFrames = malloc(sizeof(SDL_Texture *) * 17);
     getTextureFiles("Textures/WallAnim/wallAnim", 17, &wallFrames);
 
+
+
     crosshair = make_texture(renderer, "Textures/crosshair.bmp");
 
+
+
     animatedWallSprite = createSprite(true, 1);
-    animatedWallSprite->animations[0] = createAnimation(17);
+    animatedWallSprite->animations[0] = create_animation(17);
     animatedWallSprite->animations[0]->frames = wallFrames;
     animatedWallSprite->animations[0]->fps = 10;
     spritePlayAnim(animatedWallSprite, 0);
 
+
+
     leftHandSprite = createSprite(true, 2);
-    leftHandSprite->animations[0] = createAnimation(1);
+    leftHandSprite->animations[0] = create_animation(1);
     leftHandSprite->animations[0]->frames[0] = make_texture(renderer, "Textures/rightHandAnim/rightHandAnim5.bmp");
-    leftHandSprite->animations[1] = createAnimation(5);
+    leftHandSprite->animations[1] = create_animation(5);
     leftHandSprite->animations[1]->frames = malloc(sizeof(SDL_Texture *) * 5);
     getTextureFiles("Textures/rightHandAnim/rightHandAnim", 5, &leftHandSprite->animations[1]->frames);
     leftHandSprite->animations[1]->fps = 10;
@@ -565,7 +562,9 @@ void init() { // #INIT
     leftHandSprite->animations[1]->loop = false;
     spritePlayAnim(leftHandSprite, 0);
 
+
     shootHitEffectFrames = malloc(sizeof(SDL_Texture *) * 5);
+
     getTextureFiles("Textures/ShootEffectAnim/shootHitEffect", 5, &shootHitEffectFrames);
 
     // int x, y;
@@ -577,15 +576,15 @@ void init() { // #INIT
     entityTexture = make_texture(renderer, "Textures/scary_monster.bmp");
 
     if (isValidLevel(levelToLoad)) {
-        loadLevel(levelToLoad);
+        load_level(levelToLoad);
+        
     } else {
-        loadLevel("default_level.hclevel");
+        load_level("default_level.hclevel");
     }
-
 
 } // #INIT END
 
-v2 getPlayerForward() {
+v2 get_player_forward() {
     return v2_rotate_to((v2){1, 0}, deg_to_rad(player->angle));
 }
 
@@ -853,12 +852,12 @@ void objectTick(void *obj, int type, u64 delta) {
             break;
     }
 
-    updateEntityCollisions(obj, type);
+    update_entity_collisions(obj, type);
 }
 
 void tick(u64 delta) {
 
-    playerForward = getPlayerForward();
+    playerForward = get_player_forward();
 
     double deltaSec = mili_to_sec(delta);
 
@@ -1551,11 +1550,11 @@ Player *init_player(v2 pos) {
 }
 
 // CLEAR
-RayCollisionData *rayObject(Raycast ray, obj *object) {
+RayCollisionData *ray_object(Raycast ray, obj *object) {
     switch (object->type) {
         case (int)ENEMY: ;
             Enemy *enemy = object->val;
-            RayCollisionData *enemyRayData = rayCircle(ray, *enemy->collider);
+            RayCollisionData *enemyRayData = ray_circle(ray, *enemy->collider);
             if (enemyRayData != NULL) {
                 enemyRayData->collider = enemy;
                 enemyRayData->colliderType = ENEMY;
@@ -1565,7 +1564,7 @@ RayCollisionData *rayObject(Raycast ray, obj *object) {
             break;
         case (int)ENEMY_SHOOTER: ;
             Enemy *shooter = ((ShooterEnemy *)object->val)->enemy;
-            RayCollisionData *shooterRayData = rayCircle(ray, *shooter->collider);
+            RayCollisionData *shooterRayData = ray_circle(ray, *shooter->collider);
             if (shooterRayData != NULL) {
                 shooterRayData->collider = (ShooterEnemy *)object->val;
                 shooterRayData->colliderType = ENEMY_SHOOTER;
@@ -1574,7 +1573,7 @@ RayCollisionData *rayObject(Raycast ray, obj *object) {
             return shooterRayData;
             break;
         case (int)PLAYER: ;
-            RayCollisionData *playerRayData = rayCircle(ray, *player->collider);
+            RayCollisionData *playerRayData = ray_circle(ray, *player->collider);
             if (playerRayData != NULL) {
                 playerRayData->collider = player;
             }
@@ -1670,7 +1669,7 @@ RayCollisionData *castRay(v2 pos, v2 dir) {
     }
 }
 
-RayCollisionData *rayCircle(Raycast ray, CircleCollider circle) {
+RayCollisionData *ray_circle(Raycast ray, CircleCollider circle) {
 
     if (v2_distance(ray.pos, circle.pos) <= circle.radius || v2_dot(ray.dir, v2_dir(ray.pos, circle.pos)) < 0) {
         return NULL;
@@ -1807,7 +1806,7 @@ Sprite *getRandomWallSprite() {
     Sprite **sprites = malloc(sizeof(Sprite *) * 2);
     Sprite *sprite1 = createSprite(true, 1);
     sprite1->currentAnimationIdx = 0;
-    Animation *anim = createAnimation(17);
+    Animation *anim = create_animation(17);
     anim->frames = wallFrames;
     anim->loop = true;
     anim->playing = true;
@@ -1827,7 +1826,7 @@ Sprite *getRandomWallSprite() {
     return sprites[1];
 }
 
-void initGrid(int ***gridPtr, int cols, int rows) {
+void init_tilemap(int ***gridPtr, int cols, int rows) {
     *gridPtr = malloc(sizeof(int *) * rows);
     for (int i = 0; i < rows; i++) {
         (*gridPtr)[i] = malloc(sizeof(int) * cols);
@@ -1837,7 +1836,7 @@ void initGrid(int ***gridPtr, int cols, int rows) {
     }
 }
 
-void resetGrid(int ***gridPtr, int cols, int rows) {
+void reset_tilemap(int ***gridPtr, int cols, int rows) {
     for (int r = 0; r < rows; r++) {
         for (int c = 0; c < cols; c++) {
             (*gridPtr)[r][c] = -1;
@@ -1855,13 +1854,13 @@ void clearLevel() {
 
 }
 
-void loadLevel(char *file) {
+void load_level(char *file) {
 
     clearLevel();
 
-    resetGrid(&levelTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    resetGrid(&floorTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    resetGrid(&ceilingTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    reset_tilemap(&levelTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    reset_tilemap(&floorTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    reset_tilemap(&ceilingTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
 
     FILE *fh = fopen(file, "r");
     if (fh == NULL) {
@@ -1869,13 +1868,13 @@ void loadLevel(char *file) {
         return;
     }
 
-    fseek(fh, 0L, SEEK_END);
-    int fileSize = ftell(fh);
-    rewind(fh);
-
+    
+    int fileSize = TILEMAP_HEIGHT * TILEMAP_WIDTH * 4;
 
     char *data = malloc(sizeof(char) * fileSize); // sizeof char is 1 but i do it for clarity
+
     fgets(data, fileSize, fh);
+
     int idx = 0;
 
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
@@ -1926,7 +1925,7 @@ void freeAnimation(Animation *anim) {
     free(anim);
 }
 
-Animation *createAnimation(int frameCount) {
+Animation *create_animation(int frameCount) {
     Animation *anim = malloc(sizeof(Animation));
     anim->playing = false;
     anim->frameCount = frameCount;
@@ -2055,7 +2054,7 @@ void playerShoot() {
     spritePlayAnim(leftHandSprite, 1);
 
     if (player->pendingShots > 0) {
-        player->vel = v2_mul(getPlayerForward(), to_vec(-1));
+        player->vel = v2_mul(get_player_forward(), to_vec(-1));
     }
 
 
@@ -2095,7 +2094,7 @@ void playerShoot() {
         return;
     }
     
-    hitEffect->entity->sprite->animations[0] = createAnimation(5);
+    hitEffect->entity->sprite->animations[0] = create_animation(5);
     hitEffect->entity->sprite->animations[0]->frames[0] = shootHitEffectFrames[0];
     hitEffect->entity->sprite->animations[0]->frames[1] = shootHitEffectFrames[1];
     hitEffect->entity->sprite->animations[0]->frames[2] = shootHitEffectFrames[2];
@@ -2164,7 +2163,7 @@ RayCollisionData *castRayForEntities(v2 pos, v2 dir) {
     double minSquaredDist = INFINITY;
 
     for (int i = 0; i < gameobjects->length; i++) {
-        RayCollisionData *newData = rayObject(ray, arraylist_get(gameobjects, i));
+        RayCollisionData *newData = ray_object(ray, arraylist_get(gameobjects, i));
         if (newData == NULL) continue;
 
         double currentSquaredDist = v2_distance_squared(pos, newData->collpos);
@@ -2408,7 +2407,7 @@ CollisionData getCircleTileMapCollision(CircleCollider circle) {
     return result;
 }
 
-void updateEntityCollisions(void *val, int type) {
+void update_entity_collisions(void *val, int type) {
     switch (type) {
         case (int)PLAYER: ;
             CollisionData colData = getCircleTileMapCollision(*player->collider);
@@ -2439,11 +2438,17 @@ void getTextureFiles(char *fileName, int fileCount, SDL_Texture ***textures) {
     int charCount = getNumDigits(fileCount);
 
     for (int i = 0; i < fileCount; i++) {
-        char num[charCount];
+        char num[charCount + 10];
         sprintf(num, "%d", i + 1);
         char *fileWithNum = concat(fileName, num);
         char *fileWithExtension = concat(fileWithNum, ".bmp");
+
+        printf("%s \n", fileWithExtension);
+
         SDL_Texture *tex = make_texture(renderer, fileWithExtension);
         (*textures)[i] = tex;
+
+        free(fileWithNum);
+        free(fileWithExtension);
     }
 }
