@@ -543,10 +543,8 @@ void init() { // #INIT
 
     wallTexture = make_texture(renderer, "Textures/wall.bmp");
 
-    printf("Making wall frames \n");
     wallFrames = malloc(sizeof(SDL_Texture *) * 17);
     getTextureFiles("Textures/WallAnim/wallAnim", 17, &wallFrames);
-    printf("Made wall frames \n");
 
     crosshair = make_texture(renderer, "Textures/crosshair.bmp");
 
@@ -562,7 +560,6 @@ void init() { // #INIT
     leftHandSprite->animations[1] = createAnimation(5);
     leftHandSprite->animations[1]->frames = malloc(sizeof(SDL_Texture *) * 5);
     getTextureFiles("Textures/rightHandAnim/rightHandAnim", 5, &leftHandSprite->animations[1]->frames);
-    printf("Made hand frames \n");
     leftHandSprite->animations[1]->fps = 10;
 
     leftHandSprite->animations[1]->loop = false;
@@ -570,7 +567,6 @@ void init() { // #INIT
 
     shootHitEffectFrames = malloc(sizeof(SDL_Texture *) * 5);
     getTextureFiles("Textures/ShootEffectAnim/shootHitEffect", 5, &shootHitEffectFrames);
-    printf("Made shoot frames \n");
 
     // int x, y;
     // SDL_QueryTexture(floorTexture, NULL, NULL, &x, &y);
