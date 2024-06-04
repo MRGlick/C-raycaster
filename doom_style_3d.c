@@ -1799,14 +1799,11 @@ void add_game_object(void *val, int type) {
             break;
     }
 
-    printf("Added game object. Length: %d \n", gameobjects->length);
-
 }
 
 // Frees and removes the game object.
 void remove_game_object(void *val, int type) {
     arraylist_remove(gameobjects, arraylist_find(gameobjects, val));
-    printf("Removed game object. Length: %d \n", gameobjects->length);
     freeObject(val, type);
 }
 
@@ -2090,11 +2087,6 @@ void playerShoot() {
         return;
     }
 
-    // if (shootData == NULL) {
-    //     printf("shoot data was null \n");
-    //     return;
-    // }
-
 
     
     
@@ -2370,7 +2362,6 @@ CollisionData getCircleTileCollision(CircleCollider circle, v2 tilePos) {
     v2 toClamped = v2_sub(clampedPos, circle.pos);
     double dist = v2_length(toClamped);
     if (dist == 0) {
-        //printf("Dist is 0 \n");
         return result;
     }
     double overlap = circle.radius - dist;
@@ -2404,18 +2395,13 @@ CollisionData getCircleTileMapCollision(CircleCollider circle) {
     gridCheckEnd.x = (int)((circle.pos.x + circle.radius) / tileSize) + 2; //+ 2 to account for rounding up
     gridCheckEnd.y = (int)((circle.pos.y + circle.radius) / tileSize) + 2;
 
-    //printf("Grid check start: (%.2f, %.2f), end: (%.2f, %.2f) \n", gridCheckStart.x, gridCheckStart.y, gridCheckEnd.x, gridCheckEnd.y);
-
     v2 gridCheckSize = v2_sub(gridCheckEnd, gridCheckStart);
-
-    //printf("Grid check size: (%.2f, %.2f) \n", gridCheckSize.x, gridCheckSize.y);
 
     for (int row = gridCheckStart.y; row < gridCheckEnd.y; row++) {
         for (int col = gridCheckStart.x; col < gridCheckEnd.x; col++) {
             if (!in_range(row, 0, TILEMAP_HEIGHT - 1) || !in_range(col, 0, TILEMAP_WIDTH - 1)) continue;
             if (levelTileMap[row][col] == -1) continue;
             CollisionData data = getCircleTileCollision(circle, (v2){col * tileSize, row * tileSize});
-            //printf("Tile pos: %d, %d \n", col, row);
             if (data.didCollide) {
                 result.didCollide = true;
                 result.offset = v2_add(result.offset, data.offset);
