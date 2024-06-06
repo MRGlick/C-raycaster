@@ -220,6 +220,8 @@ typedef struct CollisionData {
 
 // #FUNCTIONS
 
+void drawSkybox();
+
 void update_entity_collisions(void *val, int type);
 
 void init_tilemap(int ***gridPtr, int cols, int rows);
@@ -339,10 +341,7 @@ double startFov = 80;
 double fov = 80;
 double printCooldownTimer = 0.05;
 const char *font = "font.ttf";
-const SDL_Color floorColor = {50, 50, 50, 255};
-const SDL_Color skyColor = {0, 0, 0, 255};
 const SDL_Color fogColor = {0, 0, 0, 255};
-
 
 TextureData *floorTexture;
 TextureData *floorTexture2;
@@ -368,6 +367,7 @@ double realFps;
 
 SDL_Texture **wallFrames;
 SDL_Texture **shootHitEffectFrames;
+SDL_Texture *skybox_texture;
 
 bool isCameraShaking = false;
 int cameraShakeTicks;
@@ -511,9 +511,11 @@ Enemy *createEnemy(v2 pos) {
 
 void init() { // #INIT
 
+    init_cd_print();
 
     floorAndCeiling = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, RESOLUTION_X, RESOLUTION_Y);
-    
+    SDL_SetTextureBlendMode(floorAndCeiling, SDL_BLENDMODE_BLEND);
+
     floorTexture = TextureData_fromBMP("Textures/floor.bmp");
     floorTexture2 = TextureData_fromBMP("Textures/floor2.bmp");
     ceilingTexture = TextureData_fromBMP("Textures/ceiling.bmp");
@@ -581,6 +583,10 @@ void init() { // #INIT
     } else {
         load_level("default_level.hclevel");
     }
+
+    skybox_texture = make_texture(renderer, "Textures/skybox.bmp");
+    
+
 
 } // #INIT END
 
@@ -863,14 +869,6 @@ void tick(u64 delta) {
 
     tanHalfFOV = tan(deg_to_rad(fov / 2));
 
-    if (!canPrint) {
-        printCooldownTimer -= deltaSec;
-        if (printCooldownTimer <= 0) {
-            canPrint = true;
-            printCooldownTimer = printCooldown;
-        } 
-    }
-
     if (lockMouse) {
         SDL_WarpMouseInWindow(window, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
     }
@@ -1106,7 +1104,7 @@ void calcFloorAndCeiling() {
             Pixel ceil_pixel;
 
             if (ceilingTile == -1) {
-                ceil_pixel = (Pixel){0, 0, 0, 1};
+                ceil_pixel = (Pixel){0, 0, 0, 0};
             } else {
 
                 ceil_pixel = TextureData_get_pixel(ceilingTex, loop_clamp(point.x, 0, 36), loop_clamp(point.y, 0, 36));
@@ -1129,6 +1127,8 @@ void calcFloorAndCeiling() {
 
 void drawFloorAndCeiling() {
 
+    drawSkybox();
+
     v2 offsets = (v2){cameraOffset.x, cameraOffset.y - player->height};
 
     SDL_Rect rect = {
@@ -1136,9 +1136,11 @@ void drawFloorAndCeiling() {
         offsets.y,
         WINDOW_WIDTH,
         WINDOW_HEIGHT
-    };
-
+    };  
+    
     SDL_RenderCopy(renderer, floorAndCeiling, NULL, &rect);
+
+    
 }
 
 
@@ -1455,6 +1457,24 @@ void renderHUD() {
 
 }
 
+void drawSkybox() {
+
+    SDL_Texture *tex = skybox_texture;
+
+    double x = loop_clamp(player->angle / 360 * WINDOW_WIDTH * 3.5, 0, WINDOW_WIDTH);
+
+    double yOffsets = -player->height;
+
+    SDL_Rect skybox_rect = {
+        -x,
+        yOffsets,
+        WINDOW_WIDTH * 2,
+        WINDOW_HEIGHT / 2
+    };
+
+    SDL_RenderCopy(renderer, tex, NULL, &skybox_rect);
+}
+
 void render(u64 delta) { // #RENDER
 
     char *newTitle = "FPS: ";
@@ -1471,10 +1491,6 @@ void render(u64 delta) { // #RENDER
     arraylist *renderList = getRenderList();
 
     
-    
-
-    SDL_SetRenderDrawColor(renderer, skyColor.r, skyColor.g, skyColor.b, 255);
-    SDL_RenderFillRect(renderer, NULL);
 
     calcFloorAndCeiling();
     drawFloorAndCeiling();
@@ -1957,7 +1973,7 @@ Sprite *createSprite(bool isAnimated, int animCount) {
     Sprite *sprite = malloc(sizeof(Sprite));
     sprite->isAnimated = isAnimated;
     sprite->texture = NULL;
-    sprite->currentAnimationIdx = -1;
+    sprite->currentAnimationIdx = 0;
     sprite->animCount = animCount;
     if (isAnimated) {
         sprite->animations = malloc(sizeof(Animation *) * animCount);

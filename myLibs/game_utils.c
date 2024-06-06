@@ -46,9 +46,13 @@ typedef struct Pixel {
     Uint8 r, g, b, a;
 } Pixel;
 
-bool canPrint = false;
+double last_print_time;
 const double DEG_TO_RAD = PI / 180;
 const double RAD_TO_DEG = 180 / PI;
+
+void init_cd_print() {
+    last_print_time = SDL_GetTicks64();
+}
 
 Pixel TextureData_get_pixel(TextureData *data, int x, int y) {
     int p = data->pixels[y * data->w + x];
@@ -175,9 +179,10 @@ v2 getTextureSize(SDL_Texture *texture) {
 }
 
 void cdPrint(bool activateCooldown, const char *text, ...) {
-    if (!canPrint) return;
-    if (activateCooldown) canPrint = false;
-    
+    u64 now  = SDL_GetTicks64();
+    if (mili_to_sec(now - last_print_time) < 0.1) return;
+    if (activateCooldown) last_print_time = now;
+
     va_list args;
     int done;
 
