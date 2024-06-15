@@ -9,8 +9,8 @@ SDL_Window *window;
 
 #define TPS 300
 #define FPS 300
-#define WINDOW_WIDTH 1080
-#define WINDOW_HEIGHT 720
+#define WINDOW_WIDTH 1024
+#define WINDOW_HEIGHT 540
 #define RESOLUTION_X 360
 #define RESOLUTION_Y 180
 #define X_SENSITIVITY 0.1
@@ -337,8 +337,8 @@ bool renderLight = false;
 bool isLMouseDown = false;
 
 const double printCooldown = 0.05;
-double startFov = 80;
-double fov = 80;
+double startFov = 70;
+double fov = 70;
 double printCooldownTimer = 0.05;
 const char *font = "font.ttf";
 const SDL_Color fogColor = {0, 0, 0, 255};
@@ -346,11 +346,12 @@ const SDL_Color fogColor = {0, 0, 0, 255};
 TextureData *floorTexture;
 TextureData *floorTexture2;
 TextureData *ceilingTexture;
-SDL_Texture *floorAndCeiling;
 
+SDL_Texture *floorAndCeiling;
 SDL_Texture *wallTexture;
 SDL_Texture *entityTexture;
 SDL_Texture *crosshair;
+SDL_Texture *fenceTexture;
 
 double tanHalfFOV;
 double tanHalfStartFOV;
@@ -486,7 +487,7 @@ Enemy *createEnemy(v2 pos) {
     enemy->dirSprite = createDirSprite(16);
     for (int i = 0; i < 16; i++) {
         char *baseFileName = "Textures/CubeEnemyAnim/CubeEnemy";
-        char num[getNumDigits(i + 1)];
+        char num[get_num_digits(i + 1)];
         sprintf(num, "%d", i + 1);
         char *fileWithNum = concat(baseFileName, num);
         char *fileWithExtension = concat(fileWithNum, ".bmp");
@@ -513,12 +514,15 @@ void init() { // #INIT
 
     init_cd_print();
 
+    fenceTexture = make_texture(renderer, "Textures/fence.bmp");
+    SDL_SetTextureBlendMode(fenceTexture, SDL_BLENDMODE_BLEND);
+
     floorAndCeiling = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, RESOLUTION_X, RESOLUTION_Y);
     SDL_SetTextureBlendMode(floorAndCeiling, SDL_BLENDMODE_BLEND);
 
-    floorTexture = TextureData_fromBMP("Textures/floor.bmp");
-    floorTexture2 = TextureData_fromBMP("Textures/floor2.bmp");
-    ceilingTexture = TextureData_fromBMP("Textures/ceiling.bmp");
+    floorTexture = TextureData_from_bmp("Textures/floor.bmp");
+    floorTexture2 = TextureData_from_bmp("Textures/floor2.bmp");
+    ceilingTexture = TextureData_from_bmp("Textures/ceiling.bmp");
 
     player = init_player((v2){0, 0});
 
@@ -586,7 +590,8 @@ void init() { // #INIT
 
     skybox_texture = make_texture(renderer, "Textures/skybox.bmp");
     
-
+    SDL_RenderSetLogicalSize(renderer, WINDOW_WIDTH, WINDOW_HEIGHT);
+    SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
 
 } // #INIT END
 
@@ -1158,7 +1163,7 @@ void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height) {
 
     double dist = v2_distance(pos, player->pos);
 
-    v2 textureSize = getTextureSize(texture);
+    v2 textureSize = get_texture_size(texture);
 
     //WALL_HEIGHT * WINDOW_HEIGHT/dist * 80/fov;
     double fovFactor = tanHalfStartFOV/tanHalfFOV;
@@ -1289,7 +1294,7 @@ arraylist *getRenderList() {
         sortObjects[i] = sObj;
     }
 
-    SortObject *sorted = mergeSort(sortObjects, RESOLUTION_X);
+    SortObject *sorted = merge_sort(sortObjects, RESOLUTION_X);
     for (int i = RESOLUTION_X - 1; i >= 0; i--) {
         arraylist_add(renderList, sorted[i].val, RENDER_OBJECT);
     }
@@ -1377,7 +1382,7 @@ void renderWallStripe(WallStripe *stripe) {
     };
 
     SDL_Texture *texture = stripe->texture;
-    v2 textureSize = getTextureSize(texture);
+    v2 textureSize = get_texture_size(texture);
 
     SDL_Rect srcRect = {
         (int)loop_clamp(stripe->collIdx * stripe->wallWidth, 0, textureSize.x),
@@ -1391,7 +1396,7 @@ void renderWallStripe(WallStripe *stripe) {
     SDL_Rect dstRect = {
         stripe->i * WINDOW_WIDTH/RESOLUTION_X + cameraOffset.x,
         WINDOW_HEIGHT / 2 - stripe->size / 2 - player->height + cameraOffset.y,
-        WINDOW_WIDTH/RESOLUTION_X,
+        WINDOW_WIDTH/RESOLUTION_X + 1,
         stripe->size
     };
 
@@ -1477,9 +1482,12 @@ void drawSkybox() {
 
 void render(u64 delta) { // #RENDER
 
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderClear(renderer);
+
     char *newTitle = "FPS: ";
     char *fps = malloc(4);
-    decimalToText(realFps, fps);
+    decimal_to_text(realFps, fps);
 
 
     SDL_SetWindowTitle(window, concat(newTitle, fps));
@@ -2451,7 +2459,7 @@ bool isValidLevel(char *file) {
 // Takes a file name with no extension and assumes it's a bmp
 void getTextureFiles(char *fileName, int fileCount, SDL_Texture ***textures) {
 
-    int charCount = getNumDigits(fileCount);
+    int charCount = get_num_digits(fileCount);
 
     for (int i = 0; i < fileCount; i++) {
         char num[charCount + 10];

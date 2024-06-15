@@ -2,6 +2,7 @@
     "files.associations": {
         "random": "c",
         "functional": "c",
-        "genz.h": "c"
+        "genz.h": "c",
+        "vector": "c"
     }
 }

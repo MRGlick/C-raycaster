@@ -23,11 +23,11 @@
 #define max(a, b) a > b ? a : b
 
 #define init_grid(type, rows, cols, default, result) do { \
-    *result = malloc(sizeof(type *) * rows); \
+    result = malloc(sizeof(type *) * rows); \
     for (int i = 0; i < rows; i++) { \
-        (*result)[i] = malloc(sizeof(type) * cols); \
+        result[i] = malloc(sizeof(type) * cols); \
         for (int j = 0; j < cols; j++) { \
-            (*result)[i][j] = default; \
+            result[i][j] = default; \
         } \
     } \
 } while (0)
@@ -67,7 +67,7 @@ Pixel TextureData_get_pixel(TextureData *data, int x, int y) {
     return (Pixel){r, g, b, a};
 }
 
-TextureData *TextureData_fromBMP(char *bmp_file) {
+TextureData *TextureData_from_bmp(char *bmp_file) {
     SDL_Surface* surface = SDL_LoadBMP(bmp_file);
     if (!surface) {
         fprintf(stderr, "SDL_LoadBMP Error: %s\n", SDL_GetError());
@@ -85,12 +85,12 @@ TextureData *TextureData_fromBMP(char *bmp_file) {
 
     // Access pixel data from the surface
     int pitch = surface->pitch;
-    Uint32* pixelData = (Uint32*)surface->pixels;
+    Uint32* pixel_data = (Uint32*)surface->pixels;
     SDL_PixelFormat* format = surface->format;
 
     for (int y = 0; y < surface->h; ++y) {
         for (int x = 0; x < surface->w; ++x) {
-            Uint32 pixel = pixelData[y * (pitch / 4) + x]; // pitch is in bytes, divide by 4 for Uint32
+            Uint32 pixel = pixel_data[y * (pitch / 4) + x]; // pitch is in bytes, divide by 4 for Uint32
             Uint8 r, g, b, a;
             SDL_GetRGBA(pixel, format, &r, &g, &b, &a);
             pixels[y * surface->w + x] = (r << 24) | (g << 16) | (b << 8) | a; // 0xRRGGBBAA
@@ -155,7 +155,7 @@ SDL_Texture *make_texture(SDL_Renderer *renderer, char *bmp_file) {
     return texture;
 }
 
-void decimalToText(double decimal, char *buf) {
+void decimal_to_text(double decimal, char *buf) {
     gcvt(decimal, 4, buf);
 }
 
@@ -167,21 +167,17 @@ double loop_clamp(double num, double min, double max) {
     return result;
 }
 
-// SDL_Texture *make_text_texture(SDL_Renderer *renderer, char *text) {
-//     SDL_Surface surface = TTF_
-// }
-
-v2 getTextureSize(SDL_Texture *texture) {
+v2 get_texture_size(SDL_Texture *texture) {
     int x, y;
     SDL_QueryTexture(texture, NULL, NULL, &x, &y);
 
     return (v2){x, y};
 }
 
-void cdPrint(bool activateCooldown, const char *text, ...) {
+void cd_print(bool activate_cooldown, const char *text, ...) {
     u64 now  = SDL_GetTicks64();
     if (mili_to_sec(now - last_print_time) < 0.1) return;
-    if (activateCooldown) last_print_time = now;
+    if (activate_cooldown) last_print_time = now;
 
     va_list args;
     int done;
@@ -204,17 +200,12 @@ double lerp(double a, double b, double w) {
     return a + (b - a) * w;
 }
 
-// check how far 'mid' is along a and b
 double inverse_lerp(double a, double b, double mid) {
-    // mid = a + (b - a) * w
-    // solve for w
-    // mid - a = (b - a) * w
-    // w = (mid - a)/(b - a)
     return (mid - a) / (b - a);
 }
 
-bool isPointInRect(v2 point, v2 rectPos, v2 rectSize) {
-    return (in_range(point.x, rectPos.x, rectPos.x + rectSize.x) && in_range(point.y, rectPos.y, rectPos.y + rectSize.y));
+bool is_point_in_rect(v2 point, v2 rect_pos, v2 rect_size) {
+    return (in_range(point.x, rect_pos.x, rect_pos.x + rect_size.x) && in_range(point.y, rect_pos.y, rect_pos.y + rect_size.y));
 }
 
 
@@ -223,44 +214,44 @@ bool isPointInRect(v2 point, v2 rectPos, v2 rectSize) {
 // Merges the arrays in a sorted fashion
 SortObject *merge(SortObject *arr1, SortObject *arr2, int l1, int l2) {
     SortObject *res = malloc(sizeof(SortObject) * (l1 + l2));
-    int arr1Idx = 0;
-    int arr2Idx = 0;
+    int i1 = 0;
+    int i2 = 0;
     int i = 0;
-    while (arr1Idx < l1 && arr2Idx < l2) {
-        if (arr1[arr1Idx].num < arr2[arr2Idx].num) {
-            res[i] = arr1[arr1Idx];
-            arr1Idx++;
+    while (i1 < l1 && i2 < l2) {
+        if (arr1[i1].num < arr2[i2].num) {
+            res[i] = arr1[i1];
+            i1++;
         } else {
-            res[i] = arr2[arr2Idx];
-            arr2Idx++;
+            res[i] = arr2[i2];
+            i2++;
         }
         i++;
     }
-    while (arr1Idx < l1) {
-        res[i] = arr1[arr1Idx];
-        arr1Idx++;
+    while (i1 < l1) {
+        res[i] = arr1[i1];
+        i1++;
         i++;
     }
-    while (arr2Idx < l2) {
-        res[i] = arr2[arr2Idx];
-        arr2Idx++;
+    while (i2 < l2) {
+        res[i] = arr2[i2];
+        i2++;
         i++;
     }
 
     return res;
 }
 
-SortObject *mergeSort(SortObject arr[], int arrlen) {
-    if (arrlen == 1) {
+SortObject *merge_sort(SortObject arr[], int len) {
+    if (len == 1) {
         SortObject *res = malloc(sizeof(SortObject));
         res[0] = arr[0];
         return res;
     }
-    int l1 = arrlen / 2;
-    int l2 = arrlen % 2 == 0 ? arrlen / 2 : arrlen / 2 + 1;
+    int l1 = len / 2;
+    int l2 = len % 2 == 0 ? len / 2 : len / 2 + 1;
     SortObject a1[l1];
     SortObject a2[l2];
-    for (int i = 0; i < arrlen; i++) {
+    for (int i = 0; i < len; i++) {
         if (i < l1) {
             a1[i] = arr[i];
         } else {
@@ -268,8 +259,8 @@ SortObject *mergeSort(SortObject arr[], int arrlen) {
         }
     }
 
-    SortObject *a = mergeSort(a1, l1);
-    SortObject *b = mergeSort(a2, l2);
+    SortObject *a = merge_sort(a1, l1);
+    SortObject *b = merge_sort(a2, l2);
     
     SortObject *sorted = merge(a, b, l1, l2);
 
@@ -280,7 +271,7 @@ SortObject *mergeSort(SortObject arr[], int arrlen) {
 
 }
 
-int getNumDigits(int num) {
+int get_num_digits(int num) {
     int res = 0;
     while (num > 0) {
         num /= 10;

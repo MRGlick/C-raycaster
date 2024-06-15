@@ -1,8 +1,5 @@
 #include "game_utils.c"
 #include "globals.h"
-#include <sys/stat.h>
-#include <unistd.h>
-#include <time.h>
 
 SDL_Renderer *renderer;
 SDL_Window *window;
@@ -33,7 +30,7 @@ typedef enum PlaceMode {
 //     enum Tiles type;
 // } Tile;
 
-v2 getMousePos(); 
+v2 get_mouse_pos(); 
 
 void tick(u64 delta);
 
@@ -41,9 +38,9 @@ void render(u64 delta);
 
 void handle_input(SDL_Event event);
 
-void placeObject(v2 pos);
+void place_object(v2 pos);
 
-void removeObject(v2 pos);
+void remove_object(v2 pos);
 
 void init();
 
@@ -51,25 +48,25 @@ void test();
 
 void save(SaveData data, char *file);
 
-void loadLevel(char *file);
+void load_level(char *file);
 
 SaveData load(char *file);
 
 void mouse_just_pressed(int button);
 
-Placeable getCurrentSelection();
+Placeable get_current_selection();
 
 bool running = true;
-int currentSelection;
-int **wallTileMap;
-int **floorTileMap;
-int **entityTilemap;
-int **ceilingTileMap;
-bool lMouseDown = false;
-bool rMouseDown = false;
-const int tileSize = WINDOW_WIDTH / TILEMAP_WIDTH;
-PlaceMode placeMode;
-char *levelFile;
+int current_selection;
+int **wall_tilemap;
+int **floor_tilemap;
+int **entity_tilemap;
+int **ceiling_tilemap;
+bool l_mouse_down = false;
+bool r_mouse_down = false;
+const int tile_size = WINDOW_WIDTH / TILEMAP_WIDTH;
+PlaceMode place_mode;
+char *level_file;
 LevelEditorEntity *player;
 
 int main(int argc, char **argv) {
@@ -93,7 +90,7 @@ int main(int argc, char **argv) {
     );
 
     if (argc >= 2) {
-        levelFile = argv[1];
+        level_file = argv[1];
     }
     init();
 
@@ -121,13 +118,13 @@ int main(int argc, char **argv) {
     }
 
     SaveData data;
-    data.wallTilemap = wallTileMap;
-    data.floorTilemap = floorTileMap;
-    data.ceilingTilemap = ceilingTileMap;
-    data.entityTilemap = entityTilemap;
+    data.wallTilemap = wall_tilemap;
+    data.floorTilemap = floor_tilemap;
+    data.ceilingTilemap = ceiling_tilemap;
+    data.entityTilemap = entity_tilemap;
     
 
-    save(data, levelFile);
+    save(data, level_file);
 
     SDL_DestroyRenderer(renderer);
 
@@ -137,12 +134,12 @@ int main(int argc, char **argv) {
 }
 
 void init() {
-    init_grid(int, TILEMAP_HEIGHT, TILEMAP_WIDTH, -1, &wallTileMap);
-    init_grid(int, TILEMAP_HEIGHT, TILEMAP_WIDTH, -1, &floorTileMap);
-    init_grid(int, TILEMAP_HEIGHT, TILEMAP_WIDTH, -1, &ceilingTileMap);
-    init_grid(int, TILEMAP_HEIGHT, TILEMAP_WIDTH, -1, &entityTilemap);
+    init_grid(int, TILEMAP_HEIGHT, TILEMAP_WIDTH, -1, wall_tilemap);
+    init_grid(int, TILEMAP_HEIGHT, TILEMAP_WIDTH, -1, floor_tilemap);
+    init_grid(int, TILEMAP_HEIGHT, TILEMAP_WIDTH, -1, ceiling_tilemap);
+    init_grid(int, TILEMAP_HEIGHT, TILEMAP_WIDTH, -1, entity_tilemap);
 
-    placeMode = PLACEMODE_CEILING;
+    place_mode = PLACEMODE_CEILING;
 
     player = malloc(sizeof(LevelEditorEntity));
     player->pos = (v2){WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2};
@@ -151,53 +148,53 @@ void init() {
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
 
-    loadLevel(levelFile);
+    load_level(level_file);
 
 }
 // _______
 // | | | |
 
-void printTileMap() {
+void print_tilemap() {
     for (int i = 0; i < TILEMAP_HEIGHT; i++) {
         for (int j = 0; j < TILEMAP_WIDTH; j++) {
-            printf("%d ", wallTileMap[i][j]);
+            printf("%d ", wall_tilemap[i][j]);
         }
         printf("\n");
     }
 }
 
-void removePlayer() {
+void remove_player() {
     for (int i = 0; i < TILEMAP_WIDTH; i++) {
         for (int j = 0; j < TILEMAP_HEIGHT; j++) {
-            if (entityTilemap[j][i] == (int)P_PLAYER) {
-                entityTilemap[j][i] = -1;
+            if (entity_tilemap[j][i] == (int)P_PLAYER) {
+                entity_tilemap[j][i] = -1;
                 return;
             }
         }
     }
 }
 
-void placeObject(v2 pos) {
-    v2 tileMapPos = v2_floor(v2_div(pos, to_vec(tileSize)));
+void place_object(v2 pos) {
+    v2 tileMapPos = v2_floor(v2_div(pos, to_vec(tile_size)));
     int x = tileMapPos.x;
     int y = tileMapPos.y;
 
-    switch (getCurrentSelection()) {
+    switch (get_current_selection()) {
         case (int)P_WALL:
-            wallTileMap[y][x] = P_WALL;
+            wall_tilemap[y][x] = P_WALL;
             break;
         case (int)P_CEILING:
-            ceilingTileMap[y][x] = P_CEILING;
+            ceiling_tilemap[y][x] = P_CEILING;
             break;
         case (int)P_FLOOR:
-            floorTileMap[y][x] = P_FLOOR;
+            floor_tilemap[y][x] = P_FLOOR;
             break;
         case (int)P_PLAYER:
-            removePlayer();
-            entityTilemap[y][x] = P_PLAYER;
+            remove_player();
+            entity_tilemap[y][x] = P_PLAYER;
             break;
         case (int)P_SHOOTER: ;
-            entityTilemap[y][x] = P_SHOOTER;
+            entity_tilemap[y][x] = P_SHOOTER;
             break;
     }
 }
@@ -218,23 +215,23 @@ void placeObject(v2 pos) {
 //     }
 // }
 
-void removeObject(v2 pos) {
-    v2 tileMapPos = v2_floor(v2_div(pos, to_vec(tileSize)));
+void remove_object(v2 pos) {
+    v2 tileMapPos = v2_floor(v2_div(pos, to_vec(tile_size)));
     int x = tileMapPos.x;
     int y = tileMapPos.y;
 
-    switch (placeMode) {
+    switch (place_mode) {
         case PLACEMODE_ENTITY:
-            entityTilemap[y][x] = -1;
+            entity_tilemap[y][x] = -1;
             break;
         case PLACEMODE_WALL:
-            wallTileMap[y][x] = -1;
+            wall_tilemap[y][x] = -1;
             break;
         case PLACEMODE_CEILING:
-            ceilingTileMap[y][x] = -1;
+            ceiling_tilemap[y][x] = -1;
             break;
         case PLACEMODE_FLOOR:
-            floorTileMap[y][x] = -1;
+            floor_tilemap[y][x] = -1;
             break;
     }
     
@@ -244,29 +241,29 @@ void removeObject(v2 pos) {
 void key_pressed(SDL_Keycode key) {
     switch (key) {
         case SDLK_1:
-            currentSelection = 0;
+            current_selection = 0;
             break;
         case SDLK_2:
-            currentSelection = 1;
+            current_selection = 1;
             break;
         case SDLK_3:
-            currentSelection = 2;
+            current_selection = 2;
             break;
         case SDLK_f:
-            currentSelection = 0;
-            placeMode = PLACEMODE_FLOOR;
+            current_selection = 0;
+            place_mode = PLACEMODE_FLOOR;
             break;
         case SDLK_c:
-            currentSelection = 0;
-            placeMode = PLACEMODE_CEILING;
+            current_selection = 0;
+            place_mode = PLACEMODE_CEILING;
             break;
         case SDLK_e:
-            currentSelection = 0;
-            placeMode = PLACEMODE_ENTITY;
+            current_selection = 0;
+            place_mode = PLACEMODE_ENTITY;
             break;
         case SDLK_w:
-            currentSelection = 0;
-            placeMode = PLACEMODE_WALL;
+            current_selection = 0;
+            place_mode = PLACEMODE_WALL;
             break;
         case SDLK_F8:
             running = false;
@@ -277,24 +274,24 @@ void key_pressed(SDL_Keycode key) {
 void mouse_down(int button) {
     mouse_just_pressed(button);
     if (button == SDL_BUTTON_LEFT) {
-        lMouseDown = true;
+        l_mouse_down = true;
         
     } else if (button == SDL_BUTTON_RIGHT) {
-        rMouseDown = true;
+        r_mouse_down = true;
     }
 }
 
 void mouse_just_pressed(int button) {
-    if (button == SDL_BUTTON_LEFT && placeMode == PLACEMODE_ENTITY) {
-        placeObject(getMousePos());
+    if (button == SDL_BUTTON_LEFT && place_mode == PLACEMODE_ENTITY) {
+        place_object(get_mouse_pos());
     }
 }
 
 void mouse_up(int button) {
     if (button == SDL_BUTTON_LEFT) {
-        lMouseDown = false;
+        l_mouse_down = false;
     } else if (button == SDL_BUTTON_RIGHT) {
-        rMouseDown = false;
+        r_mouse_down = false;
     }
 }
 
@@ -317,10 +314,10 @@ void handle_input(SDL_Event event) {
 
 }
 
-Placeable getCurrentSelection() {
-    switch (placeMode) {
+Placeable get_current_selection() {
+    switch (place_mode) {
         case PLACEMODE_WALL:
-            switch(currentSelection) {
+            switch(current_selection) {
                 case 0:
                     return P_WALL;
                     break;
@@ -330,7 +327,7 @@ Placeable getCurrentSelection() {
             }
             break;
         case PLACEMODE_ENTITY:
-            switch(currentSelection) {
+            switch(current_selection) {
                 case 0:
                     return P_PLAYER;
                     break;
@@ -343,7 +340,7 @@ Placeable getCurrentSelection() {
             }
             break;
         case PLACEMODE_FLOOR:
-            switch(currentSelection) {
+            switch(current_selection) {
                 case 0:
                     return P_FLOOR;
                     break;
@@ -353,7 +350,7 @@ Placeable getCurrentSelection() {
             }
             break;
         case PLACEMODE_CEILING:
-            switch(currentSelection) {
+            switch(current_selection) {
                 case 0:
                     return P_CEILING;
                     break;
@@ -365,7 +362,7 @@ Placeable getCurrentSelection() {
     }
 }
 
-char *getCurrentSelectionString() {
+char *get_current_selection_string() {
 
     //     IDK = -1,
     // WALL,
@@ -374,7 +371,7 @@ char *getCurrentSelectionString() {
     // FLOOR,
     // CEILING
 
-    switch (getCurrentSelection()) {
+    switch (get_current_selection()) {
         case P_PLAYER:
             return "Current selection: Player";
             break;
@@ -399,23 +396,23 @@ char *getCurrentSelectionString() {
     }
 }
 
-v2 getMousePos() {
+v2 get_mouse_pos() {
     int x, y;
     SDL_GetMouseState(&x, &y);
     return (v2){x, y};
 }
 
 void tick(u64 delta) {
-    if (lMouseDown && placeMode != PLACEMODE_ENTITY) {
-        placeObject(getMousePos());
-    } else if (rMouseDown) {
-        removeObject(getMousePos());
+    if (l_mouse_down && place_mode != PLACEMODE_ENTITY) {
+        place_object(get_mouse_pos());
+    } else if (r_mouse_down) {
+        remove_object(get_mouse_pos());
     }
 
     char *title;
     char *placemode;
 
-    switch (placeMode) {
+    switch (place_mode) {
         case PLACEMODE_FLOOR:
             placemode = "Place mode: FLOOR";
             break;
@@ -433,13 +430,13 @@ void tick(u64 delta) {
             break;
     }
 
-    char *currentTileText = getCurrentSelectionString();
+    char *currentTileText = get_current_selection_string();
     title = concat(concat(currentTileText, "  "), placemode);
 
     SDL_SetWindowTitle(window, title);
 }
 
-void drawPlayer() {
+void draw_player() {
     SDL_Rect rect = {
         player->pos.x - 10,
         player->pos.y - 10,
@@ -452,9 +449,9 @@ void drawPlayer() {
     SDL_RenderFillRect(renderer, &rect);
 }
 
-void drawEntity(v2 pos, EntityID id) {
+void draw_entity(v2 pos, EntityID id) {
 
-    int opacity = placeMode == PLACEMODE_ENTITY ? 255 : 30;
+    int opacity = place_mode == PLACEMODE_ENTITY ? 255 : 30;
 
     SDL_Rect rect = {
         pos.x - 10,
@@ -475,8 +472,8 @@ void drawEntity(v2 pos, EntityID id) {
     SDL_RenderFillRect(renderer, &rect);
 }
 
-void drawGridLines() {
-    switch (placeMode) {
+void draw_gridlines() {
+    switch (place_mode) {
         case (int)PLACEMODE_FLOOR:
             SDL_SetRenderDrawColor(renderer, 200, 100, 0, 255);
             break;
@@ -492,44 +489,44 @@ void drawGridLines() {
     }
 
     for (int i = 0; i < TILEMAP_WIDTH; i++) {
-        SDL_RenderDrawLine(renderer, i * tileSize, 0, i * tileSize, WINDOW_HEIGHT);
+        SDL_RenderDrawLine(renderer, i * tile_size, 0, i * tile_size, WINDOW_HEIGHT);
     }
     for (int i = 0; i < TILEMAP_HEIGHT; i++) {
-        SDL_RenderDrawLine(renderer, 0, i * tileSize, WINDOW_WIDTH, i * tileSize);        
+        SDL_RenderDrawLine(renderer, 0, i * tile_size, WINDOW_WIDTH, i * tile_size);        
     }
 }
 
 
-void setColorByType(Placeable type) {
+void set_color_by_type(Placeable type) {
     int opacity = 30;
     switch (type) {
         case P_WALL:
-            if (placeMode == PLACEMODE_WALL) {
+            if (place_mode == PLACEMODE_WALL) {
                 opacity = 255;
             }
             SDL_SetRenderDrawColor(renderer, 255, 255, 255, opacity);
             
             break;
         case P_PLAYER:
-            if (placeMode == PLACEMODE_ENTITY) {
+            if (place_mode == PLACEMODE_ENTITY) {
                 opacity = 255;
             }
             SDL_SetRenderDrawColor(renderer, 255, 0, 0, opacity);
             break;
         case P_SHOOTER:
-            if (placeMode == PLACEMODE_ENTITY) {
+            if (place_mode == PLACEMODE_ENTITY) {
                 opacity = 255;
             }
             SDL_SetRenderDrawColor(renderer, 20, 120, 20, opacity);
             break;
         case P_FLOOR:
-            if (placeMode == PLACEMODE_FLOOR) {
+            if (place_mode == PLACEMODE_FLOOR) {
                 opacity = 255;
             }
             SDL_SetRenderDrawColor(renderer, 200, 100, 0, opacity);
             break;
         case P_CEILING:
-            if (placeMode == PLACEMODE_CEILING) {
+            if (place_mode == PLACEMODE_CEILING) {
                 opacity = 255;
             }
             SDL_SetRenderDrawColor(renderer, 200, 200, 200, opacity);
@@ -544,29 +541,29 @@ void draw() {
     for (int x = 0; x < TILEMAP_WIDTH; x++) {
         for (int y = 0; y < TILEMAP_HEIGHT; y++) {
             SDL_Rect rect = {
-                x * tileSize,
-                y * tileSize,
-                tileSize,
-                tileSize
+                x * tile_size,
+                y * tile_size,
+                tile_size,
+                tile_size
             };
 
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
 
 
 
-            setColorByType(floorTileMap[y][x]);
+            set_color_by_type(floor_tilemap[y][x]);
 
             SDL_RenderFillRect(renderer, &rect);
 
-            setColorByType(wallTileMap[y][x]);
+            set_color_by_type(wall_tilemap[y][x]);
 
             SDL_RenderFillRect(renderer, &rect);
 
-            setColorByType(entityTilemap[y][x]);
+            set_color_by_type(entity_tilemap[y][x]);
 
             SDL_RenderFillRect(renderer, &rect);
 
-            setColorByType(ceilingTileMap[y][x]);
+            set_color_by_type(ceiling_tilemap[y][x]);
 
             SDL_RenderFillRect(renderer, &rect);
 
@@ -576,7 +573,7 @@ void draw() {
         }
     }
 
-    drawGridLines();
+    draw_gridlines();
 
 }
 
@@ -598,7 +595,7 @@ void render(u64 delta) {
 
 
 void save(SaveData saveData, char *file) {
-    FILE *fh = fopen(levelFile, "w");
+    FILE *fh = fopen(level_file, "w");
     if (fh == NULL) {
         printf("Couldn't open file \n");    
     }
@@ -609,25 +606,25 @@ void save(SaveData saveData, char *file) {
 
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
-            data[idx++] = floorTileMap[r][c];
+            data[idx++] = floor_tilemap[r][c];
         }
     }
 
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
-            data[idx++] = wallTileMap[r][c];
+            data[idx++] = wall_tilemap[r][c];
         }
     }
 
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
-            data[idx++] = ceilingTileMap[r][c];
+            data[idx++] = ceiling_tilemap[r][c];
         }
     }
 
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
-            data[idx++] = entityTilemap[r][c];
+            data[idx++] = entity_tilemap[r][c];
         }
     }
 
@@ -637,8 +634,8 @@ void save(SaveData saveData, char *file) {
     fclose(fh);
 }
 
-void loadLevel(char *file) {
-    FILE *fh = fopen(levelFile, "r");
+void load_level(char *file) {
+    FILE *fh = fopen(level_file, "r");
     if (fh == NULL) {
         printf("File probably doesnt exist. \n");
         return;
@@ -654,25 +651,25 @@ void loadLevel(char *file) {
 
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
-            floorTileMap[r][c] = data[idx++];
+            floor_tilemap[r][c] = data[idx++];
         }
     }
 
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
-            wallTileMap[r][c] = data[idx++];
+            wall_tilemap[r][c] = data[idx++];
         }
     }
 
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
-            ceilingTileMap[r][c] = data[idx++];
+            ceiling_tilemap[r][c] = data[idx++];
         }
     }
 
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
-            entityTilemap[r][c] = data[idx++];
+            entity_tilemap[r][c] = data[idx++];
         }
     }
 
