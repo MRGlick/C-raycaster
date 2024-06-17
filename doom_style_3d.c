@@ -99,6 +99,7 @@ typedef struct Entity {
 typedef struct LightPoint {
     v2 pos;
     double strength;
+    double radius;
     SDL_Color color;
 } LightPoint;
 
@@ -179,6 +180,8 @@ typedef struct CollisionData {
 } CollisionData;
 
 // #FUNCTIONS
+
+BakedLightColor get_light_color_by_pos(v2 pos);
 
 void bake_lights();
 
@@ -522,10 +525,18 @@ void init() {  // #INIT
 
 	LightPoint *test_point = malloc(sizeof(LightPoint));
 	test_point->color = (SDL_Color){255, 200, 100};
-	test_point->strength = 100;
+	test_point->strength = 6;
+    test_point->radius = 200;
 	test_point->pos = player->pos;
 
+    LightPoint *test_point2 = malloc(sizeof(LightPoint));
+    test_point2->color = (SDL_Color){120, 180, 255};
+    test_point2->strength = 6;
+    test_point2->radius = 200;
+	test_point2->pos = v2_add(player->pos, (v2){0, -100});
+
 	add_game_object(test_point, LIGHT_POINT);
+    add_game_object(test_point2, LIGHT_POINT);
 
 	bake_lights();
 
@@ -809,9 +820,10 @@ void renderDebug() {  // #DEBUG
     for (int row = 0; row < TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION; row++) {
         for (int col = 0; col < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; col++) {
             BakedLightColor color = baked_light_grid[row][col];
-            SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255);
+            SDL_SetRenderDrawColor(renderer, clamp(125 * color.r, 0, 255), clamp(125 * color.g, 0, 255), clamp(125 * color.b, 0, 255), 255);
             double y = (double)row / BAKED_LIGHT_RESOLUTION * tileSize;
             double x = (double)col / BAKED_LIGHT_RESOLUTION * tileSize;
+            v2 px_size = v2_div((v2){WINDOW_WIDTH, WINDOW_HEIGHT}, to_vec(tileSize * BAKED_LIGHT_RESOLUTION)); 
             SDL_Rect rect = {
                 x,
                 y,
@@ -907,6 +919,7 @@ void calcFloorAndCeiling() {
             v2 point = v2_lerp(left, right, (double)col / RESOLUTION_X);
 
             double light = inverse_lerp(RESOLUTION_Y / 2, RESOLUTION_Y, row);
+            light /= 2;
 
             int color = light * 255;
 
@@ -947,19 +960,7 @@ void calcFloorAndCeiling() {
             floor_pixel.g *= light;
             floor_pixel.b *= light;
 
-			BakedLightColor baked_light_color;
-
-			double py = point.y / tileSize;
-			double px = point.x / tileSize;
-			if (in_range(px, 0, TILEMAP_WIDTH - 1) && in_range(py, 0, TILEMAP_HEIGHT - 1)) {
-				int baked_light_row = (int)(py * BAKED_LIGHT_RESOLUTION);
-				int baked_light_col = (int)(px * BAKED_LIGHT_RESOLUTION);
-				baked_light_color = baked_light_grid[baked_light_row][baked_light_col];
-			} else {
-				baked_light_color = (BakedLightColor){1, 1, 1};
-			}
-
-            cd_print(true, "baked_light_color r: %.2f \n", baked_light_color.r);
+			BakedLightColor baked_light_color = get_light_color_by_pos(point);
 
 			// baked lights
 			floor_pixel.r = clamp(floor_pixel.r * baked_light_color.r, 0, 255);
@@ -985,6 +986,10 @@ void calcFloorAndCeiling() {
                 ceil_pixel.r *= light;
                 ceil_pixel.g *= light;
                 ceil_pixel.b *= light;
+
+                ceil_pixel.r = clamp(ceil_pixel.r * baked_light_color.r, 0, 255);
+                ceil_pixel.g = clamp(ceil_pixel.g * baked_light_color.g, 0, 255);
+                ceil_pixel.b = clamp(ceil_pixel.b * baked_light_color.b, 0, 255);
             }
 
             int ceil_pixel_i = ceil_pixel.r << 24 | ceil_pixel.g << 16 | ceil_pixel.b << 8 | ceil_pixel.a;
@@ -1056,7 +1061,7 @@ typedef struct WallStripe {
     double size;
     int i;
     double brightness;  // a bunch of rendering bullshit:
-    v2 normal;
+    v2 pos, normal;
     double collIdx;
     double wallWidth;
 } WallStripe;
@@ -1087,6 +1092,7 @@ RenderObject *getWallStripe(int i) {
     stripe->normal = data->normal;
     stripe->collIdx = data->collIdx;
     stripe->wallWidth = data->wallWidth;
+    stripe->pos = data->collpos;
 
     RenderObject *currentRenderObj = malloc(sizeof(RenderObject));
     if (currentRenderObj == NULL) {
@@ -1207,12 +1213,6 @@ void renderWallStripe(WallStripe *stripe) {
 
     double angleLightModifier = sin(v2_get_angle(stripe->normal));
 
-    SDL_Color colorMode = {
-        clamp(200 + angleLightModifier * 80, 0, 255) * brightness,
-        clamp(200 + angleLightModifier * 80, 0, 255) * brightness,
-        clamp(200 + angleLightModifier * 80, 0, 255) * brightness,
-    };
-
     SDL_Texture *texture = stripe->texture;
     v2 textureSize = get_texture_size(texture);
 
@@ -1220,8 +1220,17 @@ void renderWallStripe(WallStripe *stripe) {
 
     SDL_Rect dstRect = {stripe->i * WINDOW_WIDTH / RESOLUTION_X + cameraOffset.x, WINDOW_HEIGHT / 2 - stripe->size / 2 - player->height + cameraOffset.y, WINDOW_WIDTH / RESOLUTION_X + 1,
                         stripe->size};
+    
 
-    SDL_SetTextureColorMod(texture, colorMode.r, colorMode.g, colorMode.b);
+    BakedLightColor baked_light_color = get_light_color_by_pos(v2_add(stripe->pos, v2_mul(stripe->normal, to_vec(0.5))));
+
+    // baked lights
+    
+    int r = clamp(125 * baked_light_color.r * brightness, 0, 255);
+    int g = clamp(125 * baked_light_color.g * brightness, 0, 255);
+    int b = clamp(125 * baked_light_color.b * brightness, 0, 255);
+
+    SDL_SetTextureColorMod(texture, r, g, b);
     SDL_RenderCopy(renderer, texture, &srcRect, &dstRect);
     free(stripe);
 }
@@ -1229,6 +1238,18 @@ void renderWallStripe(WallStripe *stripe) {
 void renderParticles(Particles *particles) {
     for (int i = 0; i < particles->particleAmount; i++) {
         renderEntity(particles->particles[i]->entity);
+    }
+}
+
+BakedLightColor get_light_color_by_pos(v2 pos) {
+    double py = pos.y / tileSize;
+    double px = pos.x / tileSize;
+    if (in_range(px, 0, TILEMAP_WIDTH - 1) && in_range(py, 0, TILEMAP_HEIGHT - 1)) {
+        int baked_light_row = (int)(py * BAKED_LIGHT_RESOLUTION);
+        int baked_light_col = (int)(px * BAKED_LIGHT_RESOLUTION);
+        return baked_light_grid[baked_light_row][baked_light_col];
+    } else {
+        return (BakedLightColor){1, 1, 1};
     }
 }
 
@@ -2238,23 +2259,29 @@ void bake_lights() {
 				LightPoint *point = current->val;
 
                 double dist_to_point = v2_distance(point->pos, current_pos);
+                
+                v2 tile_pos = v2_div(current_pos, to_vec(tileSize));
+
+
+                if (in_range(tile_pos.y, 0, TILEMAP_HEIGHT - 1) && in_range(tile_pos.x, 0, TILEMAP_WIDTH - 1) && levelTileMap[(int)tile_pos.y][(int)tile_pos.x] == P_WALL) {
+                    continue;
+                }
 
 				RayCollisionData *data = castRay(current_pos, v2_dir(current_pos, point->pos));
 				if (data == NULL) {
 					double s = 1 / dist_to_point;
-					col.r += 1;//s * point->strength * (double)point->color.r / 255;
+					col.r += s * point->strength * (double)point->color.r / 255;
 					col.g += s * point->strength * (double)point->color.g / 255;
 					col.b += s * point->strength * (double)point->color.b / 255;
-                    //cd_print(true, "Color r: %d \n", color.r);
 				} else {
                     v2 collpos = data->collpos;
                     double dist = v2_distance(collpos, current_pos);
-                    if (dist > dist_to_point) {
-                        double s = 1 / dist_to_point;
+                    if (dist >= dist_to_point) {
+                        double s = clamp(lerp(1, 0, dist_to_point / point->radius), 0, 1);
+                        s *= s * s; // cubic
                         col.r += s * point->strength * (double)point->color.r / 255;
                         col.g += s * point->strength * (double)point->color.g / 255;
                         col.b += s * point->strength * (double)point->color.b / 255;
-                        //cd_print(true, "Color r: %d \n", color.r);
                     }
                 }
             }
