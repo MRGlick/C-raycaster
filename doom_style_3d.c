@@ -491,11 +491,11 @@ void init() {  // #INIT
 
     leftHandSprite = createSprite(true, 2);
     leftHandSprite->animations[0] = create_animation(1);
-    leftHandSprite->animations[0]->frames[0] = make_texture(renderer, "Textures/rightHandAnim/rightHandAnim5.bmp");
-    leftHandSprite->animations[1] = create_animation(5);
-    leftHandSprite->animations[1]->frames = malloc(sizeof(SDL_Texture *) * 5);
-    getTextureFiles("Textures/rightHandAnim/rightHandAnim", 5, &leftHandSprite->animations[1]->frames);
-    leftHandSprite->animations[1]->fps = 10;
+    leftHandSprite->animations[0]->frames[0] = make_texture(renderer, "Textures/rightHandAnim/rightHandAnim6.bmp");
+    leftHandSprite->animations[1] = create_animation(6);
+    leftHandSprite->animations[1]->frames = malloc(sizeof(SDL_Texture *) * 6);
+    getTextureFiles("Textures/rightHandAnim/rightHandAnim", 6, &leftHandSprite->animations[1]->frames);
+    leftHandSprite->animations[1]->fps = 12;
 
     leftHandSprite->animations[1]->loop = false;
     spritePlayAnim(leftHandSprite, 0);
@@ -525,14 +525,14 @@ void init() {  // #INIT
 
 	LightPoint *test_point = malloc(sizeof(LightPoint));
 	test_point->color = (SDL_Color){255, 200, 100};
-	test_point->strength = 6;
-    test_point->radius = 200;
+	test_point->strength = 2;
+    test_point->radius = 400;
 	test_point->pos = player->pos;
 
     LightPoint *test_point2 = malloc(sizeof(LightPoint));
     test_point2->color = (SDL_Color){120, 180, 255};
-    test_point2->strength = 6;
-    test_point2->radius = 200;
+    test_point2->strength = 2;
+    test_point2->radius = 400;
 	test_point2->pos = v2_add(player->pos, (v2){0, -100});
 
 	add_game_object(test_point, LIGHT_POINT);
@@ -918,8 +918,13 @@ void calcFloorAndCeiling() {
 
             v2 point = v2_lerp(left, right, (double)col / RESOLUTION_X);
 
+            
             double light = inverse_lerp(RESOLUTION_Y / 2, RESOLUTION_Y, row);
-            light /= 2;
+            if (row < RESOLUTION_Y * 3/4) {
+                light = inverse_lerp(RESOLUTION_Y / 2, RESOLUTION_Y * 3/4, row) * 0.8;
+            } else {
+                light = 0.8;
+            }
 
             int color = light * 255;
 
@@ -1088,7 +1093,7 @@ RenderObject *getWallStripe(int i) {
 
     stripe->size = finalSize;
     wallHeights[i] = finalSize;
-    stripe->brightness = distance_to_color(collDist, 0.01);
+    stripe->brightness = collDist > 150? distance_to_color(collDist - 150, 0.01) : 1;
     stripe->normal = data->normal;
     stripe->collIdx = data->collIdx;
     stripe->wallWidth = data->wallWidth;
@@ -1254,22 +1259,40 @@ BakedLightColor get_light_color_by_pos(v2 pos) {
 }
 
 void renderHUD() {
-    SDL_Rect leftHandRect = {player->handOffset.x + cameraOffset.x, player->handOffset.y + cameraOffset.y, WINDOW_WIDTH, WINDOW_HEIGHT};
+    SDL_Rect leftHandRect = {player->handOffset.x + cameraOffset.x, player->handOffset.y + cameraOffset.y, 76 * 7, 91 * 7};
+
+    leftHandRect.x += WINDOW_WIDTH * 3/5 - 40;
+    leftHandRect.y -= 20;
+
+    BakedLightColor baked_light_color;
+
+    Animation *current_anim = leftHandSprite->animations[leftHandSprite->currentAnimationIdx];
+    int current_anim_idx = leftHandSprite->currentAnimationIdx;
+
+    bool first_check = current_anim_idx == 0;
+    bool second_check = current_anim_idx == 1 && current_anim->frame > 1;
+    if (first_check || second_check) {
+        baked_light_color = get_light_color_by_pos(player->pos);
+        baked_light_color.r = 0.5 + baked_light_color.r * 0.5;
+        baked_light_color.g = 0.5 + baked_light_color.g * 0.5;
+        baked_light_color.b = 0.5 + baked_light_color.b * 0.5;
+    } else {
+        baked_light_color.r = 2;
+        baked_light_color.g = 1.8;
+        baked_light_color.b = 1.5;
+    }
+
 
     SDL_Texture *texture = getSpriteCurrentTexture(leftHandSprite);
+    
 
     if (texture == NULL) {
         return;
     }
-
-    double redness = pow(0.5, (int)(max(player->shootChargeTimer, player->pendingShots) * 3));  // 0.5 0.25 0.125 0.075
-    if (redness == 1)
-        redness = 0;
-    else
-        redness = (0.5 - redness) * 2;
-    Uint8 redness8 = redness * 255;
-
-    SDL_SetTextureColorMod(texture, 255, 255 - redness8, 255 - redness8);
+    int r = clamp(baked_light_color.r * 125, 0, 255);
+    int g = clamp(baked_light_color.g * 125, 0, 255);
+    int b = clamp(baked_light_color.b * 125, 0, 255);
+    SDL_SetTextureColorMod(texture, r, g, b);
     SDL_RenderCopy(renderer, texture, NULL, &leftHandRect);
 
     SDL_Rect crosshairRect = {WINDOW_WIDTH / 2 - 8, WINDOW_HEIGHT / 2 - 8, 16, 16};
