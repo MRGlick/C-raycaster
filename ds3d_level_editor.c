@@ -179,22 +179,21 @@ void place_object(v2 pos) {
     int x = tileMapPos.x;
     int y = tileMapPos.y;
 
-    switch (get_current_selection()) {
-        case (int)P_WALL:
-            wall_tilemap[y][x] = P_WALL;
+    Placeable s = get_current_selection();
+
+    switch (place_mode) {
+        case (int)PLACEMODE_ENTITY:
+            if (s == P_PLAYER) remove_player();
+            entity_tilemap[y][x] = s;
             break;
-        case (int)P_CEILING:
-            ceiling_tilemap[y][x] = P_CEILING;
+        case (int)PLACEMODE_FLOOR:
+            floor_tilemap[y][x] = s;
             break;
-        case (int)P_FLOOR:
-            floor_tilemap[y][x] = P_FLOOR;
+        case (int)PLACEMODE_CEILING:
+            ceiling_tilemap[y][x] = s;
             break;
-        case (int)P_PLAYER:
-            remove_player();
-            entity_tilemap[y][x] = P_PLAYER;
-            break;
-        case (int)P_SHOOTER: ;
-            entity_tilemap[y][x] = P_SHOOTER;
+        case (int)PLACEMODE_WALL:
+            wall_tilemap[y][x] = s;
             break;
     }
 }
@@ -344,6 +343,9 @@ Placeable get_current_selection() {
                 case 0:
                     return P_FLOOR;
                     break;
+                case 1:
+                    return P_FLOOR_LIGHT;
+                    break;
                 default:
                     return P_IDK;
                     break;
@@ -353,6 +355,9 @@ Placeable get_current_selection() {
             switch(current_selection) {
                 case 0:
                     return P_CEILING;
+                    break;
+                case 1:
+                    return P_CEILING_LIGHT;
                     break;
                 default:
                     return P_IDK;
@@ -373,25 +378,28 @@ char *get_current_selection_string() {
 
     switch (get_current_selection()) {
         case P_PLAYER:
-            return "Current selection: Player";
+            return "Current: Player";
             break;
         case P_SHOOTER:
-            return "Current selection: Shooter";
+            return "Current: Shooter";
             break;
         case P_WALL:
-            return "Current selection: wall";
-            break;
-        case P_DOOR:
-            return "Current selection: Door";
+            return "Current: Wall";
             break;
         case P_FLOOR:
-            return "Current selection: Floor";
+            return "Current: Floor";
+            break;
+        case P_FLOOR_LIGHT:
+            return "Current: Floor light";
             break;
         case P_CEILING:
-            return "Current selection: Ceiling";
+            return "Current: Ceiling";
+            break;
+        case P_CEILING_LIGHT:
+            return "Current: Ceiling light";
             break;
         case P_IDK:
-            return "Current selection: IDK";
+            return "Current: IDK";
             break;
     }
 }
@@ -525,11 +533,23 @@ void set_color_by_type(Placeable type) {
             }
             SDL_SetRenderDrawColor(renderer, 200, 100, 0, opacity);
             break;
+        case P_FLOOR_LIGHT:
+            if (place_mode == PLACEMODE_FLOOR) {
+                opacity = 255;
+            }
+            SDL_SetRenderDrawColor(renderer, 230, 130, 30, opacity);
+            break;
         case P_CEILING:
             if (place_mode == PLACEMODE_CEILING) {
                 opacity = 255;
             }
             SDL_SetRenderDrawColor(renderer, 200, 200, 200, opacity);
+            break;
+        case P_CEILING_LIGHT:
+            if (place_mode == PLACEMODE_CEILING) {
+                opacity = 255;
+            }
+            SDL_SetRenderDrawColor(renderer, 230, 230, 230, opacity);
             break;
         case P_DOOR:
             SDL_SetRenderDrawColor(renderer, 255, 255, 0, 255);

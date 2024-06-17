@@ -5,12 +5,14 @@
 
 typedef enum Placeable {
     P_IDK = -1,
-    P_WALL = 0,
-    P_DOOR = 1,
-    P_PLAYER = 2,
-    P_FLOOR = 3,
-    P_CEILING = 4,
-    P_SHOOTER = 5
+    P_WALL,
+    P_DOOR,
+    P_PLAYER,
+    P_FLOOR,
+    P_FLOOR_LIGHT,
+    P_CEILING,
+    P_CEILING_LIGHT,
+    P_SHOOTER
 } Placeable;
 
 typedef struct LevelEditorEntity {

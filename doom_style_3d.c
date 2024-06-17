@@ -20,7 +20,7 @@ SDL_Window *window;
 #define TRANSPARENT \
     (SDL_Color) { 0, 0, 0, 0 }
 #define RENDER_DISTANCE 350
-#define WALL_HEIGHT 36
+#define WALL_HEIGHT 30
 #define NUM_WALL_THREADS 4
 
 #define BAKED_LIGHT_RESOLUTION 36
@@ -181,6 +181,8 @@ typedef struct CollisionData {
 
 // #FUNCTIONS
 
+void clampColors(int rgb[3]);
+
 BakedLightColor get_light_color_by_pos(v2 pos);
 
 void bake_lights();
@@ -312,7 +314,9 @@ const SDL_Color fogColor = {0, 0, 0, 255};
 
 TextureData *floorTexture;
 TextureData *floorTexture2;
+TextureData *floorLightTexture;
 TextureData *ceilingTexture;
+TextureData *ceilingLightTexture;
 
 SDL_Texture *floorAndCeiling;
 SDL_Texture *wallTexture;
@@ -322,6 +326,8 @@ SDL_Texture *fenceTexture;
 
 double tanHalfFOV;
 double tanHalfStartFOV;
+
+double ambient_light = 0.3;
 
 int floorRenderStart;
 
@@ -462,8 +468,10 @@ void init() {  // #INIT
     SDL_SetTextureBlendMode(floorAndCeiling, SDL_BLENDMODE_BLEND);
 
     floorTexture = TextureData_from_bmp("Textures/floor.bmp");
+    floorLightTexture = TextureData_from_bmp("Textures/floor_light.bmp");
     floorTexture2 = TextureData_from_bmp("Textures/floor2.bmp");
     ceilingTexture = TextureData_from_bmp("Textures/ceiling.bmp");
+    ceilingLightTexture = TextureData_from_bmp("Textures/ceiling_light.bmp");
 
     player = init_player((v2){0, 0});
 
@@ -523,20 +531,20 @@ void init() {  // #INIT
 
     SDL_RenderSetLogicalSize(renderer, WINDOW_WIDTH, WINDOW_HEIGHT);
 
-	LightPoint *test_point = malloc(sizeof(LightPoint));
-	test_point->color = (SDL_Color){255, 200, 100};
-	test_point->strength = 2;
-    test_point->radius = 400;
-	test_point->pos = player->pos;
+	// LightPoint *test_point = malloc(sizeof(LightPoint));
+	// test_point->color = (SDL_Color){110, 190, 255};//{255, 200, 100};
+	// test_point->strength = 3;
+    // test_point->radius = 400;
+	// test_point->pos = player->pos;
 
-    LightPoint *test_point2 = malloc(sizeof(LightPoint));
-    test_point2->color = (SDL_Color){120, 180, 255};
-    test_point2->strength = 2;
-    test_point2->radius = 400;
-	test_point2->pos = v2_add(player->pos, (v2){0, -100});
+    // LightPoint *test_point2 = malloc(sizeof(LightPoint));
+    // test_point2->color = (SDL_Color){230, 50, 250};
+    // test_point2->strength = 2;
+    // test_point2->radius = 400;
+	// test_point2->pos = v2_add(player->pos, (v2){0, -100});
 
-	add_game_object(test_point, LIGHT_POINT);
-    add_game_object(test_point2, LIGHT_POINT);
+	//add_game_object(test_point, LIGHT_POINT);
+    //add_game_object(test_point2, LIGHT_POINT);
 
 	bake_lights();
 
@@ -670,6 +678,8 @@ void checkCollisions() {
 
 void playerTick(u64 delta) {
     double deltaSec = mili_to_sec(delta);
+
+    cd_print(true, "player angle: %.2f \n", player->angle);
 
     player->collider->pos = player->pos;
 
@@ -943,11 +953,17 @@ void calcFloorAndCeiling() {
 
             if (floorTile == P_FLOOR) {
                 floorTex = floorTexture2;
+            } else if (floorTile == P_FLOOR_LIGHT) {
+                floorTex = floorLightTexture;
             } else {
                 floorTex = floorTexture;
             }
 
             if (ceilingTile == P_CEILING) {
+                ceilingTex = ceilingTexture;
+            } else if (ceilingTile == P_CEILING_LIGHT) {
+                ceilingTex = ceilingLightTexture;
+            } else {
                 ceilingTex = ceilingTexture;
             }
 
@@ -959,7 +975,7 @@ void calcFloorAndCeiling() {
 
             int floor_pixel_idx = floor_row * RESOLUTION_X + floor_col;
 
-            Pixel floor_pixel = TextureData_get_pixel(floorTex, loop_clamp(point.x, 0, 36), loop_clamp(point.y, 0, 36));
+            Pixel floor_pixel = TextureData_get_pixel(floorTex, loop_clamp(point.x / tileSize * 36, 0, 36), loop_clamp(point.y / tileSize * 36, 0, 36));
 
             floor_pixel.r *= light;
             floor_pixel.g *= light;
@@ -967,10 +983,17 @@ void calcFloorAndCeiling() {
 
 			BakedLightColor baked_light_color = get_light_color_by_pos(point);
 
-			// baked lights
-			floor_pixel.r = clamp(floor_pixel.r * baked_light_color.r, 0, 255);
-			floor_pixel.g = clamp(floor_pixel.g * baked_light_color.g, 0, 255);
-			floor_pixel.b = clamp(floor_pixel.b * baked_light_color.b, 0, 255);
+            int rgb[3] = {
+                floor_pixel.r * baked_light_color.r,
+                floor_pixel.g * baked_light_color.g,
+                floor_pixel.b * baked_light_color.b
+            };
+
+            clampColors(rgb);
+
+			floor_pixel.r = rgb[0];
+			floor_pixel.g = rgb[1];
+			floor_pixel.b = rgb[2];
             
 
             int floor_pixel_i = floor_pixel.r << 24 | floor_pixel.g << 16 | floor_pixel.b << 8 | floor_pixel.a;
@@ -987,14 +1010,22 @@ void calcFloorAndCeiling() {
             if (ceilingTile == -1) {
                 ceil_pixel = (Pixel){0, 0, 0, 0};
             } else {
-                ceil_pixel = TextureData_get_pixel(ceilingTex, loop_clamp(point.x, 0, 36), loop_clamp(point.y, 0, 36));
+                ceil_pixel = TextureData_get_pixel(ceilingTex, loop_clamp(point.x / tileSize * 36, 0, 36), loop_clamp(point.y / tileSize * 36, 0, 36));
                 ceil_pixel.r *= light;
                 ceil_pixel.g *= light;
                 ceil_pixel.b *= light;
 
-                ceil_pixel.r = clamp(ceil_pixel.r * baked_light_color.r, 0, 255);
-                ceil_pixel.g = clamp(ceil_pixel.g * baked_light_color.g, 0, 255);
-                ceil_pixel.b = clamp(ceil_pixel.b * baked_light_color.b, 0, 255);
+                int rgb[3] = {
+                    ceil_pixel.r * baked_light_color.r,
+                    ceil_pixel.g * baked_light_color.g,
+                    ceil_pixel.b * baked_light_color.b
+                };
+
+                clampColors(rgb);
+
+                ceil_pixel.r = rgb[0];
+                ceil_pixel.g = rgb[1];
+                ceil_pixel.b = rgb[2];
             }
 
             int ceil_pixel_i = ceil_pixel.r << 24 | ceil_pixel.g << 16 | ceil_pixel.b << 8 | ceil_pixel.a;
@@ -1042,7 +1073,7 @@ void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height) {
 
     double light = distance_to_color(dist, 0.005);
 
-    int color = light * 255;
+    int color = 255;
 
     SDL_SetTextureColorMod(texture, color, color, color);
     SDL_RenderCopy(renderer, texture, NULL, &dstRect);
@@ -1213,6 +1244,18 @@ arraylist *getRenderList() {
     return renderList;
 }
 
+void clampColors(int rgb[3]) {
+    int max_idx = 0;
+    for (int i = 1; i < 3; i++) if (rgb[i] > rgb[max_idx]) max_idx = i;
+
+    if (rgb[max_idx] >= 255) {
+        double divisor = (double)rgb[max_idx] / 255;
+        for (int i = 0; i < 3; i++) {
+            rgb[i] /= divisor;   
+        }
+    }
+}
+
 void renderWallStripe(WallStripe *stripe) {
     double brightness = stripe->brightness;
 
@@ -1223,19 +1266,28 @@ void renderWallStripe(WallStripe *stripe) {
 
     SDL_Rect srcRect = {(int)loop_clamp(stripe->collIdx * stripe->wallWidth, 0, textureSize.x), 0, 1, textureSize.y};
 
-    SDL_Rect dstRect = {stripe->i * WINDOW_WIDTH / RESOLUTION_X + cameraOffset.x, WINDOW_HEIGHT / 2 - stripe->size / 2 - player->height + cameraOffset.y, WINDOW_WIDTH / RESOLUTION_X + 1,
-                        stripe->size};
+    SDL_Rect dstRect = {
+        stripe->i * WINDOW_WIDTH / RESOLUTION_X + cameraOffset.x, 
+        WINDOW_HEIGHT / 2 - stripe->size / 2 - player->height + cameraOffset.y,
+        WINDOW_WIDTH / RESOLUTION_X + 1,
+        stripe->size
+    };
     
 
     BakedLightColor baked_light_color = get_light_color_by_pos(v2_add(stripe->pos, v2_mul(stripe->normal, to_vec(0.5))));
 
     // baked lights
     
-    int r = clamp(125 * baked_light_color.r * brightness, 0, 255);
-    int g = clamp(125 * baked_light_color.g * brightness, 0, 255);
-    int b = clamp(125 * baked_light_color.b * brightness, 0, 255);
+    int rgb[3] = {
+        125 * baked_light_color.r * brightness,
+        125 * baked_light_color.g * brightness,
+        125 * baked_light_color.b * brightness
+    };
+    
+    clampColors(rgb);
 
-    SDL_SetTextureColorMod(texture, r, g, b);
+
+    SDL_SetTextureColorMod(texture, rgb[0], rgb[1], rgb[2]);
     SDL_RenderCopy(renderer, texture, &srcRect, &dstRect);
     free(stripe);
 }
@@ -1252,17 +1304,21 @@ BakedLightColor get_light_color_by_pos(v2 pos) {
     if (in_range(px, 0, TILEMAP_WIDTH - 1) && in_range(py, 0, TILEMAP_HEIGHT - 1)) {
         int baked_light_row = (int)(py * BAKED_LIGHT_RESOLUTION);
         int baked_light_col = (int)(px * BAKED_LIGHT_RESOLUTION);
-        return baked_light_grid[baked_light_row][baked_light_col];
+        BakedLightColor res = baked_light_grid[baked_light_row][baked_light_col];
+        res.r = ambient_light + (1 - ambient_light) * res.r;
+        res.g = ambient_light + (1 - ambient_light) * res.g;
+        res.b = ambient_light + (1 - ambient_light) * res.b;
+        return res;
     } else {
-        return (BakedLightColor){1, 1, 1};
+        return (BakedLightColor){ambient_light, ambient_light, ambient_light};
     }
 }
 
 void renderHUD() {
-    SDL_Rect leftHandRect = {player->handOffset.x + cameraOffset.x, player->handOffset.y + cameraOffset.y, 76 * 7, 91 * 7};
+    SDL_Rect leftHandRect = {player->handOffset.x + cameraOffset.x, player->handOffset.y + cameraOffset.y, WINDOW_WIDTH, WINDOW_HEIGHT};
 
-    leftHandRect.x += WINDOW_WIDTH * 3/5 - 40;
-    leftHandRect.y -= 20;
+    // leftHandRect.x += WINDOW_WIDTH * 3/5 - 40;
+    // leftHandRect.y -= 20;
 
     BakedLightColor baked_light_color;
 
@@ -1273,9 +1329,9 @@ void renderHUD() {
     bool second_check = current_anim_idx == 1 && current_anim->frame > 1;
     if (first_check || second_check) {
         baked_light_color = get_light_color_by_pos(player->pos);
-        baked_light_color.r = 0.5 + baked_light_color.r * 0.5;
-        baked_light_color.g = 0.5 + baked_light_color.g * 0.5;
-        baked_light_color.b = 0.5 + baked_light_color.b * 0.5;
+        baked_light_color.r = 0.3 + baked_light_color.r * 0.7;
+        baked_light_color.g = 0.3 + baked_light_color.g * 0.7;
+        baked_light_color.b = 0.3 + baked_light_color.b * 0.7;
     } else {
         baked_light_color.r = 2;
         baked_light_color.g = 1.8;
@@ -1289,10 +1345,15 @@ void renderHUD() {
     if (texture == NULL) {
         return;
     }
-    int r = clamp(baked_light_color.r * 125, 0, 255);
-    int g = clamp(baked_light_color.g * 125, 0, 255);
-    int b = clamp(baked_light_color.b * 125, 0, 255);
-    SDL_SetTextureColorMod(texture, r, g, b);
+    int rgb[3] = {
+        baked_light_color.r * 125,
+        baked_light_color.g * 125,
+        baked_light_color.b * 125
+    };
+
+    clampColors(rgb);
+
+    SDL_SetTextureColorMod(texture, rgb[0], rgb[1], rgb[2]);
     SDL_RenderCopy(renderer, texture, NULL, &leftHandRect);
 
     SDL_Rect crosshairRect = {WINDOW_WIDTH / 2 - 8, WINDOW_HEIGHT / 2 - 8, 16, 16};
@@ -1499,6 +1560,10 @@ RayCollisionData *castRay(v2 pos, v2 dir) {
 
     if (found) {
         RayCollisionData *data = malloc(sizeof(RayCollisionData));
+        if (data == NULL) {
+            printf("Couldn't malloc!");
+            return NULL;
+        }
         data->wallWidth = tileSize;
         data->startpos = pos;
         data->collpos = v2_add(pos, v2_mul(dir, to_vec(dist * tileSize)));
@@ -1720,6 +1785,14 @@ void load_level(char *file) {
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
             floorTileMap[r][c] = data[idx++];
+            if (floorTileMap[r][c] == (int)P_FLOOR_LIGHT) {
+                LightPoint *test_point = malloc(sizeof(LightPoint));
+                test_point->color = (SDL_Color){255, 100, 10};//{255, 200, 100};
+                test_point->strength = 1;
+                test_point->radius = 140;
+                test_point->pos = (v2){(c + 0.5) * tileSize, (r + 0.5) * tileSize};
+                add_game_object(test_point, LIGHT_POINT);
+            }
         }
     }
 
@@ -1732,6 +1805,14 @@ void load_level(char *file) {
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
             ceilingTileMap[r][c] = data[idx++];
+            if (ceilingTileMap[r][c] == (int)P_CEILING_LIGHT) {
+                LightPoint *test_point = malloc(sizeof(LightPoint));
+                test_point->color = (SDL_Color){255, 255, 255};//{255, 200, 100};
+                test_point->strength = 3;
+                test_point->radius = 400;
+                test_point->pos = (v2){(c + 0.5) * tileSize, (r + 0.5) * tileSize};
+                add_game_object(test_point, LIGHT_POINT);
+            }
         }
     }
 
@@ -1933,7 +2014,7 @@ void playerShoot() {
     hitEffect->entity->sprite->animations[0]->frames[2] = shootHitEffectFrames[2];
     hitEffect->entity->sprite->animations[0]->frames[3] = shootHitEffectFrames[3];
     hitEffect->entity->sprite->animations[0]->frames[4] = shootHitEffectFrames[4];
-    hitEffect->entity->sprite->animations[0]->fps = 10;
+    hitEffect->entity->sprite->animations[0]->fps = 12;
     hitEffect->entity->sprite->animations[0]->loop = false;
 
     spritePlayAnim(hitEffect->entity->sprite, 0);
@@ -2270,42 +2351,59 @@ void update_fullscreen() {
 }
 
 void bake_lights() {
+   
+    LightPoint *lights[gameobjects->length];
+    int ptr = 0;
+    for (int i = 0; i < gameobjects->length; i++) {
+        obj *current = arraylist_get(gameobjects, i);
+		if (current->type != LIGHT_POINT) continue;
+        lights[ptr++] = current->val;
+    }
+
+
     for (int r = 0; r < TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION; r++) {
         for (int c = 0; c < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; c++) {
             // col, row / light_res * tile_size
             v2 current_pos = v2_mul(v2_div((v2){c, r}, to_vec(BAKED_LIGHT_RESOLUTION)), to_vec(tileSize));
             BakedLightColor col = {1, 1, 1};
 
-            for (int i = 0; i < gameobjects->length; i++) {
-				obj *current = arraylist_get(gameobjects, i);
-				if (current->type != LIGHT_POINT) continue;
-				LightPoint *point = current->val;
+            for (int i = 0; i < ptr; i++) {
+				LightPoint *point = lights[i];
 
                 double dist_to_point = v2_distance(point->pos, current_pos);
                 
                 v2 tile_pos = v2_div(current_pos, to_vec(tileSize));
 
-
-                if (in_range(tile_pos.y, 0, TILEMAP_HEIGHT - 1) && in_range(tile_pos.x, 0, TILEMAP_WIDTH - 1) && levelTileMap[(int)tile_pos.y][(int)tile_pos.x] == P_WALL) {
+                if (/* in_range(tile_pos.y, 0, TILEMAP_HEIGHT - 1)
+                 && in_range(tile_pos.x, 0, TILEMAP_WIDTH - 1)
+                  &&  */levelTileMap[(int)tile_pos.y][(int)tile_pos.x] == P_WALL) {
                     continue;
                 }
 
+                if (dist_to_point > point->radius) continue;
+
 				RayCollisionData *data = castRay(current_pos, v2_dir(current_pos, point->pos));
+
 				if (data == NULL) {
 					double s = 1 / dist_to_point;
-					col.r += s * point->strength * (double)point->color.r / 255;
-					col.g += s * point->strength * (double)point->color.g / 255;
-					col.b += s * point->strength * (double)point->color.b / 255;
+                    s *= s * s; // cubic
+                    double helper = s * point->strength;
+					col.r += helper * (double)point->color.r / 255;
+					col.g += helper * (double)point->color.g / 255;
+					col.b += helper * (double)point->color.b / 255;
 				} else {
+
                     v2 collpos = data->collpos;
-                    double dist = v2_distance(collpos, current_pos);
-                    if (dist >= dist_to_point) {
-                        double s = clamp(lerp(1, 0, dist_to_point / point->radius), 0, 1);
-                        s *= s * s; // cubic
-                        col.r += s * point->strength * (double)point->color.r / 255;
-                        col.g += s * point->strength * (double)point->color.g / 255;
-                        col.b += s * point->strength * (double)point->color.b / 255;
-                    }
+                    double dist_squared = v2_distance_squared(collpos, current_pos);
+
+                    if (dist_squared <= dist_to_point * dist_to_point) continue;
+
+                    double s = clamp(lerp(1, 0, dist_to_point / point->radius), 0, 1);
+                    s *= s * s; // cubic
+                    double helper = s * point->strength;
+                    col.r += helper * (double)point->color.r / 255;
+					col.g += helper * (double)point->color.g / 255;
+					col.b += helper * (double)point->color.b / 255;
                 }
             }
 
