@@ -67,6 +67,7 @@ typedef struct RayCollisionData {
     void *collider;
     int colliderType;
     SDL_Texture *colliderTexture;
+    bool hit;
     double collIdx, wallWidth;
 } RayCollisionData;
 
@@ -181,6 +182,10 @@ typedef struct CollisionData {
 
 // #FUNCTIONS
 
+double get_max_height();
+
+v2 worldToScreen(v2 pos, double height);
+
 void clampColors(int rgb[3]);
 
 BakedLightColor get_light_color_by_pos(v2 pos);
@@ -203,13 +208,15 @@ void init();
 
 void render(u64 delta);
 
-RayCollisionData *ray_circle(Raycast ray, CircleCollider circle);
+RayCollisionData ray_circle(Raycast ray, CircleCollider circle);
 
-RayCollisionData *ray_object(Raycast ray, obj *object);
+RayCollisionData ray_object(Raycast ray, obj *object);
 
-RayCollisionData *castRayForEntities(v2 pos, v2 dir);
+RayCollisionData castRayForEntities(v2 pos, v2 dir);
 
-RayCollisionData *castRay(v2 pos, v2 dir);
+RayCollisionData castRay(v2 pos, v2 dir);
+
+RayCollisionData castRayForAll(v2 pos, v2 dir);
 
 CollisionData getCircleTileCollision(CircleCollider circle, v2 tilePos);
 
@@ -285,7 +292,7 @@ void shakeCamera(double strength, int ticks, bool fade);
 
 ShooterEnemy *createShooterEnemy(v2 pos);
 
-RayCollisionData *castRayForAll(v2 pos, v2 dir);
+
 
 bool isValidLevel(char *file);
 
@@ -327,7 +334,7 @@ SDL_Texture *fenceTexture;
 double tanHalfFOV;
 double tanHalfStartFOV;
 
-double ambient_light = 0.3;
+double ambient_light = 0.5;
 
 int floorRenderStart;
 
@@ -353,8 +360,6 @@ bool cameraShakeFadeActive = false;
 RenderObject *wallStripesToRender[RESOLUTION_X];
 
 v2 cameraOffset = {0, 0};
-
-double wallHeights[RESOLUTION_X];  // for floor and ceiling optimization
 
 Sprite *animatedWallSprite;
 
@@ -445,7 +450,7 @@ Enemy *createEnemy(v2 pos) {
     }
     enemy->dirSprite->dir = (v2){1, 0};
 
-    enemy->entity->height = WINDOW_HEIGHT / 6;
+    enemy->entity->height = get_max_height() * 0.1;
 
     enemy->collider = malloc(sizeof(CircleCollider));
     enemy->collider->radius = 10;
@@ -644,42 +649,8 @@ int get_key_axis(SDL_Keycode key1, SDL_Keycode key2) { return (int)is_key_presse
 
 v2 get_key_vector(SDL_Keycode k1, SDL_Keycode k2, SDL_Keycode k3, SDL_Keycode k4) { return (v2){get_key_axis(k1, k2), get_key_axis(k3, k4)}; }
 
-void checkCollisions() {
-    // new plan: Circle AABB collision.
-    // step 1: get tiles I want to intersect with
-    // step 2: For collision with a tile, get the closest point from the tile to
-    // the circle. If the distance to that point is less than or equal to the
-    // radius of the circle then push the circle back by the overlap, don't change
-    // the velocity.
-
-    v2 velDir = player->vel;
-
-    v2 dirs[] = {V2_ZERO};
-
-    RayCollisionData *collData[1];
-    int dataLen = 0;
-
-    v2 normal;
-
-    for (int i = 0; i < 1; i++) {
-        RayCollisionData *result = castRay(v2_add(player->pos, v2_mul(dirs[i], to_vec(player->collSize))), velDir);
-        if (result != NULL && v2_distance_squared(player->pos, result->collpos) < player->collSize * player->collSize) {
-            collData[dataLen++] = result;
-        }
-    }
-
-    if (dataLen > 0) {
-        v2 normals[dataLen];
-        for (int i = 0; i < dataLen; i++) normals[i] = collData[i]->normal;
-        v2 final = v2_mode(normals, dataLen);
-        player->vel = v2_slide(player->vel, final);
-    }
-}
-
 void playerTick(u64 delta) {
     double deltaSec = mili_to_sec(delta);
-
-    cd_print(true, "player angle: %.2f \n", player->angle);
 
     player->collider->pos = player->pos;
 
@@ -827,18 +798,20 @@ void renderDebug() {  // #DEBUG
     
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
-    for (int row = 0; row < TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION; row++) {
-        for (int col = 0; col < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; col++) {
-            BakedLightColor color = baked_light_grid[row][col];
+    int resolution = 2;
+
+    for (int row = 0; row < TILEMAP_HEIGHT * resolution; row++) {
+        for (int col = 0; col < TILEMAP_WIDTH * resolution; col++) {
+            BakedLightColor color = baked_light_grid[row  * BAKED_LIGHT_RESOLUTION/ resolution][col * BAKED_LIGHT_RESOLUTION / resolution];
             SDL_SetRenderDrawColor(renderer, clamp(125 * color.r, 0, 255), clamp(125 * color.g, 0, 255), clamp(125 * color.b, 0, 255), 255);
-            double y = (double)row / BAKED_LIGHT_RESOLUTION * tileSize;
-            double x = (double)col / BAKED_LIGHT_RESOLUTION * tileSize;
+            double y = (double)row * tileSize / resolution;
+            double x = (double)col * tileSize / resolution;
             v2 px_size = v2_div((v2){WINDOW_WIDTH, WINDOW_HEIGHT}, to_vec(tileSize * BAKED_LIGHT_RESOLUTION)); 
             SDL_Rect rect = {
                 x,
                 y,
-                10,
-                10
+                tileSize / resolution,
+                tileSize / resolution
             };
 
             SDL_RenderFillRect(renderer, &rect);
@@ -846,6 +819,14 @@ void renderDebug() {  // #DEBUG
     }
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+
+    SDL_Rect player_rect = {
+        player->pos.x,
+        player->pos.y,
+        10,
+        10
+    };
+    SDL_RenderFillRect(renderer, &player_rect);
 }
 
 v2 getRayDirByIdx(int i) {
@@ -859,32 +840,60 @@ v2 getRayDirByIdx(int i) {
     return rayDir;
 }
 
-v2 floorToScreen(v2 pos) {
+v2 worldToScreen(v2 pos, double height) {
     // know: player pos, distance to pos, angle to pos
     // need to find:
 
-    v2 offset = v2_sub(pos, player->pos);
-    double dist = v2_length(offset);
+    double signed_angle_to_forward = v2_signed_angle_between(playerForward, v2_sub(pos, player->pos));
 
-    double signedAngle = v2_signed_angle_between(playerForward, offset);
+    double signed_angle_degrees = deg_to_rad(signed_angle_to_forward);
 
-    double lowBound = fov * -0.5;
-    double highBound = fov * 0.5;
-    double signedAngleDeg = rad_to_deg(signedAngle);
-
-    if (signedAngleDeg <= lowBound || signedAngleDeg >= highBound) {
+    if (!in_range(signed_angle_degrees, -0.5 * fov, 0.5 * fov)) {
         return OUT_OF_SCREEN_POS;
     }
 
-    double idx = inverse_lerp(lowBound, highBound, signedAngleDeg);
+    double cos_angle_to_forward = v2_cos_angle_between(playerForward, v2_sub(pos, player->pos));
 
-    int x = idx * WINDOW_WIDTH;
+    double dist_to_player = v2_distance(pos, player->pos);
 
-    double wallSize = WALL_HEIGHT * WINDOW_HEIGHT / dist;
+    double dist_to_viewplane = dist_to_player * cos_angle_to_forward;
 
-    int y = WINDOW_HEIGHT / 2 + wallSize / 2;
+    double fov_width_at_texture = 2 * dist_to_viewplane * tanHalfFOV;
 
-    return (v2){x, y};
+    double angle = acos(cos_angle_to_forward);
+
+    double texture_thing_width = dist_to_player * sin(angle); 
+
+    double x_pos_sign = signed_angle_to_forward >= 0 ? 1 : -1;
+    double x_pos = WINDOW_WIDTH / 2 + (texture_thing_width / fov_width_at_texture * WINDOW_WIDTH) * x_pos_sign;
+
+    cd_print(true, "sign: %.2f \n", x_pos_sign);
+
+    double fov_factor = tanHalfStartFOV / tanHalfFOV;
+    double wallSize = WALL_HEIGHT * WINDOW_HEIGHT / dist_to_viewplane * fov_factor;
+    double y_pos = WINDOW_HEIGHT / 2 + wallSize / 2 - (height / dist_to_viewplane) - player->height;
+
+
+    // v2 offset = v2_sub(pos, player->pos);
+    // double dist = v2_length(offset);
+
+    // double signedAngle = v2_signed_angle_between(playerForward, offset);
+
+    // double lowBound = fov * -0.5;
+    // double highBound = fov * 0.5;
+    // double signedAngleDeg = rad_to_deg(signedAngle);
+
+    
+
+    // double idx = inverse_lerp(lowBound, highBound, signedAngleDeg);
+
+    // int x = idx * WINDOW_WIDTH;
+
+    // 
+
+    // int y = 
+
+    return (v2){x_pos, y_pos};
 }
 
 v2 screenToFloor(v2 pos) {
@@ -929,7 +938,7 @@ void calcFloorAndCeiling() {
             v2 point = v2_lerp(left, right, (double)col / RESOLUTION_X);
 
             
-            double light = inverse_lerp(RESOLUTION_Y / 2, RESOLUTION_Y, row);
+            double light;
             if (row < RESOLUTION_Y * 3/4) {
                 light = inverse_lerp(RESOLUTION_Y / 2, RESOLUTION_Y * 3/4, row) * 0.8;
             } else {
@@ -1048,34 +1057,49 @@ void drawFloorAndCeiling() {
 }
 
 void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height) {
-    double cosAngleToForward = v2_cos_angle_between(playerForward, v2_sub(pos, player->pos));
+    
 
-    v2 screenFloorPos = floorToScreen(pos);
-    if (v2_equal(screenFloorPos, OUT_OF_SCREEN_POS)) {
+    v2 screen_pos = worldToScreen(pos, height);
+
+    if (v2_equal(screen_pos, OUT_OF_SCREEN_POS)) {
         return;
+    }
+    double cos_angle_to_forward = v2_cos_angle_between(playerForward, v2_sub(pos, player->pos));
+
+    double dist_to_player = v2_distance(pos, player->pos);
+
+    double dist_to_viewplane = dist_to_player * cos_angle_to_forward;
+
+    v2 final_size = v2_div(size, to_vec(dist_to_player));
+    final_size = v2_div(to_vec(300 * WALL_HEIGHT), to_vec(dist_to_viewplane));
+
+    SDL_Rect dstRect = {
+        screen_pos.x - final_size.x / 2,
+        screen_pos.y - final_size.y / 2,
+        final_size.x,
+        final_size.y
+    };
+
+    double light;
+    if (screen_pos.y < WINDOW_HEIGHT * 3/4) {
+        light = inverse_lerp(WINDOW_HEIGHT / 2, WINDOW_HEIGHT * 3/4, screen_pos.y) * 0.8;
     } else {
-        // printf("ftoscreen pos: (%.2f, %.2f), out of screen pos; (%.2f, %.2f) \n",
-        // screenFloorPos.x, screenFloorPos.y, OUT_OF_SCREEN_POS.x,
-        // OUT_OF_SCREEN_POS.y);
+        light = 0.8;
     }
 
-    double dist = v2_distance(pos, player->pos);
+    int color = 255 * light;
+ 
+    BakedLightColor baked_color = get_light_color_by_pos(pos);
 
-    v2 textureSize = get_texture_size(texture);
+    int rgb[3] = {
+        color * baked_color.r,
+        color * baked_color.g,
+        color * baked_color.b
+    };
 
-    // WALL_HEIGHT * WINDOW_HEIGHT/dist * 80/fov;
-    double fovFactor = tanHalfStartFOV / tanHalfFOV;
-    double finalSize = WALL_HEIGHT * WINDOW_HEIGHT / dist * fovFactor / cosAngleToForward;
-    v2 finalSizeVec = (v2){finalSize * size.x / 100, finalSize * size.y / 100};
+    clampColors(rgb);
 
-    SDL_Rect dstRect = {screenFloorPos.x - finalSizeVec.x / 2 + cameraOffset.x, screenFloorPos.y - finalSizeVec.y / 2 - (height * 100 / dist) - player->height + cameraOffset.y, finalSizeVec.x,
-                        finalSizeVec.y};
-
-    double light = distance_to_color(dist, 0.005);
-
-    int color = 255;
-
-    SDL_SetTextureColorMod(texture, color, color, color);
+    SDL_SetTextureColorMod(texture, rgb[0], rgb[1], rgb[2]);
     SDL_RenderCopy(renderer, texture, NULL, &dstRect);
     SDL_SetTextureColorMod(texture, 255, 255, 255);
 }
@@ -1103,42 +1127,39 @@ typedef struct WallStripe {
 } WallStripe;
 
 RenderObject *getWallStripe(int i) {
-    v2 rayDir = getRayDirByIdx(i);
+    v2 ray_dir = getRayDirByIdx(i);
 
-    RayCollisionData *data = castRay(player->pos, rayDir);
+    RayCollisionData data = castRay(player->pos, ray_dir);
 
-    if (data == NULL) {
-        wallHeights[i] = 0;
-        free(data);
+    if (!data.hit) {
         return NULL;
     }
 
     WallStripe *stripe = malloc(sizeof(WallStripe));
     stripe->i = i;
-    stripe->texture = data->colliderTexture;
+    stripe->texture = data.colliderTexture;
 
-    double cosAngleToForward = v2_cos_angle_between(rayDir, playerForward);
-    double collDist = v2_distance(data->startpos, data->collpos) * cosAngleToForward;
-    double fovFactor = tanHalfStartFOV / tanHalfFOV;
-    double finalSize = WALL_HEIGHT * WINDOW_HEIGHT / collDist * fovFactor;
+    double cos_angle_to_forward = v2_cos_angle_between(ray_dir, playerForward);
+    double dist = v2_distance(data.startpos, data.collpos) * cos_angle_to_forward;
+    double fov_factor = tanHalfStartFOV / tanHalfFOV;
+    double final_size = WALL_HEIGHT * WINDOW_HEIGHT / dist * fov_factor;
 
-    stripe->size = finalSize;
-    wallHeights[i] = finalSize;
-    stripe->brightness = collDist > 150? distance_to_color(collDist - 150, 0.01) : 1;
-    stripe->normal = data->normal;
-    stripe->collIdx = data->collIdx;
-    stripe->wallWidth = data->wallWidth;
-    stripe->pos = data->collpos;
+    stripe->size = final_size;
+    
+    stripe->brightness = dist > 150? distance_to_color(dist - 150, 0.01) : 1;
+    stripe->normal = data.normal;
+    stripe->collIdx = data.collIdx;
+    stripe->wallWidth = data.wallWidth;
+    stripe->pos = data.collpos;
 
     RenderObject *currentRenderObj = malloc(sizeof(RenderObject));
     if (currentRenderObj == NULL) {
         printf("tf is this trash lang \n");
     }
-    currentRenderObj->dist_squared = collDist * collDist;
+    currentRenderObj->dist_squared = dist * dist;
     currentRenderObj->val = stripe;
     currentRenderObj->type = WALL_STRIPE;
 
-    free(data);
     return currentRenderObj;
 }
 
@@ -1305,9 +1326,7 @@ BakedLightColor get_light_color_by_pos(v2 pos) {
         int baked_light_row = (int)(py * BAKED_LIGHT_RESOLUTION);
         int baked_light_col = (int)(px * BAKED_LIGHT_RESOLUTION);
         BakedLightColor res = baked_light_grid[baked_light_row][baked_light_col];
-        res.r = ambient_light + (1 - ambient_light) * res.r;
-        res.g = ambient_light + (1 - ambient_light) * res.g;
-        res.b = ambient_light + (1 - ambient_light) * res.b;
+
         return res;
     } else {
         return (BakedLightColor){ambient_light, ambient_light, ambient_light};
@@ -1466,42 +1485,44 @@ Player *init_player(v2 pos) {
 }
 
 // CLEAR
-RayCollisionData *ray_object(Raycast ray, obj *object) {
+RayCollisionData ray_object(Raycast ray, obj *object) {
     switch (object->type) {
         case (int)ENEMY:;
             Enemy *enemy = object->val;
-            RayCollisionData *enemyRayData = ray_circle(ray, *enemy->collider);
-            if (enemyRayData != NULL) {
-                enemyRayData->collider = enemy;
-                enemyRayData->colliderType = ENEMY;
+            RayCollisionData enemyRayData = ray_circle(ray, *enemy->collider);
+            if (enemyRayData.hit) {
+                enemyRayData.collider = enemy;
+                enemyRayData.colliderType = ENEMY;
             }
 
             return enemyRayData;
             break;
         case (int)ENEMY_SHOOTER:;
             Enemy *shooter = ((ShooterEnemy *)object->val)->enemy;
-            RayCollisionData *shooterRayData = ray_circle(ray, *shooter->collider);
-            if (shooterRayData != NULL) {
-                shooterRayData->collider = (ShooterEnemy *)object->val;
-                shooterRayData->colliderType = ENEMY_SHOOTER;
+            RayCollisionData shooterRayData = ray_circle(ray, *shooter->collider);
+            if (shooterRayData.hit) {
+                shooterRayData.collider = (ShooterEnemy *)object->val;
+                shooterRayData.colliderType = ENEMY_SHOOTER;
             }
 
             return shooterRayData;
             break;
         case (int)PLAYER:;
-            RayCollisionData *playerRayData = ray_circle(ray, *player->collider);
-            if (playerRayData != NULL) {
-                playerRayData->collider = player;
+            RayCollisionData playerRayData = ray_circle(ray, *player->collider);
+            if (playerRayData.hit) {
+                playerRayData.collider = player;
             }
 
             return playerRayData;
             break;
     }
 
-    return NULL;
+    RayCollisionData data;
+    data.hit = false;
+    return data;
 }
 
-RayCollisionData *castRay(v2 pos, v2 dir) {
+RayCollisionData castRay(v2 pos, v2 dir) {
     // use DDA stupid
 
     // set tilesize to 1
@@ -1558,43 +1579,45 @@ RayCollisionData *castRay(v2 pos, v2 dir) {
         }
     }
 
+    RayCollisionData data;
     if (found) {
-        RayCollisionData *data = malloc(sizeof(RayCollisionData));
-        if (data == NULL) {
-            printf("Couldn't malloc!");
-            return NULL;
-        }
-        data->wallWidth = tileSize;
-        data->startpos = pos;
-        data->collpos = v2_add(pos, v2_mul(dir, to_vec(dist * tileSize)));
-        data->normal = v2_mul(lastStepDir, to_vec(-1));
-        data->colliderTexture = wallTexture;
+        data.hit = true;
+        data.wallWidth = tileSize;
+        data.startpos = pos;
+        data.collpos = v2_add(pos, v2_mul(dir, to_vec(dist * tileSize)));
+        data.normal = v2_mul(lastStepDir, to_vec(-1));
+        data.colliderTexture = wallTexture;
         if (lastStepDir.x != 0) {
-            data->collIdx = (data->collpos.y - floor(data->collpos.y / tileSize) * tileSize) / tileSize;
+            data.collIdx = (data.collpos.y - floor(data.collpos.y / tileSize) * tileSize) / tileSize;
         } else {
-            data->collIdx = (data->collpos.x - floor(data->collpos.x / tileSize) * tileSize) / tileSize;
+            data.collIdx = (data.collpos.x - floor(data.collpos.x / tileSize) * tileSize) / tileSize;
         }
-
         return data;
+
     } else {
-        return NULL;
+        data.hit = false;
+        return data;
     }
 }
 
-RayCollisionData *ray_circle(Raycast ray, CircleCollider circle) {
+RayCollisionData ray_circle(Raycast ray, CircleCollider circle) {
+    
+    RayCollisionData data;
+    
     if (v2_distance(ray.pos, circle.pos) <= circle.radius || v2_dot(ray.dir, v2_dir(ray.pos, circle.pos)) < 0) {
-        return NULL;
+        data.hit = false;
+        return data;
     }
 
-    RayCollisionData *data = malloc(sizeof(RayCollisionData));
+    
 
     v2 rayToCircle = v2_sub(circle.pos, ray.pos);
     double a = v2_dot(rayToCircle, ray.dir);
     double cSquared = v2_length_squared(rayToCircle);
     double bSquared = cSquared - a * a;  // pythagoras
     if (circle.radius * circle.radius - bSquared < 0) {
-        free(data);
-        return NULL;
+        data.hit = false;
+        return data;
     }                                                           // no imaginary numbers pls
     double d = sqrt(circle.radius * circle.radius - bSquared);  // more pythagoras
 
@@ -1602,14 +1625,18 @@ RayCollisionData *ray_circle(Raycast ray, CircleCollider circle) {
     v2 collision_pos = v2_add(ray.pos, v2_mul(ray.dir, to_vec(a - d)));  // woohoo!
 
     v2 normal = v2_dir(circle.pos, collision_pos);
-    data->normal = normal;
-    data->startpos = ray.pos;
-    data->collpos = collision_pos;
+    double collIdx = v2_get_angle(v2_dir(circle.pos, data.collpos)) / (2 * PI);
 
-    double collIdx = v2_get_angle(v2_dir(circle.pos, data->collpos)) / (2 * PI);
+    data.hit = true;
+    data.normal = normal;
+    data.startpos = ray.pos;
+    data.collpos = collision_pos;
+    data.wallWidth = circle.radius * PI;
 
-    data->collIdx = collIdx;
-    data->wallWidth = circle.radius * PI;
+    
+
+    data.collIdx = collIdx;
+    
 
     return data;
 }
@@ -1788,7 +1815,7 @@ void load_level(char *file) {
             if (floorTileMap[r][c] == (int)P_FLOOR_LIGHT) {
                 LightPoint *test_point = malloc(sizeof(LightPoint));
                 test_point->color = (SDL_Color){255, 100, 10};//{255, 200, 100};
-                test_point->strength = 1;
+                test_point->strength = 3;
                 test_point->radius = 140;
                 test_point->pos = (v2){(c + 0.5) * tileSize, (r + 0.5) * tileSize};
                 add_game_object(test_point, LIGHT_POINT);
@@ -1808,7 +1835,7 @@ void load_level(char *file) {
             if (ceilingTileMap[r][c] == (int)P_CEILING_LIGHT) {
                 LightPoint *test_point = malloc(sizeof(LightPoint));
                 test_point->color = (SDL_Color){255, 255, 255};//{255, 200, 100};
-                test_point->strength = 3;
+                test_point->strength = 2;
                 test_point->radius = 400;
                 test_point->pos = (v2){(c + 0.5) * tileSize, (r + 0.5) * tileSize};
                 add_game_object(test_point, LIGHT_POINT);
@@ -1976,24 +2003,24 @@ void playerShoot() {
     }
 
     // first cast for walls
-    RayCollisionData *entityRayData = castRayForEntities(player->pos, playerForward);
-    RayCollisionData *wallRayData = castRay(player->pos, playerForward);
+    RayCollisionData entityRayData = castRayForEntities(player->pos, playerForward);
+    RayCollisionData wallRayData = castRay(player->pos, playerForward);
 
     v2 hitPos;
 
     double entitySquaredDist = INFINITY, wallSquaredDist = INFINITY;
-    if (entityRayData != NULL) {
-        entitySquaredDist = v2_distance_squared(player->pos, entityRayData->collpos);
+    if (entityRayData.hit) {
+        entitySquaredDist = v2_distance_squared(player->pos, entityRayData.collpos);
     }
-    if (wallRayData != NULL) {
-        wallSquaredDist = v2_distance_squared(player->pos, wallRayData->collpos);
+    if (wallRayData.hit) {
+        wallSquaredDist = v2_distance_squared(player->pos, wallRayData.collpos);
     }
 
     if (entitySquaredDist < wallSquaredDist) {
-        enemyTakeDmg(entityRayData->collider, entityRayData->colliderType, 1);
-        hitPos = entityRayData->collpos;
+        enemyTakeDmg(entityRayData.collider, entityRayData.colliderType, 1);
+        hitPos = entityRayData.collpos;
     } else if (entitySquaredDist > wallSquaredDist) {
-        hitPos = wallRayData->collpos;
+        hitPos = wallRayData.collpos;
     } else {
         // didnt hit anything
         return;
@@ -2016,6 +2043,7 @@ void playerShoot() {
     hitEffect->entity->sprite->animations[0]->frames[4] = shootHitEffectFrames[4];
     hitEffect->entity->sprite->animations[0]->fps = 12;
     hitEffect->entity->sprite->animations[0]->loop = false;
+    hitEffect->entity->height = get_max_height() / 2;
 
     spritePlayAnim(hitEffect->entity->sprite, 0);
 
@@ -2039,9 +2067,9 @@ void enemyTick(Enemy *enemy, u64 delta) {
     // add player vision
 
     v2 dir = v2_dir(enemy->entity->pos, player->pos);
-    RayCollisionData *rayData = castRayForAll(v2_add(enemy->entity->pos, v2_mul(dir, to_vec(15))), dir);
+    RayCollisionData rayData = castRayForAll(v2_add(enemy->entity->pos, v2_mul(dir, to_vec(15))), dir);
 
-    enemy->seeingPlayer = rayData != NULL && (Player *)rayData->collider == player;
+    enemy->seeingPlayer = rayData.hit && (Player *)rayData.collider == player;
 
     dSpriteTick(enemy->dirSprite, enemy->entity->pos, delta);
 }
@@ -2067,38 +2095,35 @@ void enemyTakeDmg(void *enemy, int type, int dmg) {
     }
 }
 
-RayCollisionData *castRayForEntities(v2 pos, v2 dir) {
+RayCollisionData castRayForEntities(v2 pos, v2 dir) {
     Raycast ray = {pos, dir};
 
-    RayCollisionData *data = NULL;
+    RayCollisionData data;
     double minSquaredDist = INFINITY;
 
     for (int i = 0; i < gameobjects->length; i++) {
-        RayCollisionData *newData = ray_object(ray, arraylist_get(gameobjects, i));
-        if (newData == NULL) continue;
+        RayCollisionData newData = ray_object(ray, arraylist_get(gameobjects, i));
+        if (!newData.hit) continue;
 
-        double currentSquaredDist = v2_distance_squared(pos, newData->collpos);
+        double currentSquaredDist = v2_distance_squared(pos, newData.collpos);
         if (currentSquaredDist < minSquaredDist) {
             minSquaredDist = currentSquaredDist;
-            if (data != NULL) free(data);
             data = newData;
-        } else {
-            free(newData);
         }
     }
 
     return data;
 }
 
-RayCollisionData *castRayForAll(v2 pos, v2 dir) {
-    RayCollisionData *entityRayData = castRayForEntities(pos, dir);
-    RayCollisionData *wallRayData = castRay(pos, dir);
+RayCollisionData castRayForAll(v2 pos, v2 dir) {
+    RayCollisionData entityRayData = castRayForEntities(pos, dir);
+    RayCollisionData wallRayData = castRay(pos, dir);
 
-    if (entityRayData == NULL) return wallRayData;
-    if (wallRayData == NULL) return entityRayData;
+    if (!entityRayData.hit) return wallRayData;
+    if (!wallRayData.hit) return entityRayData;
 
-    double entitySquaredDist = v2_distance_squared(pos, entityRayData->collpos);
-    double wallSquaredDist = v2_distance_squared(pos, wallRayData->collpos);
+    double entitySquaredDist = v2_distance_squared(pos, entityRayData.collpos);
+    double wallSquaredDist = v2_distance_squared(pos, wallRayData.collpos);
 
     if (entitySquaredDist > wallSquaredDist) return entityRayData;
     return wallRayData;
@@ -2114,24 +2139,28 @@ DirectionalSprite *createDirSprite(int dirCount) {
 }
 
 Sprite *getDSpriteCurrentSprite(DirectionalSprite *dSprite, v2 spritePos) {
-    double playerAngleToSprite = v2_get_angle(v2_dir(player->pos, spritePos));
+    double player_angle_to_sprite = v2_get_angle(v2_dir(player->pos, spritePos));
 
     if (dSprite->dirCount < 2) {
         return dSprite->sprites[0];
     } else {
-        double relativeAngle = rad_to_deg(v2_get_angle(dSprite->dir)) + rad_to_deg(playerAngleToSprite);
+
+        double relative_angle = rad_to_deg(v2_get_angle(dSprite->dir)) - rad_to_deg(player_angle_to_sprite);
+
         double min = 9999999;
-        int minIdx = -1;
+        int min_idx = -1;
         for (int i = 0; i < dSprite->dirCount; i++) {
+
             double angle = (360.0 / dSprite->dirCount) * i;
-            double aDist = angleDist(angle, relativeAngle);  // ANGLE DIST WORKS CORRECTLY 100%
-            if (aDist < min && aDist != 0) {
-                min = aDist;
-                minIdx = i;
+            double angle_dist = angleDist(angle, relative_angle);
+
+            if (angle_dist < min && angle_dist != 0) {
+                min = angle_dist;
+                min_idx = i;
             }
         }
 
-        return dSprite->sprites[minIdx];
+        return dSprite->sprites[min_idx];
     }
 
     return NULL;
@@ -2215,6 +2244,7 @@ void shooterTick(ShooterEnemy *shooter, u64 delta) {
 
     if (!shooter->enemy->seeingPlayer) {
         shooter->enemy->dir = v2_dir(shooter->enemy->entity->pos, player->pos);
+        shooter->enemy->dirSprite->dir = shooter->enemy->dir;
         if (shooter->shootCooldownTimer <= 0) {
             shooterEnemyShoot(shooter);
             shooter->shootCooldownTimer = shooter->shootCooldown;
@@ -2365,36 +2395,36 @@ void bake_lights() {
         for (int c = 0; c < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; c++) {
             // col, row / light_res * tile_size
             v2 current_pos = v2_mul(v2_div((v2){c, r}, to_vec(BAKED_LIGHT_RESOLUTION)), to_vec(tileSize));
-            BakedLightColor col = {1, 1, 1};
+
+            v2 tile_pos = v2_div(current_pos, to_vec(tileSize));
+
+            if (levelTileMap[(int)tile_pos.y][(int)tile_pos.x] == P_WALL) {
+                continue;
+            }
+            
+            BakedLightColor col = {ambient_light, ambient_light, ambient_light};
 
             for (int i = 0; i < ptr; i++) {
-				LightPoint *point = lights[i];
+                
+                LightPoint *point = lights[i];
 
                 double dist_to_point = v2_distance(point->pos, current_pos);
-                
-                v2 tile_pos = v2_div(current_pos, to_vec(tileSize));
-
-                if (/* in_range(tile_pos.y, 0, TILEMAP_HEIGHT - 1)
-                 && in_range(tile_pos.x, 0, TILEMAP_WIDTH - 1)
-                  &&  */levelTileMap[(int)tile_pos.y][(int)tile_pos.x] == P_WALL) {
-                    continue;
-                }
 
                 if (dist_to_point > point->radius) continue;
 
-				RayCollisionData *data = castRay(current_pos, v2_dir(current_pos, point->pos));
+                v2 dir = v2_div(v2_sub(point->pos, current_pos), to_vec(dist_to_point));
 
-				if (data == NULL) {
-					double s = 1 / dist_to_point;
+				RayCollisionData data = castRay(current_pos, dir);
+
+				if (!data.hit) {
+					double s = clamp(lerp(1, 0, dist_to_point / point->radius), 0, 1);
                     s *= s * s; // cubic
                     double helper = s * point->strength;
 					col.r += helper * (double)point->color.r / 255;
 					col.g += helper * (double)point->color.g / 255;
 					col.b += helper * (double)point->color.b / 255;
 				} else {
-
-                    v2 collpos = data->collpos;
-                    double dist_squared = v2_distance_squared(collpos, current_pos);
+                    double dist_squared = v2_distance_squared(data.collpos, current_pos);
 
                     if (dist_squared <= dist_to_point * dist_to_point) continue;
 
@@ -2411,3 +2441,12 @@ void bake_lights() {
         }
     }
 }
+
+double get_max_height() {
+    double fov_factor = tanHalfStartFOV / tanHalfFOV;
+    return WALL_HEIGHT * WINDOW_HEIGHT * fov_factor;
+}
+
+
+
+// #END

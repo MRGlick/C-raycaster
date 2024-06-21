@@ -3,6 +3,9 @@
         "random": "c",
         "functional": "c",
         "genz.h": "c",
-        "vector": "c"
+        "vector": "c",
+        "cmath": "c",
+        "*.tcc": "c",
+        "limits": "c"
     }
 }
