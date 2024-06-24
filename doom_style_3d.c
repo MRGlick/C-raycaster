@@ -127,7 +127,7 @@ typedef struct LightPoint {
 } LightPoint;
 
 typedef struct Particle {
-    Entity *entity;
+    Entity entity;
     v2 vel;
     double lifeTimer;
 } Particle;
@@ -146,7 +146,7 @@ typedef struct Particles {
 } Particles;
 
 typedef struct Effect {
-    Entity *entity;
+    Entity entity;
     double lifeTime;
 } Effect;
 
@@ -157,7 +157,7 @@ typedef struct RenderObject {
 } RenderObject;
 
 typedef struct Enemy {
-    Entity *entity;
+    Entity entity;
     DirectionalSprite *dirSprite;
     CircleCollider *collider;
     v2 dir;
@@ -168,7 +168,7 @@ typedef struct Enemy {
 } Enemy;
 
 typedef struct EnemyBullet {
-    Entity *entity;
+    Entity entity;
     DirectionalSprite *dirSprite;
     CircleCollider *collider;
     v2 dir;
@@ -456,11 +456,10 @@ Enemy *createEnemy(v2 pos) {
     enemy->health = enemy->maxHealth;
     enemy->dir = (v2){1, 0};
 
-    enemy->entity = malloc(sizeof(Entity));
-    enemy->entity->pos = pos;
-    enemy->entity->size = to_vec(50);
-    enemy->entity->sprite = NULL;
-    enemy->entity->affected_by_light = true;
+    enemy->entity.pos = pos;
+    enemy->entity.size = to_vec(50);
+    enemy->entity.sprite = NULL;
+    enemy->entity.affected_by_light = true;
 
     enemy->dirSprite = createDirSprite(16);
     for (int i = 0; i < 16; i++) {
@@ -475,11 +474,11 @@ Enemy *createEnemy(v2 pos) {
     }
     enemy->dirSprite->dir = (v2){1, 0};
 
-    enemy->entity->height = get_max_height() * 0.1;
+    enemy->entity.height = get_max_height() * 0.1;
 
     enemy->collider = malloc(sizeof(CircleCollider));
     enemy->collider->radius = 10;
-    enemy->collider->pos = enemy->entity->pos;
+    enemy->collider->pos = enemy->entity.pos;
 
     enemy->seeingPlayer = false;
     enemy->lastSeenPlayerPos = (v2){0, 0};
@@ -1135,10 +1134,10 @@ void renderDirSprite(DirectionalSprite *dSprite, v2 pos, v2 size, double height)
     renderTexture(texture, pos, size, height, true);
 }
 
-void renderEntity(Entity *entity) {  // RENDER ENTITY
-    SDL_Texture *texture = getSpriteCurrentTexture(entity->sprite);
+void renderEntity(Entity entity) {  // RENDER ENTITY
+    SDL_Texture *texture = getSpriteCurrentTexture(entity.sprite);
 
-    renderTexture(texture, entity->pos, entity->size, entity->height, entity->affected_by_light);
+    renderTexture(texture, entity.pos, entity.size, entity.height, entity.affected_by_light);
 }
 
 typedef struct WallStripe {
@@ -1242,7 +1241,7 @@ arraylist *getRenderList() {
                 pos = ((Entity *)object->val)->pos;
                 break;
             case (int)EFFECT:
-                currentRObj->val = ((Effect *)(object->val))->entity;
+                currentRObj->val = &((Effect *)(object->val))->entity;
                 currentRObj->type = ENTITY;
                 pos = ((Entity *)currentRObj->val)->pos;
                 break;
@@ -1254,17 +1253,17 @@ arraylist *getRenderList() {
             case (int)ENEMY:
                 currentRObj->val = object->val;
                 currentRObj->type = ENEMY;
-                pos = ((Enemy *)object->val)->entity->pos;
+                pos = ((Enemy *)object->val)->entity.pos;
                 break;
             case (int)ENEMY_SHOOTER:
                 currentRObj->val = ((ShooterEnemy *)object->val)->enemy;
                 currentRObj->type = ENEMY;
-                pos = ((ShooterEnemy *)object->val)->enemy->entity->pos;
+                pos = ((ShooterEnemy *)object->val)->enemy->entity.pos;
                 break;
             case (int)BULLET:
                 currentRObj->val = object->val;
                 currentRObj->type = BULLET;
-                pos = ((EnemyBullet *)object->val)->entity->pos;
+                pos = ((EnemyBullet *)object->val)->entity.pos;
                 break;
             default:
                 continue;
@@ -1451,7 +1450,7 @@ void render(u64 delta) {  // #RENDER
 
         switch (rObj->type) {
             case (int)ENTITY:
-                renderEntity((Entity *)rObj->val);
+                renderEntity(*(Entity *)rObj->val);
                 break;
             case (int)WALL_STRIPE:
                 renderWallStripe((WallStripe *)rObj->val);
@@ -1462,7 +1461,7 @@ void render(u64 delta) {  // #RENDER
             case (int)ENEMY:;
                 Enemy *enemy = rObj->val;
                 if (enemy->dirSprite != NULL) {
-                    renderDirSprite(enemy->dirSprite, enemy->entity->pos, enemy->entity->size, enemy->entity->height);
+                    renderDirSprite(enemy->dirSprite, enemy->entity.pos, enemy->entity.size, enemy->entity.height);
                 } else {
                     renderEntity(enemy->entity);
                 }
@@ -1471,7 +1470,7 @@ void render(u64 delta) {  // #RENDER
             case (int)BULLET:;
                 EnemyBullet *bullet = rObj->val;
                 if (bullet->dirSprite != NULL) {
-                    renderDirSprite(bullet->dirSprite, bullet->entity->pos, bullet->entity->size, bullet->entity->height);
+                    renderDirSprite(bullet->dirSprite, bullet->entity.pos, bullet->entity.size, bullet->entity.height);
                 } else {
                     renderEntity(bullet->entity);
                 }
@@ -1612,6 +1611,7 @@ RayCollisionData castRay(v2 pos, v2 dir) {
         data.collpos = v2_add(pos, v2_mul(dir, to_vec(dist * tileSize)));
         data.normal = v2_mul(lastStepDir, to_vec(-1));
         data.colliderTexture = wallTexture;
+        data.colliderType = -1;
         if (lastStepDir.x != 0) {
             data.collIdx = (data.collpos.y - floor(data.collpos.y / tileSize) * tileSize) / tileSize;
         } else {
@@ -1671,7 +1671,6 @@ void freeObject(void *val, int type) {
         case (int)PARTICLES:;
             Particles *p = (Particles *)val;
             for (int i = 0; i < p->particleAmount; i++) {
-                free(p->particles[i]->entity);
                 free(p->particles[i]);
             }
             free(p->particles);
@@ -1679,7 +1678,7 @@ void freeObject(void *val, int type) {
             break;
         case (int)EFFECT:;
             Effect *effect = (Effect *)val;
-            freeObject(effect->entity->sprite, SPRITE);
+            freeObject(effect->entity.sprite, SPRITE);
             free(effect);
             break;
         case (int)SPRITE:;  // not gonna destroy the texture i think
@@ -1700,11 +1699,6 @@ void freeObject(void *val, int type) {
             free(dSprite->sprites);
             free(dSprite);
             break;
-        case (int)ENTITY:;
-            Entity *entity = val;
-            freeObject(entity->sprite, SPRITE);
-            free(entity);
-            break;
 
         case (int)BULLET:;
             EnemyBullet *bullet = val;
@@ -1712,8 +1706,8 @@ void freeObject(void *val, int type) {
             if (bullet->dirSprite != NULL) {
                 freeObject(bullet->dirSprite, DIR_SPRITE);
             }
-            if (bullet->entity->sprite != NULL) {
-                freeObject(bullet->entity->sprite, SPRITE);
+            if (bullet->entity.sprite != NULL) {
+                freeObject(bullet->entity.sprite, SPRITE);
             }
 
             free(bullet);
@@ -1742,11 +1736,11 @@ void add_game_object(void *val, int type) {
             for (int i = 0; i < particles->particleAmount; i++) {
                 particles->particles[i]->vel = particles->startVel;
                 particles->particles[i]->lifeTimer = particles->particleLifetime;
-                particles->particles[i]->entity = malloc(sizeof(Entity));
-                particles->particles[i]->entity->pos = particles->pos;
-                particles->particles[i]->entity->size = particles->particleSize;
-                particles->particles[i]->entity->sprite = particles->particleSprite;
-                particles->particles[i]->entity->height = particles->height;
+
+                particles->particles[i]->entity.pos = particles->pos;
+                particles->particles[i]->entity.size = particles->particleSize;
+                particles->particles[i]->entity.sprite = particles->particleSprite;
+                particles->particles[i]->entity.height = particles->height;
             }
             arraylist_add(gameobjects, particles, PARTICLES);
             break;
@@ -1983,13 +1977,13 @@ void particlesTick(Particles *particles, u64 delta) {
         particle->vel = v2_add(particle->vel, particles->gravity);
 
         v2 finalVel = v2_mul(particle->vel, to_vec(deltaSec));
-        particle->entity->pos = v2_add(particle->entity->pos, finalVel);
+        particle->entity.pos = v2_add(particle->entity.pos, finalVel);
 
         particle->lifeTimer -= deltaSec;
         if (particle->lifeTimer <= 0) {
             particle->lifeTimer = particles->particleLifetime;
             particle->vel = particles->startVel;
-            particle->entity->pos = particles->pos;
+            particle->entity.pos = particles->pos;
         }
     }
 }
@@ -2001,16 +1995,10 @@ Effect *createEffect(v2 pos, v2 size, Sprite *sprite, double lifeTime) {
         printf("Failed to malloc effect \n");
     }
 
-    effect->entity = malloc(sizeof(Entity));
-
-    if (effect == NULL) {
-        printf("Failed to malloc effect entity \n");
-    }
-
-    effect->entity->pos = pos;
-    effect->entity->size = size;
-    effect->entity->sprite = sprite;
-    effect->entity->height = WINDOW_HEIGHT / 6;  // idk it works
+    effect->entity.pos = pos;
+    effect->entity.size = size;
+    effect->entity.sprite = sprite;
+    effect->entity.height = WINDOW_HEIGHT / 6;  // idk it works
     effect->lifeTime = lifeTime;
 
     return effect;
@@ -2027,30 +2015,6 @@ void playerShoot() {
         player->vel = v2_mul(get_player_forward(), to_vec(-1));
     }
 
-    // first cast for walls
-    // RayCollisionData entityRayData = castRayForEntities(player->pos, playerForward);
-    // RayCollisionData wallRayData = castRay(player->pos, playerForward);
-
-    // v2 hitPos;
-
-    // double entitySquaredDist = INFINITY, wallSquaredDist = INFINITY;
-    // if (entityRayData.hit) {
-    //     entitySquaredDist = v2_distance_squared(player->pos, entityRayData.collpos);
-    // }
-    // if (wallRayData.hit) {
-    //     wallSquaredDist = v2_distance_squared(player->pos, wallRayData.collpos);
-    // }
-
-    // if (entitySquaredDist < wallSquaredDist) {
-    //     enemyTakeDmg(entityRayData.collider, entityRayData.colliderType, 1);
-    //     hitPos = entityRayData.collpos;
-    // } else if (entitySquaredDist > wallSquaredDist) {
-    //     hitPos = wallRayData.collpos;
-    // } else {
-    //     // didnt hit anything
-    //     return;
-    // }
-
     RayCollisionData ray_data = castRayForAll(player->pos, playerForward);
 
     double effect_height = get_max_height() / 2;
@@ -2058,7 +2022,8 @@ void playerShoot() {
     if (ray_data.hit) {
         if (is_enemy_type(ray_data.colliderType)) {
             enemyTakeDmg(ray_data.collider, ray_data.colliderType, 1);
-
+            Entity entity = *((Entity *)ray_data.collider);
+            effect_height = entity.height - entity.size.y / 2;
         }
     } else {
         return;
@@ -2073,18 +2038,18 @@ void playerShoot() {
         return;
     }
 
-    hitEffect->entity->sprite->animations[0] = create_animation(5);
-    hitEffect->entity->sprite->animations[0]->frames[0] = shootHitEffectFrames[0];
-    hitEffect->entity->sprite->animations[0]->frames[1] = shootHitEffectFrames[1];
-    hitEffect->entity->sprite->animations[0]->frames[2] = shootHitEffectFrames[2];
-    hitEffect->entity->sprite->animations[0]->frames[3] = shootHitEffectFrames[3];
-    hitEffect->entity->sprite->animations[0]->frames[4] = shootHitEffectFrames[4];
-    hitEffect->entity->sprite->animations[0]->fps = 12;
-    hitEffect->entity->sprite->animations[0]->loop = false;
-    hitEffect->entity->height = effect_height;
-    hitEffect->entity->affected_by_light = false;
+    hitEffect->entity.sprite->animations[0] = create_animation(5);
+    hitEffect->entity.sprite->animations[0]->frames[0] = shootHitEffectFrames[0];
+    hitEffect->entity.sprite->animations[0]->frames[1] = shootHitEffectFrames[1];
+    hitEffect->entity.sprite->animations[0]->frames[2] = shootHitEffectFrames[2];
+    hitEffect->entity.sprite->animations[0]->frames[3] = shootHitEffectFrames[3];
+    hitEffect->entity.sprite->animations[0]->frames[4] = shootHitEffectFrames[4];
+    hitEffect->entity.sprite->animations[0]->fps = 12;
+    hitEffect->entity.sprite->animations[0]->loop = false;
+    hitEffect->entity.height = effect_height;
+    hitEffect->entity.affected_by_light = false;
 
-    spritePlayAnim(hitEffect->entity->sprite, 0);
+    spritePlayAnim(hitEffect->entity.sprite, 0);
 
     add_game_object(hitEffect, EFFECT);
 }
@@ -2097,20 +2062,20 @@ void effectTick(Effect *effect, u64 delta) {
         remove_game_object(effect, EFFECT);
         return;
     }
-    spriteTick(effect->entity->sprite, delta);
+    spriteTick(effect->entity.sprite, delta);
 }
 
 void enemyTick(Enemy *enemy, u64 delta) {
-    enemy->collider->pos = enemy->entity->pos;
+    enemy->collider->pos = enemy->entity.pos;
 
     // add player vision
 
-    v2 dir = v2_dir(enemy->entity->pos, player->pos);
-    RayCollisionData rayData = castRayForAll(v2_add(enemy->entity->pos, v2_mul(dir, to_vec(enemy->collider->radius + 0.01))), dir);
+    v2 dir = v2_dir(enemy->entity.pos, player->pos);
+    RayCollisionData rayData = castRayForAll(v2_add(enemy->entity.pos, v2_mul(dir, to_vec(enemy->collider->radius + 0.01))), dir);
 
     enemy->seeingPlayer = rayData.hit && (Player *)rayData.collider == player;
 
-    dSpriteTick(enemy->dirSprite, enemy->entity->pos, delta);
+    dSpriteTick(enemy->dirSprite, enemy->entity.pos, delta);
 }
 
 void enemyTakeDmg(void *enemy, int type, int dmg) {
@@ -2225,12 +2190,11 @@ double angleDist(double a1, double a2) {
 EnemyBullet *createDefaultBullet(v2 pos, v2 dir) {
     EnemyBullet *bullet = malloc(sizeof(EnemyBullet));
 
-    bullet->entity = malloc(sizeof(Entity));
-    bullet->entity->pos = pos;
-    bullet->entity->size = to_vec(20);
-    bullet->entity->sprite = createSprite(false, 0);
-    bullet->entity->sprite->texture = entityTexture;  // CHANGE LATER
-    bullet->entity->height = WINDOW_HEIGHT / 6;
+    bullet->entity.pos = pos;
+    bullet->entity.size = to_vec(20);
+    bullet->entity.sprite = createSprite(false, 0);
+    bullet->entity.sprite->texture = entityTexture;  // CHANGE LATER
+    bullet->entity.height = WINDOW_HEIGHT / 6;
     bullet->dirSprite = NULL;
     bullet->dmg = 1;
     bullet->speed = 5.5;
@@ -2239,7 +2203,7 @@ EnemyBullet *createDefaultBullet(v2 pos, v2 dir) {
     bullet->lifeTimer = bullet->lifeTime;
 
     bullet->collider = malloc(sizeof(CircleCollider));
-    bullet->collider->pos = bullet->entity->pos;
+    bullet->collider->pos = bullet->entity.pos;
     bullet->collider->radius = 5;
 
     return bullet;
@@ -2254,8 +2218,8 @@ bool intersectCircles(CircleCollider c1, CircleCollider c2) {
 void bulletTick(EnemyBullet *bullet, u64 delta) {
     double deltaSec = mili_to_sec(delta);
 
-    bullet->entity->pos = v2_add(bullet->entity->pos, v2_mul(bullet->dir, to_vec(bullet->speed)));
-    bullet->collider->pos = bullet->entity->pos;
+    bullet->entity.pos = v2_add(bullet->entity.pos, v2_mul(bullet->dir, to_vec(bullet->speed)));
+    bullet->collider->pos = bullet->entity.pos;
 
     bullet->lifeTimer -= deltaSec;
     if (bullet->lifeTimer <= 0) {
@@ -2270,7 +2234,7 @@ void bulletTick(EnemyBullet *bullet, u64 delta) {
 }
 
 void shooterEnemyShoot(ShooterEnemy *shooter) {
-    EnemyBullet *bullet = createDefaultBullet(shooter->enemy->entity->pos, shooter->enemy->dir);
+    EnemyBullet *bullet = createDefaultBullet(shooter->enemy->entity.pos, shooter->enemy->dir);
     if (bullet == NULL) {
         printf("Bullet is null \n");
         return;
@@ -2284,7 +2248,7 @@ void shooterTick(ShooterEnemy *shooter, u64 delta) {
     enemyTick(shooter->enemy, delta);
 
     if (shooter->enemy->seeingPlayer) {
-        shooter->enemy->dir = v2_dir(shooter->enemy->entity->pos, player->pos);
+        shooter->enemy->dir = v2_dir(shooter->enemy->entity.pos, player->pos);
         shooter->enemy->dirSprite->dir = shooter->enemy->dir;
         if (shooter->shootCooldownTimer <= 0) {
             shooterEnemyShoot(shooter);
