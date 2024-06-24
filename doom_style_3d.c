@@ -63,13 +63,14 @@ typedef struct Animation {
     double timeToNextFrame;
     bool loop;
     bool playing;
+    int priority;
 } Animation;
 
 typedef struct Sprite {
     SDL_Texture *texture;  // not used if animated
     bool isAnimated;
     int currentAnimationIdx;
-    Animation **animations;
+    Animation *animations;
     int animCount;
 } Sprite;
 
@@ -190,7 +191,7 @@ typedef struct BakedLightColor {
 
 // #ENEMIES
 typedef struct ShooterEnemy {
-    Enemy *enemy;
+    Enemy enemy;
     double shootCooldown;
     double shootCooldownTimer;
 } ShooterEnemy;
@@ -264,7 +265,7 @@ double mili_to_sec(u64 mili);
 
 v2 get_player_forward();
 
-Animation *create_animation(int frameCount);
+Animation create_animation(int frameCount, int priority);
 
 void freeAnimation(Animation *anim);
 
@@ -450,18 +451,18 @@ void initParticles() {
     add_game_object(particles, PARTICLES);
 }
 
-Enemy *createEnemy(v2 pos) {
-    Enemy *enemy = malloc(sizeof(Enemy));
-    enemy->maxHealth = 5;
-    enemy->health = enemy->maxHealth;
-    enemy->dir = (v2){1, 0};
+Enemy createEnemy(v2 pos) {
+    Enemy enemy;
+    enemy.maxHealth = 5;
+    enemy.health = enemy.maxHealth;
+    enemy.dir = (v2){1, 0};
 
-    enemy->entity.pos = pos;
-    enemy->entity.size = to_vec(50);
-    enemy->entity.sprite = NULL;
-    enemy->entity.affected_by_light = true;
+    enemy.entity.pos = pos;
+    enemy.entity.size = to_vec(50);
+    enemy.entity.sprite = NULL;
+    enemy.entity.affected_by_light = true;
 
-    enemy->dirSprite = createDirSprite(16);
+    enemy.dirSprite = createDirSprite(16);
     for (int i = 0; i < 16; i++) {
         char *baseFileName = "Textures/CubeEnemyAnim/CubeEnemy";
         char num[get_num_digits(i + 1)];
@@ -469,19 +470,19 @@ Enemy *createEnemy(v2 pos) {
         char *fileWithNum = concat(baseFileName, num);
         char *fileWithExtension = concat(fileWithNum, ".bmp");
 
-        enemy->dirSprite->sprites[i] = createSprite(false, 0);
-        enemy->dirSprite->sprites[i]->texture = make_texture(renderer, fileWithExtension);
+        enemy.dirSprite->sprites[i] = createSprite(false, 0);
+        enemy.dirSprite->sprites[i]->texture = make_texture(renderer, fileWithExtension);
     }
-    enemy->dirSprite->dir = (v2){1, 0};
+    enemy.dirSprite->dir = (v2){1, 0};
 
-    enemy->entity.height = get_max_height() * 0.1;
+    enemy.entity.height = get_max_height() * 0.1;
 
-    enemy->collider = malloc(sizeof(CircleCollider));
-    enemy->collider->radius = 10;
-    enemy->collider->pos = enemy->entity.pos;
+    enemy.collider = malloc(sizeof(CircleCollider));
+    enemy.collider->radius = 10;
+    enemy.collider->pos = enemy.entity.pos;
 
-    enemy->seeingPlayer = false;
-    enemy->lastSeenPlayerPos = (v2){0, 0};
+    enemy.seeingPlayer = false;
+    enemy.lastSeenPlayerPos = (v2){0, 0};
 
     return enemy;
 }
@@ -521,20 +522,20 @@ void init() {  // #INIT
     crosshair = make_texture(renderer, "Textures/crosshair.bmp");
 
     animatedWallSprite = createSprite(true, 1);
-    animatedWallSprite->animations[0] = create_animation(17);
-    animatedWallSprite->animations[0]->frames = wallFrames;
-    animatedWallSprite->animations[0]->fps = 10;
+    animatedWallSprite->animations[0] = create_animation(17, 0);
+    animatedWallSprite->animations[0].frames = wallFrames;
+    animatedWallSprite->animations[0].fps = 10;
     spritePlayAnim(animatedWallSprite, 0);
 
     leftHandSprite = createSprite(true, 2);
-    leftHandSprite->animations[0] = create_animation(1);
-    leftHandSprite->animations[0]->frames[0] = make_texture(renderer, "Textures/rightHandAnim/rightHandAnim6.bmp");
-    leftHandSprite->animations[1] = create_animation(6);
-    leftHandSprite->animations[1]->frames = malloc(sizeof(SDL_Texture *) * 6);
-    getTextureFiles("Textures/rightHandAnim/rightHandAnim", 6, &leftHandSprite->animations[1]->frames);
-    leftHandSprite->animations[1]->fps = 12;
+    leftHandSprite->animations[0] = create_animation(1, 0);
+    leftHandSprite->animations[0].frames[0] = make_texture(renderer, "Textures/rightHandAnim/rightHandAnim6.bmp");
+    leftHandSprite->animations[1] = create_animation(6, 0);
+    leftHandSprite->animations[1].frames = malloc(sizeof(SDL_Texture *) * 6);
+    getTextureFiles("Textures/rightHandAnim/rightHandAnim", 6, &leftHandSprite->animations[1].frames);
+    leftHandSprite->animations[1].fps = 12;
 
-    leftHandSprite->animations[1]->loop = false;
+    leftHandSprite->animations[1].loop = false;
     spritePlayAnim(leftHandSprite, 0);
 
     shootHitEffectFrames = malloc(sizeof(SDL_Texture *) * 5);
@@ -736,7 +737,7 @@ void spriteTick(Sprite *sprite, u64 delta) {
     if (!sprite->isAnimated) return;
     if (sprite->animations == NULL) return;
     if (sprite->currentAnimationIdx == -1) return;
-    animationTick(sprite->animations[sprite->currentAnimationIdx], delta);
+    animationTick(&sprite->animations[sprite->currentAnimationIdx], delta);
 }
 
 void objectTick(void *obj, int type, u64 delta) {
@@ -749,7 +750,7 @@ void objectTick(void *obj, int type, u64 delta) {
             break;
         case (int)SPRITE:;
             Sprite *sprite = obj;
-            animationTick(sprite->animations[sprite->currentAnimationIdx], delta);
+            animationTick(&sprite->animations[sprite->currentAnimationIdx], delta);
             break;
         case (int)PARTICLES:
             particlesTick(obj, delta);
@@ -803,7 +804,7 @@ void tick(u64 delta) {
 
     SDL_ShowCursor(!lockMouse);
 
-    animationTick(animatedWallSprite->animations[animatedWallSprite->currentAnimationIdx], delta);
+    animationTick(&animatedWallSprite->animations[animatedWallSprite->currentAnimationIdx], delta);
     spriteTick(leftHandSprite, delta);
 
     for (int i = 0; i < gameobjects->length; i++) {
@@ -1256,9 +1257,9 @@ arraylist *getRenderList() {
                 pos = ((Enemy *)object->val)->entity.pos;
                 break;
             case (int)ENEMY_SHOOTER:
-                currentRObj->val = ((ShooterEnemy *)object->val)->enemy;
+                currentRObj->val = object->val;
                 currentRObj->type = ENEMY;
-                pos = ((ShooterEnemy *)object->val)->enemy->entity.pos;
+                pos = ((Enemy *)object->val)->entity.pos;
                 break;
             case (int)BULLET:
                 currentRObj->val = object->val;
@@ -1365,11 +1366,11 @@ void renderHUD() {
 
     BakedLightColor baked_light_color;
 
-    Animation *current_anim = leftHandSprite->animations[leftHandSprite->currentAnimationIdx];
+    Animation current_anim = leftHandSprite->animations[leftHandSprite->currentAnimationIdx];
     int current_anim_idx = leftHandSprite->currentAnimationIdx;
 
     bool first_check = current_anim_idx == 0;
-    bool second_check = current_anim_idx == 1 && current_anim->frame > 1;
+    bool second_check = current_anim_idx == 1 && current_anim.frame > 1;
     if (first_check || second_check) {
         baked_light_color = get_light_color_by_pos(player->pos);
         baked_light_color.r = 0.3 + baked_light_color.r * 0.7;
@@ -1522,7 +1523,7 @@ RayCollisionData ray_object(Raycast ray, obj *object) {
             return enemyRayData;
             break;
         case (int)ENEMY_SHOOTER:;
-            Enemy *shooter = ((ShooterEnemy *)object->val)->enemy;
+            Enemy *shooter = object->val;
             RayCollisionData shooterRayData = ray_circle(ray, *shooter->collider);
             if (shooterRayData.hit) {
                 shooterRayData.collider = (ShooterEnemy *)object->val;
@@ -1681,12 +1682,11 @@ void freeObject(void *val, int type) {
             freeObject(effect->entity.sprite, SPRITE);
             free(effect);
             break;
-        case (int)SPRITE:;  // not gonna destroy the texture i think
+        case (int)SPRITE:;  // not gonna destroy the texture
             Sprite *s = val;
             for (int i = 0; i < s->animCount; i++) {
-                Animation *anim = s->animations[i];
-                free(anim->frames);
-                free(anim);
+                Animation anim = s->animations[i];
+                free(anim.frames);
             }
             free(s->animations);
             free(s);
@@ -1760,11 +1760,11 @@ Sprite *getRandomWallSprite() {
     Sprite **sprites = malloc(sizeof(Sprite *) * 2);
     Sprite *sprite1 = createSprite(true, 1);
     sprite1->currentAnimationIdx = 0;
-    Animation *anim = create_animation(17);
-    anim->frames = wallFrames;
-    anim->loop = true;
-    anim->playing = true;
-    anim->fps = 10;
+    Animation anim = create_animation(17, 0);
+    anim.frames = wallFrames; // #LEAK
+    anim.loop = true;
+    anim.playing = true;
+    anim.fps = 10;
     sprite1->animations[0] = anim;
 
     Sprite *sprite2 = createSprite(false, 0);
@@ -1834,7 +1834,7 @@ void load_level(char *file) {
             if (floorTileMap[r][c] == (int)P_FLOOR_LIGHT) {
                 LightPoint *test_point = malloc(sizeof(LightPoint));
                 test_point->color = (SDL_Color){255, 100, 10};//{255, 200, 100};
-                test_point->strength = 3;
+                test_point->strength = 2;
                 test_point->radius = 140;
                 test_point->pos = (v2){(c + 0.5) * tileSize, (r + 0.5) * tileSize};
                 add_game_object(test_point, LIGHT_POINT);
@@ -1854,7 +1854,7 @@ void load_level(char *file) {
             if (ceilingTileMap[r][c] == (int)P_CEILING_LIGHT) {
                 LightPoint *test_point = malloc(sizeof(LightPoint));
                 test_point->color = (SDL_Color){255, 255, 255};//{255, 200, 100};
-                test_point->strength = 2;
+                test_point->strength = 1;
                 test_point->radius = 400;
                 test_point->pos = (v2){(c + 0.5) * tileSize, (r + 0.5) * tileSize};
                 add_game_object(test_point, LIGHT_POINT);
@@ -1891,15 +1891,16 @@ void freeAnimation(Animation *anim) {
     free(anim);
 }
 
-Animation *create_animation(int frameCount) {
-    Animation *anim = malloc(sizeof(Animation));
-    anim->playing = false;
-    anim->frameCount = frameCount;
-    anim->frames = malloc(sizeof(SDL_Texture *) * frameCount);
-    anim->frame = 0;
-    anim->fps = 5;
-    anim->loop = true;
-    anim->timeToNextFrame = 0;
+Animation create_animation(int frameCount, int priority) {
+    Animation anim;
+    anim.playing = false;
+    anim.frameCount = frameCount;
+    anim.frames = malloc(sizeof(SDL_Texture *) * frameCount);
+    anim.frame = 0;
+    anim.fps = 5;
+    anim.loop = true;
+    anim.timeToNextFrame = 0;
+    anim.priority = priority;
 
     return anim;
 }
@@ -1927,7 +1928,7 @@ Sprite *createSprite(bool isAnimated, int animCount) {
     sprite->currentAnimationIdx = 0;
     sprite->animCount = animCount;
     if (isAnimated) {
-        sprite->animations = malloc(sizeof(Animation *) * animCount);
+        sprite->animations = malloc(sizeof(Animation ) * animCount);
     } else {
         sprite->animations = NULL;
     }
@@ -1935,13 +1936,19 @@ Sprite *createSprite(bool isAnimated, int animCount) {
 }
 
 void spritePlayAnim(Sprite *sprite, int idx) {
+    bool less_priority = sprite->currentAnimationIdx != -1 
+    && sprite->animations[sprite->currentAnimationIdx].priority < sprite->animations[idx].priority
+    && sprite->animations[sprite->currentAnimationIdx].playing;
+    if (less_priority) {
+        return;
+    }
     sprite->currentAnimationIdx = idx;
     for (int i = 0; i < sprite->animCount; i++) {
-        sprite->animations[i]->playing = false;
+        sprite->animations[i].playing = false;
     }
-    sprite->animations[idx]->frame = 0;
-    sprite->animations[idx]->timeToNextFrame = 1 / sprite->animations[idx]->fps;
-    sprite->animations[idx]->playing = true;
+    sprite->animations[idx].frame = 0;
+    sprite->animations[idx].timeToNextFrame = 1 / sprite->animations[idx].fps;
+    sprite->animations[idx].playing = true;
 }
 
 SDL_Texture *getSpriteCurrentTexture(Sprite *sprite) {
@@ -1949,9 +1956,8 @@ SDL_Texture *getSpriteCurrentTexture(Sprite *sprite) {
         return sprite->texture;
     } else {
         if (sprite->currentAnimationIdx == -1) return NULL;
-        Animation *current = sprite->animations[sprite->currentAnimationIdx];
-        if (current == NULL) return NULL;
-        return current->frames[current->frame];
+        Animation current = sprite->animations[sprite->currentAnimationIdx];
+        return current.frames[current.frame];
     }
 }
 
@@ -2021,9 +2027,12 @@ void playerShoot() {
 
     if (ray_data.hit) {
         if (is_enemy_type(ray_data.colliderType)) {
-            enemyTakeDmg(ray_data.collider, ray_data.colliderType, 1);
+            
             Entity entity = *((Entity *)ray_data.collider);
             effect_height = entity.height - entity.size.y / 2;
+            
+            enemyTakeDmg(ray_data.collider, ray_data.colliderType, 1);
+            
         }
     } else {
         return;
@@ -2038,14 +2047,14 @@ void playerShoot() {
         return;
     }
 
-    hitEffect->entity.sprite->animations[0] = create_animation(5);
-    hitEffect->entity.sprite->animations[0]->frames[0] = shootHitEffectFrames[0];
-    hitEffect->entity.sprite->animations[0]->frames[1] = shootHitEffectFrames[1];
-    hitEffect->entity.sprite->animations[0]->frames[2] = shootHitEffectFrames[2];
-    hitEffect->entity.sprite->animations[0]->frames[3] = shootHitEffectFrames[3];
-    hitEffect->entity.sprite->animations[0]->frames[4] = shootHitEffectFrames[4];
-    hitEffect->entity.sprite->animations[0]->fps = 12;
-    hitEffect->entity.sprite->animations[0]->loop = false;
+    hitEffect->entity.sprite->animations[0] = create_animation(5, 0);
+    hitEffect->entity.sprite->animations[0].frames[0] = shootHitEffectFrames[0];
+    hitEffect->entity.sprite->animations[0].frames[1] = shootHitEffectFrames[1];
+    hitEffect->entity.sprite->animations[0].frames[2] = shootHitEffectFrames[2];
+    hitEffect->entity.sprite->animations[0].frames[3] = shootHitEffectFrames[3];
+    hitEffect->entity.sprite->animations[0].frames[4] = shootHitEffectFrames[4];
+    hitEffect->entity.sprite->animations[0].fps = 12;
+    hitEffect->entity.sprite->animations[0].loop = false;
     hitEffect->entity.height = effect_height;
     hitEffect->entity.affected_by_light = false;
 
@@ -2090,8 +2099,8 @@ void enemyTakeDmg(void *enemy, int type, int dmg) {
             break;
         case (int)ENEMY_SHOOTER:;
             ShooterEnemy *shooter = (ShooterEnemy *)enemy;
-            shooter->enemy->health -= dmg;
-            if (shooter->enemy->health <= 0) {
+            shooter->enemy.health -= dmg;
+            if (shooter->enemy.health <= 0) {
                 // play death anim
                 remove_game_object(shooter, ENEMY_SHOOTER);
             }
@@ -2234,7 +2243,7 @@ void bulletTick(EnemyBullet *bullet, u64 delta) {
 }
 
 void shooterEnemyShoot(ShooterEnemy *shooter) {
-    EnemyBullet *bullet = createDefaultBullet(shooter->enemy->entity.pos, shooter->enemy->dir);
+    EnemyBullet *bullet = createDefaultBullet(shooter->enemy.entity.pos, shooter->enemy.dir);
     if (bullet == NULL) {
         printf("Bullet is null \n");
         return;
@@ -2245,11 +2254,11 @@ void shooterEnemyShoot(ShooterEnemy *shooter) {
 void shooterTick(ShooterEnemy *shooter, u64 delta) {
     double deltaSec = mili_to_sec(delta);
 
-    enemyTick(shooter->enemy, delta);
+    enemyTick((Enemy *)shooter, delta);
 
-    if (shooter->enemy->seeingPlayer) {
-        shooter->enemy->dir = v2_dir(shooter->enemy->entity.pos, player->pos);
-        shooter->enemy->dirSprite->dir = shooter->enemy->dir;
+    if (shooter->enemy.seeingPlayer) {
+        shooter->enemy.dir = v2_dir(shooter->enemy.entity.pos, player->pos);
+        shooter->enemy.dirSprite->dir = shooter->enemy.dir;
         if (shooter->shootCooldownTimer <= 0) {
             shooterEnemyShoot(shooter);
             shooter->shootCooldownTimer = shooter->shootCooldown;
@@ -2266,8 +2275,8 @@ ShooterEnemy *createShooterEnemy(v2 pos) {
         return NULL;
     }
     shooter->enemy = createEnemy(pos);
-    shooter->enemy->maxHealth = 3;
-    shooter->enemy->health = shooter->enemy->maxHealth;
+    shooter->enemy.maxHealth = 3;
+    shooter->enemy.health = shooter->enemy.maxHealth;
 
     shooter->shootCooldown = 2;
     shooter->shootCooldownTimer = 0;
@@ -2449,7 +2458,7 @@ void bake_lights() {
 
 double get_max_height() {
     double fov_factor = tanHalfStartFOV / tanHalfFOV;
-    return WALL_HEIGHT * WINDOW_HEIGHT * fov_factor;
+    return (WALL_HEIGHT * WINDOW_HEIGHT) * fov_factor;
 }
 
 bool is_enemy_type(int type) {
