@@ -205,6 +205,8 @@ typedef struct CollisionData {
 
 // #FUNCTIONS
 
+SDL_Color lerp_color(SDL_Color col1, SDL_Color col2, double w);
+
 void remove_loading_screen();
 
 void update_loading_progress(double progress);
@@ -338,6 +340,11 @@ void getTextureFiles(char *fileName, int fileCount, SDL_Texture ***textures);
 // #FUNCTIONS END
 
 // #VARIABLES
+
+
+SDL_Color vignette_color = {0, 0, 0};
+
+SDL_Texture *vignette_texture;
 
 bool is_loading = false;
 double loading_progress = 0;
@@ -505,6 +512,8 @@ Enemy createEnemy(v2 pos) {
 void init() {  // #INIT
 
     init_cd_print();
+
+    vignette_texture = make_texture(renderer, "Textures/vignette.bmp");
 
     fenceTexture = make_texture(renderer, "Textures/fence.bmp");
     SDL_SetTextureBlendMode(fenceTexture, SDL_BLENDMODE_BLEND);
@@ -769,9 +778,14 @@ void objectTick(void *obj, int type, u64 delta) {
 }
 
 void tick(u64 delta) {
-    playerForward = get_player_forward();
 
     double deltaSec = mili_to_sec(delta);
+
+    vignette_color = lerp_color(vignette_color, (SDL_Color){0, 0, 0}, deltaSec);
+
+    playerForward = get_player_forward();
+
+    
 
     tanHalfFOV = tan(deg_to_rad(fov / 2));
 
@@ -893,27 +907,10 @@ v2 worldToScreen(v2 pos, double height) {
 
     double fov_factor = tanHalfStartFOV / tanHalfFOV;
     double wallSize = WALL_HEIGHT * WINDOW_HEIGHT / dist_to_viewplane * fov_factor;
-    double y_pos = WINDOW_HEIGHT / 2 + wallSize / 2 - (height / dist_to_viewplane) - player->height;
+    double y_pos = WINDOW_HEIGHT / 2 + wallSize / 2 - (height / dist_to_viewplane);
 
-
-    // v2 offset = v2_sub(pos, player->pos);
-    // double dist = v2_length(offset);
-
-    // double signedAngle = v2_signed_angle_between(playerForward, offset);
-
-    // double lowBound = fov * -0.5;
-    // double highBound = fov * 0.5;
-    // double signedAngleDeg = rad_to_deg(signedAngle);
-
-    
-
-    // double idx = inverse_lerp(lowBound, highBound, signedAngleDeg);
-
-    // int x = idx * WINDOW_WIDTH;
-
-    // 
-
-    // int y = 
+    x_pos += cameraOffset.x;
+    y_pos += -player->height + cameraOffset.y;
 
     return (v2){x_pos, y_pos};
 }
@@ -1358,6 +1355,10 @@ BakedLightColor get_light_color_by_pos(v2 pos) {
 }
 
 void renderHUD() {
+
+    SDL_SetTextureColorMod(vignette_texture, vignette_color.r, vignette_color.g, vignette_color.b);
+    SDL_RenderCopy(renderer, vignette_texture, NULL, NULL);
+
     SDL_Rect leftHandRect = {player->handOffset.x + cameraOffset.x, player->handOffset.y + cameraOffset.y, WINDOW_WIDTH, WINDOW_HEIGHT};
 
     // leftHandRect.x += WINDOW_WIDTH * 3/5 - 40;
@@ -1385,19 +1386,19 @@ void renderHUD() {
     SDL_Texture *texture = getSpriteCurrentTexture(leftHandSprite);
     
 
-    if (texture == NULL) {
-        return;
+    if (texture != NULL) {
+        int rgb[3] = {
+            baked_light_color.r * 125,
+            baked_light_color.g * 125,
+            baked_light_color.b * 125
+        };
+
+        clampColors(rgb);
+
+        SDL_SetTextureColorMod(texture, rgb[0], rgb[1], rgb[2]);
+        SDL_RenderCopy(renderer, texture, NULL, &leftHandRect);
     }
-    int rgb[3] = {
-        baked_light_color.r * 125,
-        baked_light_color.g * 125,
-        baked_light_color.b * 125
-    };
-
-    clampColors(rgb);
-
-    SDL_SetTextureColorMod(texture, rgb[0], rgb[1], rgb[2]);
-    SDL_RenderCopy(renderer, texture, NULL, &leftHandRect);
+    
 
     SDL_Rect crosshairRect = {WINDOW_WIDTH / 2 - 8, WINDOW_HEIGHT / 2 - 8, 16, 16};
 
@@ -1410,6 +1411,8 @@ void renderHUD() {
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
 
     SDL_RenderFillRect(renderer, &playerPendingShotsRect);
+
+    
 }
 
 void drawSkybox() {
@@ -1502,7 +1505,7 @@ void init_player(v2 pos) {
     player->collider = malloc(sizeof(CircleCollider));
     player->collider->radius = 5;
     player->collider->pos = player->pos;
-    player->maxHealth = 3;
+    player->maxHealth = 10;
     player->health = player->maxHealth;
 }
 
@@ -2498,7 +2501,12 @@ void reset_level() {
 
 void player_take_dmg(int dmg) {
     player->health -= dmg;
+
     // play some effect or animation
+    shakeCamera(20, 10, true);
+
+    double progress_to_death = (double)(player->maxHealth - player->health) / player->maxHealth; // when it reaches 1, ur cooked
+    vignette_color = (SDL_Color){255 * progress_to_death, 0, 0};
 
     if (player->health <= 0) {
         player_die();
@@ -2523,7 +2531,7 @@ void init_loading_screen() {
 
     const v2 bar_container_size = {
         200,
-        70
+        50
     };
 
     SDL_Rect bar_container = {
@@ -2534,8 +2542,8 @@ void init_loading_screen() {
     };
 
     const v2 bar_size = {
-        180,
-        50
+        190,
+        40
     };
 
     SDL_Rect bar_background = {
@@ -2561,7 +2569,7 @@ void update_loading_progress(double progress) {
 
     const v2 bar_container_size = {
         200,
-        70
+        50
     };
 
     SDL_Rect bar_container = {
@@ -2571,19 +2579,26 @@ void update_loading_progress(double progress) {
         bar_container_size.y
     };
 
-    const v2 bar_size = {
-        180,
-        50
+    v2 bar_bg_size = {
+        190,
+        40
     };
 
     SDL_Rect bar_background = {
-        WINDOW_WIDTH / 2 - bar_size.x / 2,
-        WINDOW_HEIGHT / 2 - bar_size.y / 2,
-        bar_size.x,
-        bar_size.y
+        WINDOW_WIDTH / 2 - bar_bg_size.x / 2,
+        WINDOW_HEIGHT / 2 - bar_bg_size.y / 2,
+        bar_bg_size.x,
+        bar_bg_size.y
     };
 
-    SDL_Rect bar = bar_background;
+    v2 bar_size = v2_sub(bar_bg_size, to_vec(10));
+
+    SDL_Rect bar = {
+        WINDOW_WIDTH / 2 - bar_size.x / 2,
+        WINDOW_HEIGHT / 2 - bar_size.y / 2,
+        bar_size.x * progress,
+        bar_size.y
+    };
     bar.w = bar_size.x * progress;
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
@@ -2603,6 +2618,15 @@ void remove_loading_screen() {
 }
 
 
+SDL_Color lerp_color(SDL_Color col1, SDL_Color col2, double w) {
+    SDL_Color res = {
+        lerp(col1.r, col2.r, w),
+        lerp(col1.g, col2.g, w),
+        lerp(col1.b, col2.b, w)
+    };
+
+    return res;
+}
 
 
 
