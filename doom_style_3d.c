@@ -342,6 +342,8 @@ void getTextureFiles(char *fileName, int fileCount, SDL_Texture ***textures);
 // #VARIABLES
 
 
+SDL_Texture *healthbar_texture;
+
 SDL_Color vignette_color = {0, 0, 0};
 
 SDL_Texture *vignette_texture;
@@ -512,6 +514,8 @@ Enemy createEnemy(v2 pos) {
 void init() {  // #INIT
 
     init_cd_print();
+
+    healthbar_texture = make_texture(renderer, "Textures/health_bar.bmp");
 
     vignette_texture = make_texture(renderer, "Textures/vignette.bmp");
 
@@ -1354,15 +1358,9 @@ BakedLightColor get_light_color_by_pos(v2 pos) {
     }
 }
 
-void renderHUD() {
-
-    SDL_SetTextureColorMod(vignette_texture, vignette_color.r, vignette_color.g, vignette_color.b);
-    SDL_RenderCopy(renderer, vignette_texture, NULL, NULL);
+void render_hand() {
 
     SDL_Rect leftHandRect = {player->handOffset.x + cameraOffset.x, player->handOffset.y + cameraOffset.y, WINDOW_WIDTH, WINDOW_HEIGHT};
-
-    // leftHandRect.x += WINDOW_WIDTH * 3/5 - 40;
-    // leftHandRect.y -= 20;
 
     BakedLightColor baked_light_color;
 
@@ -1398,7 +1396,42 @@ void renderHUD() {
         SDL_SetTextureColorMod(texture, rgb[0], rgb[1], rgb[2]);
         SDL_RenderCopy(renderer, texture, NULL, &leftHandRect);
     }
+}
+
+void render_health_bar() {
     
+    v2 tex_size = get_texture_size(healthbar_texture);
+
+    v2 scale = {3, 3};
+
+    SDL_Rect outline_rect = {
+        0,
+        0,
+        tex_size.x * scale.x,
+        tex_size.y * scale.y 
+    };
+
+    SDL_Rect health_rect = {
+        16 * scale.x,
+        18 * scale.y,
+        78 * scale.x * ((double)player->health / player->maxHealth),
+        11 * scale.y
+    };
+
+    SDL_SetRenderDrawColor(renderer, 200, 0, 0, 255);
+    SDL_RenderFillRect(renderer, &health_rect);
+
+    SDL_RenderCopy(renderer, healthbar_texture, NULL, &outline_rect);
+}
+
+void renderHUD() {
+
+    SDL_SetTextureColorMod(vignette_texture, vignette_color.r, vignette_color.g, vignette_color.b);
+    SDL_RenderCopy(renderer, vignette_texture, NULL, NULL);
+
+    render_hand();
+
+    render_health_bar();
 
     SDL_Rect crosshairRect = {WINDOW_WIDTH / 2 - 8, WINDOW_HEIGHT / 2 - 8, 16, 16};
 
