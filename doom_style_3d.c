@@ -205,6 +205,18 @@ typedef struct CollisionData {
 
 // #FUNCTIONS
 
+void remove_loading_screen();
+
+void update_loading_progress(double progress);
+
+void init_loading_screen();
+
+void player_die();
+
+void player_take_dmg(int dmg);
+
+void reset_level();
+
 bool is_enemy_type(int type);
 
 double get_max_height();
@@ -259,7 +271,7 @@ void add_game_object(void *val, int type);
 
 void remove_game_object(void *val, int type);
 
-Player *init_player(v2 pos);
+void init_player();
 
 double mili_to_sec(u64 mili);
 
@@ -327,12 +339,15 @@ void getTextureFiles(char *fileName, int fileCount, SDL_Texture ***textures);
 
 // #VARIABLES
 
+bool is_loading = false;
+double loading_progress = 0;
+
 BakedLightColor baked_light_grid[TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION][TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION];
 
 bool fullscreen = false;
 bool running = true;
 arraylist *gameobjects;
-Player *player;
+Player *player = NULL;
 bool keyPressArr[26];
 bool render_debug = false;
 bool lockMouse = true;
@@ -503,8 +518,6 @@ void init() {  // #INIT
     ceilingTexture = TextureData_from_bmp("Textures/ceiling.bmp");
     ceilingLightTexture = TextureData_from_bmp("Textures/ceiling_light.bmp");
 
-    player = init_player((v2){0, 0});
-
     init_tilemap(&levelTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
     init_tilemap(&floorTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
     init_tilemap(&ceilingTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
@@ -542,10 +555,6 @@ void init() {  // #INIT
 
     getTextureFiles("Textures/ShootEffectAnim/shootHitEffect", 5, &shootHitEffectFrames);
 
-    // int x, y;
-    // SDL_QueryTexture(floorTexture, NULL, NULL, &x, &y);
-    // floorTextureSize = (v2){x, y};
-
     for (int i = 0; i < 26; i++) keyPressArr[i] = false;
 
     entityTexture = make_texture(renderer, "Textures/scary_monster.bmp");
@@ -561,22 +570,7 @@ void init() {  // #INIT
 
     SDL_RenderSetLogicalSize(renderer, WINDOW_WIDTH, WINDOW_HEIGHT);
 
-	// LightPoint *test_point = malloc(sizeof(LightPoint));
-	// test_point->color = (SDL_Color){110, 190, 255};//{255, 200, 100};
-	// test_point->strength = 3;
-    // test_point->radius = 400;
-	// test_point->pos = player->pos;
-
-    // LightPoint *test_point2 = malloc(sizeof(LightPoint));
-    // test_point2->color = (SDL_Color){230, 50, 250};
-    // test_point2->strength = 2;
-    // test_point2->radius = 400;
-	// test_point2->pos = v2_add(player->pos, (v2){0, -100});
-
-	//add_game_object(test_point, LIGHT_POINT);
-    //add_game_object(test_point2, LIGHT_POINT);
-
-	bake_lights();
+	
 
 }  // #INIT END
 
@@ -642,6 +636,11 @@ void key_pressed(SDL_Keycode key) {
         render_debug = !render_debug;
         return;
     }
+
+    if (key == SDLK_r) {
+        reset_level();
+    }
+
     if (key == SDLK_LSHIFT) {
         player->sprinting = true;
     }
@@ -1487,8 +1486,8 @@ void render(u64 delta) {  // #RENDER
 }
 
 // #PLAYER INIT
-Player *init_player(v2 pos) {
-    Player *player = malloc(sizeof(Player));
+void init_player(v2 pos) {
+    if (player == NULL) player = malloc(sizeof(Player));
     player->angle = 0;
     player->pos = pos;
     player->vel = V2_ZERO;
@@ -1503,10 +1502,8 @@ Player *init_player(v2 pos) {
     player->collider = malloc(sizeof(CircleCollider));
     player->collider->radius = 5;
     player->collider->pos = player->pos;
-    player->maxHealth = 10;
+    player->maxHealth = 3;
     player->health = player->maxHealth;
-
-    return player;
 }
 
 // CLEAR
@@ -1799,12 +1796,16 @@ void reset_tilemap(int ***gridPtr, int cols, int rows) {
 }
 
 void clearLevel() {
+
     for (int i = 0; i < gameobjects->length; i++) {
         obj *object = arraylist_get(gameobjects, i);
         freeObject(object->val, object->type);
     }
 
     arraylist_clear(gameobjects);
+
+    player = NULL;
+
 }
 
 void load_level(char *file) {
@@ -1870,7 +1871,7 @@ void load_level(char *file) {
 
             switch (type) {
                 case (int)P_PLAYER:
-                    player->pos = tileMid;
+                    init_player(tileMid);
                     arraylist_add(gameobjects, player, PLAYER);
                     break;
                 case (int)P_SHOOTER:;
@@ -1884,6 +1885,10 @@ void load_level(char *file) {
     free(data);
 
     fclose(fh);
+
+
+    bake_lights();
+
 }
 
 void freeAnimation(Animation *anim) {
@@ -2206,7 +2211,7 @@ EnemyBullet *createDefaultBullet(v2 pos, v2 dir) {
     bullet->entity.height = WINDOW_HEIGHT / 6;
     bullet->dirSprite = NULL;
     bullet->dmg = 1;
-    bullet->speed = 5.5;
+    bullet->speed = 3.5;
     bullet->dir = dir;
     bullet->lifeTime = 5;
     bullet->lifeTimer = bullet->lifeTime;
@@ -2238,7 +2243,7 @@ void bulletTick(EnemyBullet *bullet, u64 delta) {
 
     if (intersectCircles(*bullet->collider, *(player->collider))) {
         remove_game_object(bullet, BULLET);
-        // deal damage to player
+        player_take_dmg(1);
     }
 }
 
@@ -2396,6 +2401,8 @@ void update_fullscreen() {
 
 void bake_lights() {
    
+    init_loading_screen();
+
     LightPoint *lights[gameobjects->length];
     int ptr = 0;
     for (int i = 0; i < gameobjects->length; i++) {
@@ -2403,7 +2410,6 @@ void bake_lights() {
 		if (current->type != LIGHT_POINT) continue;
         lights[ptr++] = current->val;
     }
-
 
     for (int r = 0; r < TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION; r++) {
         for (int c = 0; c < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; c++) {
@@ -2452,8 +2458,21 @@ void bake_lights() {
             }
 
 			baked_light_grid[r][c] = col;
+
+
+            // calc loading bar progress
+            int w = TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION;
+            int h = TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION;
+            int prog = r * w + c;
+            if (prog % 30000 == 0) {
+                double p = (double)prog / (w * h);
+                cd_print(true, "%.2f \n", p);
+                update_loading_progress(p);
+            }
         }
     }
+
+    remove_loading_screen();
 }
 
 double get_max_height() {
@@ -2467,6 +2486,124 @@ bool is_enemy_type(int type) {
     }
     return false;
 }
+
+void reset_level() {
+
+    if (isValidLevel(levelToLoad)) {
+        load_level(levelToLoad);
+    } else {
+        load_level("default_level.hclevel");
+    }
+}
+
+void player_take_dmg(int dmg) {
+    player->health -= dmg;
+    // play some effect or animation
+
+    if (player->health <= 0) {
+        player_die();
+    }
+}
+
+void player_die() {
+
+    // play some dramatic ahh animation
+
+    reset_level();
+}
+
+
+void init_loading_screen() {
+    
+    is_loading = true;
+    loading_progress = 0;
+
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderClear(renderer);
+
+    const v2 bar_container_size = {
+        200,
+        70
+    };
+
+    SDL_Rect bar_container = {
+        WINDOW_WIDTH / 2 - bar_container_size.x / 2,
+        WINDOW_HEIGHT / 2 - bar_container_size.y / 2,
+        bar_container_size.x,
+        bar_container_size.y
+    };
+
+    const v2 bar_size = {
+        180,
+        50
+    };
+
+    SDL_Rect bar_background = {
+        WINDOW_WIDTH / 2 - bar_size.x / 2,
+        WINDOW_HEIGHT / 2 - bar_size.y / 2,
+        bar_size.x,
+        bar_size.y
+    };
+
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    SDL_RenderFillRect(renderer, &bar_container);
+
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderFillRect(renderer, &bar_background);
+
+    SDL_RenderPresent(renderer);
+
+}
+
+void update_loading_progress(double progress) {
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderClear(renderer);
+
+    const v2 bar_container_size = {
+        200,
+        70
+    };
+
+    SDL_Rect bar_container = {
+        WINDOW_WIDTH / 2 - bar_container_size.x / 2,
+        WINDOW_HEIGHT / 2 - bar_container_size.y / 2,
+        bar_container_size.x,
+        bar_container_size.y
+    };
+
+    const v2 bar_size = {
+        180,
+        50
+    };
+
+    SDL_Rect bar_background = {
+        WINDOW_WIDTH / 2 - bar_size.x / 2,
+        WINDOW_HEIGHT / 2 - bar_size.y / 2,
+        bar_size.x,
+        bar_size.y
+    };
+
+    SDL_Rect bar = bar_background;
+    bar.w = bar_size.x * progress;
+
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    SDL_RenderFillRect(renderer, &bar_container);
+
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderFillRect(renderer, &bar_background);
+
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    SDL_RenderFillRect(renderer, &bar);
+
+    SDL_RenderPresent(renderer);
+}
+
+void remove_loading_screen() {
+    is_loading = false;
+}
+
+
+
 
 
 // #END
