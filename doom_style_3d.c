@@ -2298,7 +2298,8 @@ void shooterTick(ShooterEnemy *shooter, u64 delta) {
     enemyTick((Enemy *)shooter, delta);
 
     if (shooter->enemy.seeingPlayer) {
-        shooter->enemy.dir = v2_dir(shooter->enemy.entity.pos, player->pos);
+        v2 desired_dir = v2_dir(shooter->enemy.entity.pos, player->pos);
+        shooter->enemy.dir = v2_normalize(v2_lerp(shooter->enemy.dir, desired_dir, deltaSec * 2));
         shooter->enemy.dirSprite->dir = shooter->enemy.dir;
         if (shooter->shootCooldownTimer <= 0) {
             shooterEnemyShoot(shooter);

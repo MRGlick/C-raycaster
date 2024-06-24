@@ -1,1 +1,1 @@
-When making the textures, the texture that faces BACK goes first, and the rest of the textures follow counter-clockwise.
+When making the textures, the texture that faces BACK goes first, and the rest of the textures follow clockwise.
