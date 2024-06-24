@@ -28,7 +28,28 @@ SDL_Window *window;
 #define OUT_OF_SCREEN_POS \
     (v2) { WINDOW_WIDTH * 100, WINDOW_HEIGHT * 100 }
 
-enum Types { PLAYER, RAYCAST, CIRCLE_COLLIDER, RAY_COLL_DATA, ENTITY, RENDER_OBJECT, WALL_STRIPE, LIGHT_POINT, SPRITE, PARTICLES, PARTICLE, EFFECT, ENEMY, BULLET, DIR_SPRITE, ENEMY_SHOOTER };
+enum Types { 
+    PLAYER, 
+    RAYCAST, 
+    CIRCLE_COLLIDER, 
+    RAY_COLL_DATA, 
+    ENTITY, 
+    RENDER_OBJECT, 
+    WALL_STRIPE, 
+    LIGHT_POINT, 
+    SPRITE, 
+    PARTICLES, 
+    PARTICLE, 
+    EFFECT, 
+    BULLET, 
+    DIR_SPRITE, 
+
+
+
+
+    ENEMY, // enemy types start
+    ENEMY_SHOOTER 
+};
 
 enum Tiles { WALL1 = 1, WALL2 = 2 };
 
@@ -95,6 +116,7 @@ typedef struct Entity {
     v2 pos, size;
     Sprite *sprite;
     double height;
+    bool affected_by_light;
 } Entity;
 
 typedef struct LightPoint {
@@ -181,6 +203,8 @@ typedef struct CollisionData {
 } CollisionData;
 
 // #FUNCTIONS
+
+bool is_enemy_type(int type);
 
 double get_max_height();
 
@@ -282,7 +306,7 @@ void playerShoot();
 
 void enemyTakeDmg(void *enemy, int type, int dmg);
 
-void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height);
+void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height, bool affected_by_light);
 
 void renderDirSprite(DirectionalSprite *dSprite, v2 pos, v2 size, double height);
 
@@ -436,6 +460,7 @@ Enemy *createEnemy(v2 pos) {
     enemy->entity->pos = pos;
     enemy->entity->size = to_vec(50);
     enemy->entity->sprite = NULL;
+    enemy->entity->affected_by_light = true;
 
     enemy->dirSprite = createDirSprite(16);
     for (int i = 0; i < 16; i++) {
@@ -867,8 +892,6 @@ v2 worldToScreen(v2 pos, double height) {
     double x_pos_sign = signed_angle_to_forward >= 0 ? 1 : -1;
     double x_pos = WINDOW_WIDTH / 2 + (texture_thing_width / fov_width_at_texture * WINDOW_WIDTH) * x_pos_sign;
 
-    cd_print(true, "sign: %.2f \n", x_pos_sign);
-
     double fov_factor = tanHalfStartFOV / tanHalfFOV;
     double wallSize = WALL_HEIGHT * WINDOW_HEIGHT / dist_to_viewplane * fov_factor;
     double y_pos = WINDOW_HEIGHT / 2 + wallSize / 2 - (height / dist_to_viewplane) - player->height;
@@ -1056,7 +1079,7 @@ void drawFloorAndCeiling() {
     SDL_RenderCopy(renderer, floorAndCeiling, NULL, &rect);
 }
 
-void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height) {
+void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height, bool affected_by_light) {
     
 
     v2 screen_pos = worldToScreen(pos, height);
@@ -1080,24 +1103,26 @@ void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height) {
         final_size.y
     };
 
-    double light;
-    if (screen_pos.y < WINDOW_HEIGHT * 3/4) {
-        light = inverse_lerp(WINDOW_HEIGHT / 2, WINDOW_HEIGHT * 3/4, screen_pos.y) * 0.8;
-    } else {
-        light = 0.8;
+    int rgb[3] = {255, 255, 255};
+    if (affected_by_light) {
+        double light;
+        if (dist_to_player > 150) {
+            light = distance_to_color(dist_to_player - 150, 0.01) * 0.8;
+        } else {
+            light = 0.8;
+        }
+
+        int color = 255 * light;
+    
+        BakedLightColor baked_color = get_light_color_by_pos(pos);
+
+        rgb[0] = color * baked_color.r;
+        rgb[1] = color * baked_color.g;
+        rgb[2] = color * baked_color.b;
+
+        clampColors(rgb);
     }
-
-    int color = 255 * light;
- 
-    BakedLightColor baked_color = get_light_color_by_pos(pos);
-
-    int rgb[3] = {
-        color * baked_color.r,
-        color * baked_color.g,
-        color * baked_color.b
-    };
-
-    clampColors(rgb);
+    
 
     SDL_SetTextureColorMod(texture, rgb[0], rgb[1], rgb[2]);
     SDL_RenderCopy(renderer, texture, NULL, &dstRect);
@@ -1107,13 +1132,13 @@ void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height) {
 void renderDirSprite(DirectionalSprite *dSprite, v2 pos, v2 size, double height) {
     SDL_Texture *texture = getSpriteCurrentTexture(getDSpriteCurrentSprite(dSprite, pos));
 
-    renderTexture(texture, pos, size, height);
+    renderTexture(texture, pos, size, height, true);
 }
 
 void renderEntity(Entity *entity) {  // RENDER ENTITY
     SDL_Texture *texture = getSpriteCurrentTexture(entity->sprite);
 
-    renderTexture(texture, entity->pos, entity->size, entity->height);
+    renderTexture(texture, entity->pos, entity->size, entity->height, entity->affected_by_light);
 }
 
 typedef struct WallStripe {
@@ -2003,30 +2028,43 @@ void playerShoot() {
     }
 
     // first cast for walls
-    RayCollisionData entityRayData = castRayForEntities(player->pos, playerForward);
-    RayCollisionData wallRayData = castRay(player->pos, playerForward);
+    // RayCollisionData entityRayData = castRayForEntities(player->pos, playerForward);
+    // RayCollisionData wallRayData = castRay(player->pos, playerForward);
 
-    v2 hitPos;
+    // v2 hitPos;
 
-    double entitySquaredDist = INFINITY, wallSquaredDist = INFINITY;
-    if (entityRayData.hit) {
-        entitySquaredDist = v2_distance_squared(player->pos, entityRayData.collpos);
-    }
-    if (wallRayData.hit) {
-        wallSquaredDist = v2_distance_squared(player->pos, wallRayData.collpos);
-    }
+    // double entitySquaredDist = INFINITY, wallSquaredDist = INFINITY;
+    // if (entityRayData.hit) {
+    //     entitySquaredDist = v2_distance_squared(player->pos, entityRayData.collpos);
+    // }
+    // if (wallRayData.hit) {
+    //     wallSquaredDist = v2_distance_squared(player->pos, wallRayData.collpos);
+    // }
 
-    if (entitySquaredDist < wallSquaredDist) {
-        enemyTakeDmg(entityRayData.collider, entityRayData.colliderType, 1);
-        hitPos = entityRayData.collpos;
-    } else if (entitySquaredDist > wallSquaredDist) {
-        hitPos = wallRayData.collpos;
+    // if (entitySquaredDist < wallSquaredDist) {
+    //     enemyTakeDmg(entityRayData.collider, entityRayData.colliderType, 1);
+    //     hitPos = entityRayData.collpos;
+    // } else if (entitySquaredDist > wallSquaredDist) {
+    //     hitPos = wallRayData.collpos;
+    // } else {
+    //     // didnt hit anything
+    //     return;
+    // }
+
+    RayCollisionData ray_data = castRayForAll(player->pos, playerForward);
+
+    double effect_height = get_max_height() / 2;
+
+    if (ray_data.hit) {
+        if (is_enemy_type(ray_data.colliderType)) {
+            enemyTakeDmg(ray_data.collider, ray_data.colliderType, 1);
+
+        }
     } else {
-        // didnt hit anything
         return;
     }
 
-    v2 effectPos = v2_add(hitPos, v2_mul(playerForward, to_vec(-4)));
+    v2 effectPos = v2_add(ray_data.collpos, v2_mul(playerForward, to_vec(-4)));
 
     Effect *hitEffect = createEffect(effectPos, to_vec(35), createSprite(true, 1), 1);
 
@@ -2043,7 +2081,8 @@ void playerShoot() {
     hitEffect->entity->sprite->animations[0]->frames[4] = shootHitEffectFrames[4];
     hitEffect->entity->sprite->animations[0]->fps = 12;
     hitEffect->entity->sprite->animations[0]->loop = false;
-    hitEffect->entity->height = get_max_height() / 2;
+    hitEffect->entity->height = effect_height;
+    hitEffect->entity->affected_by_light = false;
 
     spritePlayAnim(hitEffect->entity->sprite, 0);
 
@@ -2067,7 +2106,7 @@ void enemyTick(Enemy *enemy, u64 delta) {
     // add player vision
 
     v2 dir = v2_dir(enemy->entity->pos, player->pos);
-    RayCollisionData rayData = castRayForAll(v2_add(enemy->entity->pos, v2_mul(dir, to_vec(15))), dir);
+    RayCollisionData rayData = castRayForAll(v2_add(enemy->entity->pos, v2_mul(dir, to_vec(enemy->collider->radius + 0.01))), dir);
 
     enemy->seeingPlayer = rayData.hit && (Player *)rayData.collider == player;
 
@@ -2116,17 +2155,19 @@ RayCollisionData castRayForEntities(v2 pos, v2 dir) {
 }
 
 RayCollisionData castRayForAll(v2 pos, v2 dir) {
-    RayCollisionData entityRayData = castRayForEntities(pos, dir);
-    RayCollisionData wallRayData = castRay(pos, dir);
+    RayCollisionData entity_ray_data = castRayForEntities(pos, dir);
+    RayCollisionData wall_ray_data = castRay(pos, dir);
 
-    if (!entityRayData.hit) return wallRayData;
-    if (!wallRayData.hit) return entityRayData;
+    if (!entity_ray_data.hit) return wall_ray_data;
+    if (!wall_ray_data.hit) return entity_ray_data;
 
-    double entitySquaredDist = v2_distance_squared(pos, entityRayData.collpos);
-    double wallSquaredDist = v2_distance_squared(pos, wallRayData.collpos);
+    double entity_squared_dist = v2_distance_squared(pos, entity_ray_data.collpos);
+    double wall_squared_dist = v2_distance_squared(pos, wall_ray_data.collpos);
 
-    if (entitySquaredDist > wallSquaredDist) return entityRayData;
-    return wallRayData;
+    cd_print(false, "entity_dist: %.2f, wall_dist: %.2f", entity_squared_dist, wall_squared_dist);
+
+    if (entity_squared_dist < wall_squared_dist) return entity_ray_data;
+    return wall_ray_data;
 }
 
 DirectionalSprite *createDirSprite(int dirCount) {
@@ -2242,7 +2283,7 @@ void shooterTick(ShooterEnemy *shooter, u64 delta) {
 
     enemyTick(shooter->enemy, delta);
 
-    if (!shooter->enemy->seeingPlayer) {
+    if (shooter->enemy->seeingPlayer) {
         shooter->enemy->dir = v2_dir(shooter->enemy->entity->pos, player->pos);
         shooter->enemy->dirSprite->dir = shooter->enemy->dir;
         if (shooter->shootCooldownTimer <= 0) {
@@ -2447,6 +2488,12 @@ double get_max_height() {
     return WALL_HEIGHT * WINDOW_HEIGHT * fov_factor;
 }
 
+bool is_enemy_type(int type) {
+    if (type >= (int)ENEMY) {
+        return true;
+    }
+    return false;
+}
 
 
 // #END
