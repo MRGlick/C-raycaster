@@ -22,6 +22,10 @@
 #define min(a, b) a < b ? a : b
 #define max(a, b) a > b ? a : b
 
+#define new(type) malloc(sizeof(type))
+
+#define debug_crash() *(int *)NULL = 42
+
 #define init_grid(type, rows, cols, default, result) do { \
     result = malloc(sizeof(type *) * rows); \
     for (int i = 0; i < rows; i++) { \
@@ -110,6 +114,7 @@ TextureData *TextureData_from_bmp(char *bmp_file) {
 double mili_to_sec(u64 mili) {
     return (double)mili / 1000;
 }
+
 
 char *concat(char *s1, char *s2) {
     char *result = malloc(strlen(s1) + strlen(s2) + 1);

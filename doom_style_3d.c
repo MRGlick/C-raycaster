@@ -177,6 +177,7 @@ typedef struct EnemyBullet {
     double speed;
     double lifeTime;
     double lifeTimer;
+
 } EnemyBullet;
 
 typedef struct BakedLightColor {
@@ -204,6 +205,8 @@ typedef struct CollisionData {
 } CollisionData;
 
 // #FUNCTIONS
+
+void enemy_bullet_destroy(EnemyBullet *bullet);
 
 SDL_Color lerp_color(SDL_Color col1, SDL_Color col2, double w);
 
@@ -341,6 +344,9 @@ void getTextureFiles(char *fileName, int fileCount, SDL_Texture ***textures);
 
 // #VARIABLES
 
+SDL_Texture *mimran_jumpscare;
+
+SDL_Texture *shooter_hit_texture;
 
 SDL_Texture *healthbar_texture;
 
@@ -374,6 +380,7 @@ TextureData *floorLightTexture;
 TextureData *ceilingTexture;
 TextureData *ceilingLightTexture;
 
+SDL_Texture *enemy_bullet_texture;
 SDL_Texture *floorAndCeiling;
 SDL_Texture *wallTexture;
 SDL_Texture *entityTexture;
@@ -514,6 +521,12 @@ Enemy createEnemy(v2 pos) {
 void init() {  // #INIT
 
     init_cd_print();
+
+    mimran_jumpscare = make_texture(renderer, "Textures/scary_monster2.bmp");
+
+    shooter_hit_texture = make_texture(renderer, "Textures/CubeEnemyAnim/CubeEnemyHit2.bmp");
+
+    enemy_bullet_texture = make_texture(renderer, "Textures/CubeEnemyAnim/CubeEnemyBullet.bmp");
 
     healthbar_texture = make_texture(renderer, "Textures/health_bar.bmp");
 
@@ -720,6 +733,11 @@ void playerTick(u64 delta) {
 
     player->vel = v2_lerp(player->vel, v2_add(v2_mul(move_dir, to_vec(keyVec.x)), v2_mul(move_dir_rotated, to_vec(keyVec.y))), 0.15);
 
+    CollisionData player_coldata = getCircleTileMapCollision(*player->collider);
+    if (player_coldata.didCollide) {
+        player->pos = v2_add(player->pos, player_coldata.offset);
+    }
+
     double moveSpeed = player->speed;
     if (player->sprinting) {
         moveSpeed *= 1.5;
@@ -753,6 +771,9 @@ void spriteTick(Sprite *sprite, u64 delta) {
 }
 
 void objectTick(void *obj, int type, u64 delta) {
+    
+    update_entity_collisions(obj, type);
+    
     switch (type) {
         case (int)PLAYER:
             playerTick(delta);
@@ -777,8 +798,6 @@ void objectTick(void *obj, int type, u64 delta) {
             shooterTick(obj, delta);
             break;
     }
-
-    update_entity_collisions(obj, type);
 }
 
 void tick(u64 delta) {
@@ -2141,6 +2160,14 @@ void enemyTakeDmg(void *enemy, int type, int dmg) {
         case (int)ENEMY_SHOOTER:;
             ShooterEnemy *shooter = (ShooterEnemy *)enemy;
             shooter->enemy.health -= dmg;
+            shakeCamera(15, 4, true);
+            Sprite *sprite = createSprite(false, 0);
+            sprite->texture = shooter_hit_texture;
+            Effect *hit_effect = createEffect(v2_add(shooter->enemy.entity.pos, v2_dir(shooter->enemy.entity.pos, player->pos)), to_vec(50), sprite, 0.1);
+            hit_effect->entity.height = shooter->enemy.entity.height;
+            hit_effect->entity.affected_by_light = false;
+            add_game_object(hit_effect, EFFECT);
+
             if (shooter->enemy.health <= 0) {
                 // play death anim
                 remove_game_object(shooter, ENEMY_SHOOTER);
@@ -2178,8 +2205,6 @@ RayCollisionData castRayForAll(v2 pos, v2 dir) {
 
     double entity_squared_dist = v2_distance_squared(pos, entity_ray_data.collpos);
     double wall_squared_dist = v2_distance_squared(pos, wall_ray_data.collpos);
-
-    cd_print(false, "entity_dist: %.2f, wall_dist: %.2f", entity_squared_dist, wall_squared_dist);
 
     if (entity_squared_dist < wall_squared_dist) return entity_ray_data;
     return wall_ray_data;
@@ -2243,8 +2268,9 @@ EnemyBullet *createDefaultBullet(v2 pos, v2 dir) {
     bullet->entity.pos = pos;
     bullet->entity.size = to_vec(20);
     bullet->entity.sprite = createSprite(false, 0);
-    bullet->entity.sprite->texture = entityTexture;  // CHANGE LATER
+    bullet->entity.sprite->texture = enemy_bullet_texture;  // CHANGE LATER
     bullet->entity.height = WINDOW_HEIGHT / 6;
+    bullet->entity.affected_by_light = false;
     bullet->dirSprite = NULL;
     bullet->dmg = 1;
     bullet->speed = 3.5;
@@ -2272,14 +2298,24 @@ void bulletTick(EnemyBullet *bullet, u64 delta) {
     bullet->collider->pos = bullet->entity.pos;
 
     bullet->lifeTimer -= deltaSec;
+
+
+
     if (bullet->lifeTimer <= 0) {
-        remove_game_object(bullet, BULLET);
+        enemy_bullet_destroy(bullet);
+        return;
+    }
+
+    CollisionData bullet_coldata = getCircleTileMapCollision(*bullet->collider);
+    if (bullet_coldata.didCollide) {
+        enemy_bullet_destroy(bullet);
         return;
     }
 
     if (intersectCircles(*bullet->collider, *(player->collider))) {
-        remove_game_object(bullet, BULLET);
+        enemy_bullet_destroy(bullet);
         player_take_dmg(1);
+        return;
     }
 }
 
@@ -2317,7 +2353,7 @@ ShooterEnemy *createShooterEnemy(v2 pos) {
         return NULL;
     }
     shooter->enemy = createEnemy(pos);
-    shooter->enemy.maxHealth = 3;
+    shooter->enemy.maxHealth = 5;
     shooter->enemy.health = shooter->enemy.maxHealth;
 
     shooter->shootCooldown = 2;
@@ -2388,10 +2424,11 @@ CollisionData getCircleTileMapCollision(CircleCollider circle) {
 void update_entity_collisions(void *val, int type) {
     switch (type) {
         case (int)PLAYER:;
-            CollisionData colData = getCircleTileMapCollision(*player->collider);
-            if (colData.didCollide) {
-                player->pos = v2_add(player->pos, colData.offset);
-            }
+            
+            break;
+        case (int)BULLET: ;
+            EnemyBullet *b = val;
+            
             break;
     }
 }
@@ -2662,6 +2699,9 @@ SDL_Color lerp_color(SDL_Color col1, SDL_Color col2, double w) {
     return res;
 }
 
+void enemy_bullet_destroy(EnemyBullet *bullet) {
+   remove_game_object(bullet, ENEMY_SHOOTER); 
+}
 
 
 // #END

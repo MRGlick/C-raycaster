@@ -55,10 +55,6 @@ void extend_list(arraylist *list) { // PROBLEM HERE
         printf("objects are null");
     }
 
-    printf("%d \n", list->objects[0]->type);
-
-    
-
     obj **newvals = malloc(sizeof(obj *) * list->size * 2);
     if (newvals == NULL) {
         printf("Couldn't allocate memory. Returning \n");

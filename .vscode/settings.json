@@ -6,6 +6,7 @@
         "vector": "c",
         "cmath": "c",
         "*.tcc": "c",
-        "limits": "c"
+        "limits": "c",
+        "stdarg.h": "c"
     }
 }
