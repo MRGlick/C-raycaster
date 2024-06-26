@@ -248,7 +248,7 @@ void load_level(char *file);
 
 void init();
 
-void render(u64 delta);
+void render(double delta);
 
 RayCollisionData ray_circle(Raycast ray, CircleCollider circle);
 
@@ -268,7 +268,7 @@ void key_pressed(SDL_Keycode key);
 
 void key_released(SDL_Keycode key);
 
-void tick(u64 delta);
+void tick(double delta);
 
 void handle_input(SDL_Event event);
 
@@ -290,23 +290,23 @@ SDL_Texture *getSpriteCurrentTexture(Sprite *sprite);
 
 Sprite *getDSpriteCurrentSprite(DirectionalSprite *dSprite, v2 spritePos);
 
-void objectTick(void *obj, int type, u64 delta);
+void objectTick(void *obj, int type, double delta);
 
-void playerTick(u64 delta);
+void playerTick(double delta);
 
-void dSpriteTick(DirectionalSprite *dSprite, v2 spritePos, u64 delta);
+void dSpriteTick(DirectionalSprite *dSprite, v2 spritePos, double delta);
 
-void spriteTick(Sprite *sprite, u64 delta);
+void spriteTick(Sprite *sprite, double delta);
 
-void enemyTick(Enemy *enemy, u64 delta);
+void enemyTick(Enemy *enemy, double delta);
 
-void animationTick(Animation *anim, u64 delta);
+void animationTick(Animation *anim, double delta);
 
-void effectTick(Effect *effect, u64 delta);
+void effectTick(Effect *effect, double delta);
 
-void bulletTick(EnemyBullet *bullet, u64 delta);
+void bulletTick(EnemyBullet *bullet, double delta);
 
-void shooterTick(ShooterEnemy *shooter, u64 delta);
+void shooterTick(ShooterEnemy *shooter, double delta);
 
 Sprite *createSprite(bool isAnimated, int animCount);
 
@@ -405,6 +405,7 @@ double realFps;
 SDL_Texture **wallFrames;
 SDL_Texture **shootHitEffectFrames;
 SDL_Texture *skybox_texture;
+SDL_Texture **enemy_bullet_destroy_anim;
 
 bool isCameraShaking = false;
 int cameraShakeTicks;
@@ -456,8 +457,8 @@ int main(int argc, char *argv[]) {
         // render_timer += delta;
         if (tick_timer >= 1000 / TPS) {
             realFps = 1000.0 / tick_timer;
-            tick(tick_timer);
-            render(tick_timer);
+            tick(mili_to_sec(tick_timer));
+            render(mili_to_sec(tick_timer));
             tick_timer = 0;
         }
     }
@@ -521,6 +522,10 @@ Enemy createEnemy(v2 pos) {
 void init() {  // #INIT
 
     init_cd_print();
+
+    enemy_bullet_destroy_anim = malloc(sizeof(SDL_Texture *) * 5);
+
+    getTextureFiles("Textures/CubeEnemyAnim/CEBulletHitAnim/CEBullethitAnim", 5, &enemy_bullet_destroy_anim);
 
     mimran_jumpscare = make_texture(renderer, "Textures/scary_monster2.bmp");
 
@@ -699,13 +704,12 @@ int get_key_axis(SDL_Keycode key1, SDL_Keycode key2) { return (int)is_key_presse
 
 v2 get_key_vector(SDL_Keycode k1, SDL_Keycode k2, SDL_Keycode k3, SDL_Keycode k4) { return (v2){get_key_axis(k1, k2), get_key_axis(k3, k4)}; }
 
-void playerTick(u64 delta) {
-    double deltaSec = mili_to_sec(delta);
+void playerTick(double delta) {
 
     player->collider->pos = player->pos;
 
     if (player->pendingShots > 0) {
-        player->ShootTickTimer -= deltaSec;
+        player->ShootTickTimer -= delta;
 
         if (player->ShootTickTimer <= 0) {
             player->ShootTickTimer = 0.15;
@@ -750,11 +754,11 @@ void playerTick(u64 delta) {
     if (delta == 0) {
         player->pos = v2_add(player->pos, v2_mul(finalVel, to_vec(0.016)));
     } else {
-        player->pos = v2_add(player->pos, v2_mul(finalVel, to_vec(deltaSec)));
+        player->pos = v2_add(player->pos, v2_mul(finalVel, to_vec(delta)));
     }
 
     if (!player->canShoot) {
-        player->shootCooldown -= deltaSec;
+        player->shootCooldown -= delta;
         if (player->shootCooldown <= 0) {
             player->canShoot = true;
             player->shootCooldown = PLAYER_SHOOT_COOLDOWN;
@@ -762,7 +766,7 @@ void playerTick(u64 delta) {
     }
 }
 
-void spriteTick(Sprite *sprite, u64 delta) {
+void spriteTick(Sprite *sprite, double delta) {
     if (sprite == NULL) return;
     if (!sprite->isAnimated) return;
     if (sprite->animations == NULL) return;
@@ -770,7 +774,7 @@ void spriteTick(Sprite *sprite, u64 delta) {
     animationTick(&sprite->animations[sprite->currentAnimationIdx], delta);
 }
 
-void objectTick(void *obj, int type, u64 delta) {
+void objectTick(void *obj, int type, double delta) {
     
     update_entity_collisions(obj, type);
     
@@ -800,11 +804,10 @@ void objectTick(void *obj, int type, u64 delta) {
     }
 }
 
-void tick(u64 delta) {
+// #TICK
+void tick(double delta) {
 
-    double deltaSec = mili_to_sec(delta);
-
-    vignette_color = lerp_color(vignette_color, (SDL_Color){0, 0, 0}, deltaSec);
+    vignette_color = lerp_color(vignette_color, (SDL_Color){0, 0, 0}, delta);
 
     playerForward = get_player_forward();
 
@@ -817,14 +820,14 @@ void tick(u64 delta) {
     }
 
     if (isLMouseDown) {
-        player->shootChargeTimer += deltaSec;
+        player->shootChargeTimer += delta;
         if (player->shootChargeTimer >= 0.7) {
             shakeCamera(80 * min(15, player->shootChargeTimer - 0.7), 5, false);
         }
     }
 
     if (isCameraShaking) {
-        cameraShakeTimeToNextTick -= deltaSec;
+        cameraShakeTimeToNextTick -= delta;
         if (cameraShakeTimeToNextTick <= 0) {
             cameraShakeTicksLeft -= 1;
             cameraShakeTimeToNextTick = 0.02;
@@ -1479,7 +1482,7 @@ void drawSkybox() {
     SDL_RenderCopy(renderer, tex, NULL, &skybox_rect);
 }
 
-void render(u64 delta) {  // #RENDER
+void render(double delta) {  // #RENDER
 
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
@@ -1965,9 +1968,9 @@ Animation create_animation(int frameCount, int priority) {
     return anim;
 }
 
-void animationTick(Animation *anim, u64 delta) {
+void animationTick(Animation *anim, double delta) {
     if (!anim->playing) return;
-    anim->timeToNextFrame -= mili_to_sec(delta);
+    anim->timeToNextFrame -= delta;
     if (anim->timeToNextFrame <= 0) {
         anim->timeToNextFrame = 1 / anim->fps;
         if (anim->frame + 1 >= anim->frameCount) {
@@ -2123,10 +2126,9 @@ void playerShoot() {
     add_game_object(hitEffect, EFFECT);
 }
 
-void effectTick(Effect *effect, u64 delta) {
-    double deltaSec = mili_to_sec(delta);
+void effectTick(Effect *effect, double delta) {
 
-    effect->lifeTime -= deltaSec;
+    effect->lifeTime -= delta;
     if (effect->lifeTime <= 0) {
         remove_game_object(effect, EFFECT);
         return;
@@ -2134,7 +2136,7 @@ void effectTick(Effect *effect, u64 delta) {
     spriteTick(effect->entity.sprite, delta);
 }
 
-void enemyTick(Enemy *enemy, u64 delta) {
+void enemyTick(Enemy *enemy, double delta) {
     enemy->collider->pos = enemy->entity.pos;
 
     // add player vision
@@ -2247,7 +2249,9 @@ Sprite *getDSpriteCurrentSprite(DirectionalSprite *dSprite, v2 spritePos) {
     return NULL;
 }
 
-void dSpriteTick(DirectionalSprite *dSprite, v2 spritePos, u64 delta) { spriteTick(getDSpriteCurrentSprite(dSprite, spritePos), delta); }
+void dSpriteTick(DirectionalSprite *dSprite, v2 spritePos, double delta) {
+    spriteTick(getDSpriteCurrentSprite(dSprite, spritePos), delta);
+}
 
 double angleDist(double a1, double a2) {
     double l1 = loop_clamp(a1, 0, 360);
@@ -2291,13 +2295,12 @@ bool intersectCircles(CircleCollider c1, CircleCollider c2) {
     return v2_distance_squared(c1.pos, c2.pos) < (c1.radius + c2.radius) * (c1.radius + c2.radius);  // dist^2 < (r1 + r2)^2
 }
 
-void bulletTick(EnemyBullet *bullet, u64 delta) {
-    double deltaSec = mili_to_sec(delta);
+void bulletTick(EnemyBullet *bullet, double delta) {
 
     bullet->entity.pos = v2_add(bullet->entity.pos, v2_mul(bullet->dir, to_vec(bullet->speed)));
     bullet->collider->pos = bullet->entity.pos;
 
-    bullet->lifeTimer -= deltaSec;
+    bullet->lifeTimer -= delta;
 
 
 
@@ -2328,20 +2331,19 @@ void shooterEnemyShoot(ShooterEnemy *shooter) {
     add_game_object(bullet, BULLET);
 }
 
-void shooterTick(ShooterEnemy *shooter, u64 delta) {
-    double deltaSec = mili_to_sec(delta);
+void shooterTick(ShooterEnemy *shooter, double delta) {
 
     enemyTick((Enemy *)shooter, delta);
 
     if (shooter->enemy.seeingPlayer) {
         v2 desired_dir = v2_dir(shooter->enemy.entity.pos, player->pos);
-        shooter->enemy.dir = v2_normalize(v2_lerp(shooter->enemy.dir, desired_dir, deltaSec * 2));
+        shooter->enemy.dir = v2_normalize(v2_lerp(shooter->enemy.dir, desired_dir, delta * 2));
         shooter->enemy.dirSprite->dir = shooter->enemy.dir;
         if (shooter->shootCooldownTimer <= 0) {
             shooterEnemyShoot(shooter);
             shooter->shootCooldownTimer = shooter->shootCooldown;
         } else {
-            shooter->shootCooldownTimer -= deltaSec;
+            shooter->shootCooldownTimer -= delta;
         }
     }
 }
@@ -2700,7 +2702,27 @@ SDL_Color lerp_color(SDL_Color col1, SDL_Color col2, double w) {
 }
 
 void enemy_bullet_destroy(EnemyBullet *bullet) {
-   remove_game_object(bullet, ENEMY_SHOOTER); 
+   
+   
+    Sprite *sprite = createSprite(true, 1);
+    sprite->animations[0] = create_animation(5, 0);
+    for (int i = 0; i < 5; i++) {
+        sprite->animations[0].frames[i] = enemy_bullet_destroy_anim[i];
+    }
+    sprite->animations[0].playing = true;
+    sprite->animations[0].fps = 10;
+    sprite->animations[0].loop = false;
+
+    Effect *effect = createEffect(bullet->entity.pos, to_vec(50), sprite, 1);
+    effect->entity.height = bullet->entity.height;
+    effect->entity.affected_by_light = false;
+
+    add_game_object(effect, EFFECT);
+
+
+
+
+    remove_game_object(bullet, ENEMY_SHOOTER); 
 }
 
 
