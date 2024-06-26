@@ -2479,30 +2479,42 @@ void bake_lights() {
    
     init_loading_screen();
 
-    LightPoint *lights[gameobjects->length];
-    int ptr = 0;
-    for (int i = 0; i < gameobjects->length; i++) {
-        obj *current = arraylist_get(gameobjects, i);
-		if (current->type != LIGHT_POINT) continue;
-        lights[ptr++] = current->val;
-    }
 
     for (int r = 0; r < TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION; r++) {
         for (int c = 0; c < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; c++) {
-            // col, row / light_res * tile_size
-            v2 current_pos = v2_mul(v2_div((v2){c, r}, to_vec(BAKED_LIGHT_RESOLUTION)), to_vec(tileSize));
+            baked_light_grid[r][c] = (BakedLightColor){ambient_light, ambient_light, ambient_light};
+        }
+    }
 
-            v2 tile_pos = v2_div(current_pos, to_vec(tileSize));
+    int light_count = 0;
 
-            if (levelTileMap[(int)tile_pos.y][(int)tile_pos.x] == P_WALL) {
-                continue;
-            }
-            
-            BakedLightColor col = {ambient_light, ambient_light, ambient_light};
+    for (int i = 0; i < gameobjects->length; i++) {
+        obj *current = arraylist_get(gameobjects, i);
+		if (current->type != LIGHT_POINT) continue;
+        light_count++;
+    }
 
-            for (int i = 0; i < ptr; i++) {
-                
-                LightPoint *point = lights[i];
+    if (light_count == 0) {
+        return;
+    }
+
+
+    int current_count = 0;
+
+    for (int i = 0; i < gameobjects->length; i++) {
+        obj *current = arraylist_get(gameobjects, i);
+		if (current->type != LIGHT_POINT) continue;
+        LightPoint *point = current->val;
+
+        int row_lbound = max(point->pos.y - point->radius, 0);
+        int row_rbound = min(point->pos.y + point->radius, TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION);
+        int col_lbound = max(point->pos.x - point->radius, 0);
+        int col_rbound = min(point->pos.x + point->radius, TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION);
+
+        for (int r = row_lbound; r < row_rbound; r++) {
+            for (int c = col_lbound; c < col_rbound; c++) {
+
+                v2 current_pos = v2_mul(v2_div((v2){c, r}, to_vec(BAKED_LIGHT_RESOLUTION)), to_vec(tileSize));
 
                 double dist_to_point = v2_distance(point->pos, current_pos);
 
@@ -2511,6 +2523,8 @@ void bake_lights() {
                 v2 dir = v2_div(v2_sub(point->pos, current_pos), to_vec(dist_to_point));
 
 				RayCollisionData data = castRay(current_pos, dir);
+
+                BakedLightColor col = {0, 0, 0};
 
 				if (!data.hit) {
 					double s = clamp(lerp(1, 0, dist_to_point / point->radius), 0, 1);
@@ -2531,22 +2545,82 @@ void bake_lights() {
 					col.g += helper * (double)point->color.g / 255;
 					col.b += helper * (double)point->color.b / 255;
                 }
-            }
 
-			baked_light_grid[r][c] = col;
+                baked_light_grid[r][c].r += col.r;
+                baked_light_grid[r][c].g += col.g;
+                baked_light_grid[r][c].b += col.b;
 
 
-            // calc loading bar progress
-            int w = TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION;
-            int h = TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION;
-            int prog = r * w + c;
-            if (prog % 30000 == 0) {
-                double p = (double)prog / (w * h);
-                cd_print(true, "%.2f \n", p);
-                update_loading_progress(p);
+                
             }
         }
+
+        current_count++;
+
+        double loading_progress = (double)current_count / light_count;
+        update_loading_progress(loading_progress);
     }
+
+    // for (int r = 0; r < TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION; r++) {
+    //     for (int c = 0; c < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; c++) {
+    //         // col, row / light_res * tile_size
+    //         v2 current_pos = v2_mul(v2_div((v2){c, r}, to_vec(BAKED_LIGHT_RESOLUTION)), to_vec(tileSize));
+
+    //         v2 tile_pos = v2_div(current_pos, to_vec(tileSize));
+
+    //         if (levelTileMap[(int)tile_pos.y][(int)tile_pos.x] == P_WALL) {
+    //             continue;
+    //         }
+            
+    //         BakedLightColor col = {ambient_light, ambient_light, ambient_light};
+
+    //         for (int i = 0; i < ptr; i++) {
+                
+    //             LightPoint *point = lights[i];
+
+    //             double dist_to_point = v2_distance(point->pos, current_pos);
+
+    //             if (dist_to_point > point->radius) continue;
+
+    //             v2 dir = v2_div(v2_sub(point->pos, current_pos), to_vec(dist_to_point));
+
+	// 			RayCollisionData data = castRay(current_pos, dir);
+
+	// 			if (!data.hit) {
+	// 				double s = clamp(lerp(1, 0, dist_to_point / point->radius), 0, 1);
+    //                 s *= s * s; // cubic
+    //                 double helper = s * point->strength;
+	// 				col.r += helper * (double)point->color.r / 255;
+	// 				col.g += helper * (double)point->color.g / 255;
+	// 				col.b += helper * (double)point->color.b / 255;
+	// 			} else {
+    //                 double dist_squared = v2_distance_squared(data.collpos, current_pos);
+
+    //                 if (dist_squared <= dist_to_point * dist_to_point) continue;
+
+    //                 double s = clamp(lerp(1, 0, dist_to_point / point->radius), 0, 1);
+    //                 s *= s * s; // cubic
+    //                 double helper = s * point->strength;
+    //                 col.r += helper * (double)point->color.r / 255;
+	// 				col.g += helper * (double)point->color.g / 255;
+	// 				col.b += helper * (double)point->color.b / 255;
+    //             }
+    //         }
+
+	// 		baked_light_grid[r][c] = col;
+
+
+    //         // calc loading bar progress
+    //         int w = TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION;
+    //         int h = TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION;
+    //         int prog = r * w + c;
+    //         if (prog % 30000 == 0) {
+    //             double p = (double)prog / (w * h);
+    //             cd_print(true, "%.2f \n", p);
+    //             update_loading_progress(p);
+    //         }
+    //     }
+    // }
 
     remove_loading_screen();
 }
