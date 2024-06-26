@@ -107,6 +107,7 @@ typedef struct Player {
     double shootCooldown;
     double shootChargeTimer;
     int pendingShots;
+    int max_pending_shots;
     double ShootTickTimer;
     v2 handOffset;
     int health, maxHealth;
@@ -161,6 +162,7 @@ typedef struct Enemy {
     Entity entity;
     DirectionalSprite *dirSprite;
     CircleCollider *collider;
+    SDL_Texture *hit_texture;
     v2 dir;
     bool seeingPlayer;
     v2 lastSeenPlayerPos;
@@ -205,6 +207,8 @@ typedef struct CollisionData {
 } CollisionData;
 
 // #FUNCTIONS
+
+int charge_time_to_shots(double charge_time);
 
 void enemy_bullet_destroy(EnemyBullet *bullet);
 
@@ -322,7 +326,7 @@ void particlesTick(Particles *particles, u64 delta);
 
 void playerShoot();
 
-void enemyTakeDmg(void *enemy, int type, int dmg);
+void enemyTakeDmg(Enemy *enemy, int dmg);
 
 void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height, bool affected_by_light);
 
@@ -493,6 +497,7 @@ Enemy createEnemy(v2 pos) {
     enemy.entity.size = to_vec(50);
     enemy.entity.sprite = NULL;
     enemy.entity.affected_by_light = true;
+    enemy.hit_texture = NULL;
 
     enemy.dirSprite = createDirSprite(16);
     for (int i = 0; i < 16; i++) {
@@ -640,9 +645,8 @@ void handle_input(SDL_Event event) {
             }
 
             if (player->shootChargeTimer > 0.4) {
-                int numShots = (int)(player->shootChargeTimer * 3);
+                player->pendingShots = charge_time_to_shots(player->shootChargeTimer);
                 player->shootChargeTimer = 0;
-                player->pendingShots = numShots;
                 player->ShootTickTimer = 0.15;
             } else if (player->canShoot) {
                 player->pendingShots = 0;
@@ -707,7 +711,21 @@ v2 get_key_vector(SDL_Keycode k1, SDL_Keycode k2, SDL_Keycode k3, SDL_Keycode k4
 
 void playerTick(double delta) {
 
+    double speed_multiplier = 1;
+
     player->collider->pos = player->pos;
+
+    bool reached_max_charge = charge_time_to_shots(player->shootChargeTimer) == player->max_pending_shots;
+
+    if (isLMouseDown) {
+        if (!reached_max_charge) player->shootChargeTimer += delta;
+        
+        if (player->shootChargeTimer >= 0.7) {
+            shakeCamera(80 * min(15, player->shootChargeTimer - 0.7), 5, false);
+        }
+        speed_multiplier *= 0.5;
+    }
+
 
     if (player->pendingShots > 0) {
         player->ShootTickTimer -= delta;
@@ -734,24 +752,20 @@ void playerTick(double delta) {
         player->handOffset.y = lerp(player->handOffset.y, 0, 0.1);
     }
 
-    player->torque = get_key_axis(SDLK_n, SDLK_m);
-
     player->vel = v2_lerp(player->vel, v2_add(v2_mul(move_dir, to_vec(keyVec.x)), v2_mul(move_dir_rotated, to_vec(keyVec.y))), 0.15);
 
     CollisionData player_coldata = getCircleTileMapCollision(*player->collider);
     if (player_coldata.didCollide) {
         player->pos = v2_add(player->pos, player_coldata.offset);
     }
-
-    double moveSpeed = player->speed;
     if (player->sprinting) {
-        moveSpeed *= 1.5;
+        speed_multiplier *= 1.5;
         fov = lerp(fov, startFov * 1.2, 0.1);
     } else {
         fov = lerp(fov, startFov, 0.1);
     }
 
-    v2 finalVel = v2_mul(player->vel, to_vec(moveSpeed));
+    v2 finalVel = v2_mul(player->vel, to_vec(player->speed * speed_multiplier));
     if (delta == 0) {
         player->pos = v2_add(player->pos, v2_mul(finalVel, to_vec(0.016)));
     } else {
@@ -820,12 +834,7 @@ void tick(double delta) {
         SDL_WarpMouseInWindow(window, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
     }
 
-    if (isLMouseDown) {
-        player->shootChargeTimer += delta;
-        if (player->shootChargeTimer >= 0.7) {
-            shakeCamera(80 * min(15, player->shootChargeTimer - 0.7), 5, false);
-        }
-    }
+    
 
     if (isCameraShaking) {
         cameraShakeTimeToNextTick -= delta;
@@ -1558,6 +1567,7 @@ void init_player(v2 pos) {
     player->shootChargeTimer = 0;
     player->ShootTickTimer = 0.15;
     player->pendingShots = 0;
+    player->max_pending_shots = 10;
     player->collider = malloc(sizeof(CircleCollider));
     player->collider->radius = 5;
     player->collider->pos = player->pos;
@@ -2075,7 +2085,7 @@ void playerShoot() {
             Entity entity = *((Entity *)ray_data.collider);
             effect_height = entity.height - entity.size.y / 2;
             
-            enemyTakeDmg(ray_data.collider, ray_data.colliderType, 1);
+            enemyTakeDmg(ray_data.collider, 1);
             
         }
     } else {
@@ -2130,33 +2140,48 @@ void enemyTick(Enemy *enemy, double delta) {
     dSpriteTick(enemy->dirSprite, enemy->entity.pos, delta);
 }
 
-void enemyTakeDmg(void *enemy, int type, int dmg) {
-    switch (type) {
-        case (int)ENEMY:;
-            Enemy *e = (Enemy *)enemy;
-            e->health -= dmg;
-            if (e->health <= 0) {
-                // play death anim
-                remove_game_object(e, ENEMY);
-            }
-            break;
-        case (int)ENEMY_SHOOTER:;
-            ShooterEnemy *shooter = (ShooterEnemy *)enemy;
-            shooter->enemy.health -= dmg;
-            shakeCamera(15, 4, true);
-            Sprite *sprite = createSprite(false, 0);
-            sprite->texture = shooter_hit_texture;
-            Effect *hit_effect = createEffect(v2_add(shooter->enemy.entity.pos, v2_dir(shooter->enemy.entity.pos, player->pos)), to_vec(50), sprite, 0.1);
-            hit_effect->entity.height = shooter->enemy.entity.height;
-            hit_effect->entity.affected_by_light = false;
-            add_game_object(hit_effect, EFFECT);
+void enemyTakeDmg(Enemy *enemy, int dmg) {
 
-            if (shooter->enemy.health <= 0) {
-                // play death anim
-                remove_game_object(shooter, ENEMY_SHOOTER);
-            }
-            break;
+    enemy->health -= dmg;
+    shakeCamera(15, 4, true);
+    Sprite *sprite = createSprite(false, 0);
+    sprite->texture = enemy->hit_texture;
+    Effect *hit_effect = createEffect(v2_add(enemy->entity.pos, v2_dir(enemy->entity.pos, player->pos)), to_vec(50), sprite, 0.1);
+    hit_effect->entity.height = enemy->entity.height;
+    hit_effect->entity.affected_by_light = false;
+    add_game_object(hit_effect, EFFECT);
+
+    if (enemy->health <= 0) {
+        // play death anim
+        remove_game_object(enemy, ENEMY);
     }
+
+    // switch (type) {
+    //     case (int)ENEMY:;
+    //         Enemy *e = (Enemy *)enemy;
+    //         e->health -= dmg;
+    //         if (e->health <= 0) {
+    //             // play death anim
+    //             remove_game_object(e, ENEMY);
+    //         }
+    //         break;
+    //     case (int)ENEMY_SHOOTER:;
+    //         ShooterEnemy *shooter = (ShooterEnemy *)enemy;
+    //         shooter->enemy.health -= dmg;
+    //         shakeCamera(15, 4, true);
+    //         Sprite *sprite = createSprite(false, 0);
+    //         sprite->texture = shooter_hit_texture;
+    //         Effect *hit_effect = createEffect(v2_add(shooter->enemy.entity.pos, v2_dir(shooter->enemy.entity.pos, player->pos)), to_vec(50), sprite, 0.1);
+    //         hit_effect->entity.height = shooter->enemy.entity.height;
+    //         hit_effect->entity.affected_by_light = false;
+    //         add_game_object(hit_effect, EFFECT);
+
+    //         if (shooter->enemy.health <= 0) {
+    //             // play death anim
+    //             remove_game_object(shooter, ENEMY_SHOOTER);
+    //         }
+    //         break;
+    // }
 }
 
 RayCollisionData castRayForEntities(v2 pos, v2 dir) {
@@ -2338,6 +2363,7 @@ ShooterEnemy *createShooterEnemy(v2 pos) {
     shooter->enemy = createEnemy(pos);
     shooter->enemy.maxHealth = 5;
     shooter->enemy.health = shooter->enemy.maxHealth;
+    shooter->enemy.hit_texture = shooter_hit_texture;
 
     shooter->shootCooldown = 2;
     shooter->shootCooldownTimer = 0;
@@ -2724,5 +2750,8 @@ void enemy_bullet_destroy(EnemyBullet *bullet) {
     remove_game_object(bullet, ENEMY_SHOOTER); 
 }
 
+int charge_time_to_shots(double charge_time) {
+    return (int)(charge_time * 3);
+}
 
 // #END

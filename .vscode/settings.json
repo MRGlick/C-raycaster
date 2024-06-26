@@ -7,6 +7,10 @@
         "cmath": "c",
         "*.tcc": "c",
         "limits": "c",
-        "stdarg.h": "c"
+        "stdarg.h": "c",
+        "array": "c",
+        "tuple": "c",
+        "type_traits": "c",
+        "utility": "c"
     }
 }
