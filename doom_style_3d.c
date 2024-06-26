@@ -282,7 +282,7 @@ double mili_to_sec(u64 mili);
 
 v2 get_player_forward();
 
-Animation create_animation(int frameCount, int priority);
+Animation create_animation(int frameCount, int priority, SDL_Texture **frames);
 
 void freeAnimation(Animation *anim);
 
@@ -566,16 +566,17 @@ void init() {  // #INIT
     crosshair = make_texture(renderer, "Textures/crosshair.bmp");
 
     animatedWallSprite = createSprite(true, 1);
-    animatedWallSprite->animations[0] = create_animation(17, 0);
-    animatedWallSprite->animations[0].frames = wallFrames;
+    animatedWallSprite->animations[0] = create_animation(17, 0, wallFrames);
     animatedWallSprite->animations[0].fps = 10;
     spritePlayAnim(animatedWallSprite, 0);
 
     leftHandSprite = createSprite(true, 2);
-    leftHandSprite->animations[0] = create_animation(1, 0);
-    leftHandSprite->animations[0].frames[0] = make_texture(renderer, "Textures/rightHandAnim/rightHandAnim6.bmp");
-    leftHandSprite->animations[1] = create_animation(6, 0);
-    leftHandSprite->animations[1].frames = malloc(sizeof(SDL_Texture *) * 6);
+    SDL_Texture **default_hand = malloc(sizeof(SDL_Texture *)); 
+    default_hand[0] = make_texture(renderer, "Textures/rightHandAnim/rightHandAnim6.bmp");
+    leftHandSprite->animations[0] = create_animation(1, 0, default_hand);
+
+
+    leftHandSprite->animations[1] = create_animation(6, 0, NULL);
     getTextureFiles("Textures/rightHandAnim/rightHandAnim", 6, &leftHandSprite->animations[1].frames);
     leftHandSprite->animations[1].fps = 12;
 
@@ -1811,30 +1812,6 @@ void remove_game_object(void *val, int type) {
     freeObject(val, type);
 }
 
-Sprite *getRandomWallSprite() {
-    Sprite **sprites = malloc(sizeof(Sprite *) * 2);
-    Sprite *sprite1 = createSprite(true, 1);
-    sprite1->currentAnimationIdx = 0;
-    Animation anim = create_animation(17, 0);
-    anim.frames = wallFrames; // #LEAK
-    anim.loop = true;
-    anim.playing = true;
-    anim.fps = 10;
-    sprite1->animations[0] = anim;
-
-    Sprite *sprite2 = createSprite(false, 0);
-    sprite2->texture = wallTexture;
-
-    sprites[0] = sprite1;
-    sprites[1] = sprite2;
-
-    if (randi_range(0, 2) == 1) {
-        return sprites[0];
-    }
-
-    return sprites[1];
-}
-
 void init_tilemap(int ***gridPtr, int cols, int rows) {
     *gridPtr = malloc(sizeof(int *) * rows);
     for (int i = 0; i < rows; i++) {
@@ -1954,11 +1931,15 @@ void freeAnimation(Animation *anim) {
     free(anim);
 }
 
-Animation create_animation(int frameCount, int priority) {
+Animation create_animation(int frameCount, int priority, SDL_Texture **frames) {
     Animation anim;
     anim.playing = false;
     anim.frameCount = frameCount;
-    anim.frames = malloc(sizeof(SDL_Texture *) * frameCount);
+    if (frames == NULL) {
+        anim.frames = malloc(sizeof(SDL_Texture *) * frameCount);
+    } else {
+        anim.frames = frames;
+    }
     anim.frame = 0;
     anim.fps = 5;
     anim.loop = true;
@@ -2110,12 +2091,12 @@ void playerShoot() {
         return;
     }
 
-    hitEffect->entity.sprite->animations[0] = create_animation(5, 0);
-    hitEffect->entity.sprite->animations[0].frames[0] = shootHitEffectFrames[0];
-    hitEffect->entity.sprite->animations[0].frames[1] = shootHitEffectFrames[1];
-    hitEffect->entity.sprite->animations[0].frames[2] = shootHitEffectFrames[2];
-    hitEffect->entity.sprite->animations[0].frames[3] = shootHitEffectFrames[3];
-    hitEffect->entity.sprite->animations[0].frames[4] = shootHitEffectFrames[4];
+    
+
+    hitEffect->entity.sprite->animations[0] = create_animation(5, 0, NULL);
+
+    for (int i = 0; i < 5; i++) hitEffect->entity.sprite->animations[0].frames[i] = shootHitEffectFrames[i];
+    
     hitEffect->entity.sprite->animations[0].fps = 12;
     hitEffect->entity.sprite->animations[0].loop = false;
     hitEffect->entity.height = effect_height;
@@ -2564,67 +2545,6 @@ void bake_lights() {
         update_loading_progress(loading_progress);
     }
 
-    // for (int r = 0; r < TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION; r++) {
-    //     for (int c = 0; c < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; c++) {
-    //         // col, row / light_res * tile_size
-    //         v2 current_pos = v2_mul(v2_div((v2){c, r}, to_vec(BAKED_LIGHT_RESOLUTION)), to_vec(tileSize));
-
-    //         v2 tile_pos = v2_div(current_pos, to_vec(tileSize));
-
-    //         if (levelTileMap[(int)tile_pos.y][(int)tile_pos.x] == P_WALL) {
-    //             continue;
-    //         }
-            
-    //         BakedLightColor col = {ambient_light, ambient_light, ambient_light};
-
-    //         for (int i = 0; i < ptr; i++) {
-                
-    //             LightPoint *point = lights[i];
-
-    //             double dist_to_point = v2_distance(point->pos, current_pos);
-
-    //             if (dist_to_point > point->radius) continue;
-
-    //             v2 dir = v2_div(v2_sub(point->pos, current_pos), to_vec(dist_to_point));
-
-	// 			RayCollisionData data = castRay(current_pos, dir);
-
-	// 			if (!data.hit) {
-	// 				double s = clamp(lerp(1, 0, dist_to_point / point->radius), 0, 1);
-    //                 s *= s * s; // cubic
-    //                 double helper = s * point->strength;
-	// 				col.r += helper * (double)point->color.r / 255;
-	// 				col.g += helper * (double)point->color.g / 255;
-	// 				col.b += helper * (double)point->color.b / 255;
-	// 			} else {
-    //                 double dist_squared = v2_distance_squared(data.collpos, current_pos);
-
-    //                 if (dist_squared <= dist_to_point * dist_to_point) continue;
-
-    //                 double s = clamp(lerp(1, 0, dist_to_point / point->radius), 0, 1);
-    //                 s *= s * s; // cubic
-    //                 double helper = s * point->strength;
-    //                 col.r += helper * (double)point->color.r / 255;
-	// 				col.g += helper * (double)point->color.g / 255;
-	// 				col.b += helper * (double)point->color.b / 255;
-    //             }
-    //         }
-
-	// 		baked_light_grid[r][c] = col;
-
-
-    //         // calc loading bar progress
-    //         int w = TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION;
-    //         int h = TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION;
-    //         int prog = r * w + c;
-    //         if (prog % 30000 == 0) {
-    //             double p = (double)prog / (w * h);
-    //             cd_print(true, "%.2f \n", p);
-    //             update_loading_progress(p);
-    //         }
-    //     }
-    // }
-
     remove_loading_screen();
 }
 
@@ -2782,7 +2702,7 @@ void enemy_bullet_destroy(EnemyBullet *bullet) {
    
    
     Sprite *sprite = createSprite(true, 1);
-    sprite->animations[0] = create_animation(5, 0);
+    sprite->animations[0] = create_animation(5, 0, NULL);
     for (int i = 0; i < 5; i++) {
         sprite->animations[0].frames[i] = enemy_bullet_destroy_anim[i];
     }
