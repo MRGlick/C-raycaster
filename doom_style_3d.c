@@ -2506,10 +2506,13 @@ void bake_lights() {
 		if (current->type != LIGHT_POINT) continue;
         LightPoint *point = current->val;
 
-        int row_lbound = max(point->pos.y - point->radius, 0);
-        int row_rbound = min(point->pos.y + point->radius, TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION);
-        int col_lbound = max(point->pos.x - point->radius, 0);
-        int col_rbound = min(point->pos.x + point->radius, TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION);
+        v2 grid_pos = v2_mul(v2_div(point->pos, to_vec(tileSize)), to_vec(BAKED_LIGHT_RESOLUTION));
+        double scaled_radius = point->radius / tileSize * BAKED_LIGHT_RESOLUTION;
+
+        int row_lbound = max(grid_pos.y - scaled_radius, 0);
+        int row_rbound = min(grid_pos.y + scaled_radius, TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION);
+        int col_lbound = max(grid_pos.x - scaled_radius, 0);
+        int col_rbound = min(grid_pos.x + scaled_radius, TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION);
 
         for (int r = row_lbound; r < row_rbound; r++) {
             for (int c = col_lbound; c < col_rbound; c++) {
@@ -2787,7 +2790,9 @@ void enemy_bullet_destroy(EnemyBullet *bullet) {
     sprite->animations[0].fps = 10;
     sprite->animations[0].loop = false;
 
-    Effect *effect = createEffect(bullet->entity.pos, to_vec(50), sprite, 1);
+    v2 pos = v2_sub(bullet->entity.pos, v2_mul(bullet->dir, to_vec(5)));
+
+    Effect *effect = createEffect(pos, to_vec(50), sprite, 1);
     effect->entity.height = bullet->entity.height;
     effect->entity.affected_by_light = false;
 
