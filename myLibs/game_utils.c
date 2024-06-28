@@ -54,6 +54,9 @@ double last_print_time;
 const double DEG_TO_RAD = PI / 180;
 const double RAD_TO_DEG = 180 / PI;
 
+
+
+
 void init_cd_print() {
     last_print_time = SDL_GetTicks64();
 }

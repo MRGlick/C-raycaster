@@ -1,6 +1,7 @@
 
 #include "game_utils.c"
 #include "globals.h"
+#include "sounds.c"
 
 SDL_Renderer *renderer;
 SDL_Window *window;
@@ -206,7 +207,7 @@ typedef struct CollisionData {
     bool didCollide;
 } CollisionData;
 
-// #FUNCTIONS
+// #FUNC
 
 int charge_time_to_shots(double charge_time);
 
@@ -334,7 +335,7 @@ void renderDirSprite(DirectionalSprite *dSprite, v2 pos, v2 size, double height)
 
 double angleDist(double a1, double a2);
 
-void shakeCamera(double strength, int ticks, bool fade);
+void shakeCamera(double strength, int ticks, bool fade, int priority);
 
 ShooterEnemy *createShooterEnemy(v2 pos);
 
@@ -344,9 +345,9 @@ bool isValidLevel(char *file);
 
 void getTextureFiles(char *fileName, int fileCount, SDL_Texture ***textures);
 
-// #FUNCTIONS END
+// #FUNC END
 
-// #VARIABLES
+// #VAR
 
 SDL_Texture *mimran_jumpscare;
 
@@ -412,6 +413,7 @@ SDL_Texture *skybox_texture;
 SDL_Texture **enemy_bullet_destroy_anim;
 
 bool isCameraShaking = false;
+int camerashake_current_priority = 0;
 int cameraShakeTicks;
 int cameraShakeTicksLeft = 0;
 double cameraShakeTimeToNextTick = 0.02;
@@ -431,6 +433,11 @@ v2 playerForward;
 char *levelToLoad = NULL;
 
 const double PLAYER_SHOOT_COOLDOWN = 0.5;
+
+Sound *enemy_default_hit;
+Sound *enemy_default_kill;
+
+// #VAR END
 
 // #MAIN
 int main(int argc, char *argv[]) {
@@ -525,6 +532,10 @@ Enemy createEnemy(v2 pos) {
 }
 
 void init() {  // #INIT
+
+
+    enemy_default_hit = create_sound("Sounds/enemy_default_hit.wav", 1);
+    enemy_default_kill = create_sound("Sounds/enemy_default_kill.wav", 1);
 
     init_cd_print();
 
@@ -703,11 +714,17 @@ void key_released(SDL_Keycode key) {
     keyPressArr[(char)key - 'a'] = false;
 }
 
-bool is_key_pressed(SDL_Keycode key) { return keyPressArr[(char)key - 'a']; }
+bool is_key_pressed(SDL_Keycode key) {
+    return keyPressArr[(char)key - 'a'];
+}
 
-int get_key_axis(SDL_Keycode key1, SDL_Keycode key2) { return (int)is_key_pressed(key2) - (int)is_key_pressed(key1); }
+int get_key_axis(SDL_Keycode key1, SDL_Keycode key2) {
+    return (int)is_key_pressed(key2) - (int)is_key_pressed(key1);
+}
 
-v2 get_key_vector(SDL_Keycode k1, SDL_Keycode k2, SDL_Keycode k3, SDL_Keycode k4) { return (v2){get_key_axis(k1, k2), get_key_axis(k3, k4)}; }
+v2 get_key_vector(SDL_Keycode k1, SDL_Keycode k2, SDL_Keycode k3, SDL_Keycode k4) {
+    return (v2){get_key_axis(k1, k2), get_key_axis(k3, k4)};
+}
 
 void playerTick(double delta) {
 
@@ -720,9 +737,8 @@ void playerTick(double delta) {
     if (isLMouseDown) {
         if (!reached_max_charge) player->shootChargeTimer += delta;
         
-        if (player->shootChargeTimer >= 0.7) {
-            shakeCamera(80 * min(15, player->shootChargeTimer - 0.7), 5, false);
-        }
+        shakeCamera(80 * min(15, player->shootChargeTimer), 5, false, 0);
+        
         speed_multiplier *= 0.5;
     }
 
@@ -843,6 +859,7 @@ void tick(double delta) {
             cameraShakeTimeToNextTick = 0.02;
             if (cameraShakeTicksLeft <= 0) {
                 isCameraShaking = false;
+                camerashake_current_priority = -9999;
             } else {
                 v2 rawShake = {randf_range(-cameraShakeCurrentStrength, cameraShakeCurrentStrength), randf_range(-cameraShakeCurrentStrength, cameraShakeCurrentStrength)};
                 cameraOffset = v2_mul(rawShake, to_vec((double)cameraShakeTicksLeft / cameraShakeTicks));
@@ -1785,8 +1802,9 @@ void freeObject(void *val, int type) {
     }
 }
 
-void shakeCamera(double strength, int ticks, bool fade) {
-    if (isCameraShaking) return;
+void shakeCamera(double strength, int ticks, bool fade, int priority) {
+    if (priority < camerashake_current_priority && isCameraShaking) return;
+    camerashake_current_priority = priority;
     isCameraShaking = true;
     cameraShakeCurrentStrength = strength;
     cameraShakeTimeToNextTick = 0.02;
@@ -2066,7 +2084,7 @@ Effect *createEffect(v2 pos, v2 size, Sprite *sprite, double lifeTime) {
 
 // Todo: add shoot cooldown for base shooting
 void playerShoot() {
-    shakeCamera(10, 4, true);
+    shakeCamera(10, 4, true, 1);
 
     player->canShoot = false;
     spritePlayAnim(leftHandSprite, 1);
@@ -2143,16 +2161,18 @@ void enemyTick(Enemy *enemy, double delta) {
 void enemyTakeDmg(Enemy *enemy, int dmg) {
 
     enemy->health -= dmg;
-    shakeCamera(15, 4, true);
+    shakeCamera(15, 4, true, 0);
     Sprite *sprite = createSprite(false, 0);
     sprite->texture = enemy->hit_texture;
     Effect *hit_effect = createEffect(v2_add(enemy->entity.pos, v2_dir(enemy->entity.pos, player->pos)), to_vec(50), sprite, 0.1);
     hit_effect->entity.height = enemy->entity.height;
     hit_effect->entity.affected_by_light = false;
     add_game_object(hit_effect, EFFECT);
+    play_sound(enemy_default_hit);
 
     if (enemy->health <= 0) {
         // play death anim
+        play_sound(enemy_default_kill);
         remove_game_object(enemy, ENEMY);
     }
 
@@ -2599,7 +2619,7 @@ void player_take_dmg(int dmg) {
     player->health -= dmg;
 
     // play some effect or animation
-    shakeCamera(20, 10, true);
+    shakeCamera(20, 10, true, 2);
 
     double progress_to_death = (double)(player->maxHealth - player->health) / player->maxHealth; // when it reaches 1, ur cooked
     vignette_color = (SDL_Color){255 * progress_to_death, 0, 0};
