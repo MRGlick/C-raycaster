@@ -1500,7 +1500,7 @@ void renderHUD() {
 void drawSkybox() {
     SDL_Texture *tex = skybox_texture;
 
-    double x = loop_clamp(player->angle / fov * WINDOW_WIDTH, 0, WINDOW_WIDTH);
+    double x = loop_clamp(player->angle / startFov * WINDOW_WIDTH, 0, WINDOW_WIDTH);
 
     double yOffsets = -player->height;
 
@@ -2168,6 +2168,7 @@ void enemyTakeDmg(Enemy *enemy, int dmg) {
     hit_effect->entity.height = enemy->entity.height;
     hit_effect->entity.affected_by_light = false;
     add_game_object(hit_effect, EFFECT);
+    
     play_sound(enemy_default_hit);
 
     if (enemy->health <= 0) {
@@ -2725,6 +2726,8 @@ void update_loading_progress(double progress) {
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderFillRect(renderer, &bar);
+
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "hello", "this is op af", window);
 
     SDL_RenderPresent(renderer);
 }

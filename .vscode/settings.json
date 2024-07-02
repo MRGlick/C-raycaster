@@ -11,6 +11,10 @@
         "array": "c",
         "tuple": "c",
         "type_traits": "c",
-        "utility": "c"
+        "utility": "c",
+        "close_code.h": "c",
+        "sdl.h": "c",
+        "sdl_main.h": "c",
+        "sounds_test,c": "c"
     }
 }
