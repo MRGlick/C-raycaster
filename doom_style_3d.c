@@ -181,6 +181,18 @@ typedef struct Enemy {
     v2 current_wander_pos;
     double wander_pause_timer;
 
+    EnemyState state;    
+
+    bool noticed_player;
+    
+    double time_to_pursue;
+    double pursue_timer;
+
+    double time_to_forget;
+    double forget_timer;
+
+
+
 } Enemy;
 
 typedef struct EnemyBullet {
@@ -212,9 +224,6 @@ typedef struct ShooterEnemy {
     double shootCooldown;
     double shootCooldownTimer;
 
-
-    EnemyState state;
-    
 } ShooterEnemy;
 
 // #ENEMIES END
@@ -225,6 +234,10 @@ typedef struct CollisionData {
 } CollisionData;
 
 // #FUNC
+
+void enemy_default_handle_state(Enemy *enemy, double delta);
+
+void enemy_notice_player_effect(Enemy *enemy, double delta);
 
 void enemy_idle_movement(Enemy *enemy, double delta);
 
@@ -508,11 +521,19 @@ Enemy createEnemy(v2 pos) {
     enemy.move_dir = (v2){0, 0};
     enemy.speed = 50;
     enemy.speed_multiplier = 1;
+    enemy.state = STATE_IDLE;
 
     // idle movement
     enemy.home_pos = pos;
     enemy.current_wander_pos = pos;
     enemy.wander_pause_timer = 10;
+
+    enemy.time_to_forget = 1;
+    enemy.forget_timer = enemy.time_to_forget;
+
+    enemy.noticed_player = false;
+    enemy.time_to_pursue = 0.5;
+    enemy.pursue_timer = enemy.time_to_pursue;
 
     enemy.entity.pos = pos;
     enemy.entity.size = to_vec(50);
@@ -2180,6 +2201,9 @@ void enemyTick(Enemy *enemy, double delta) {
 
     if (enemy->dirSprite != NULL) enemy->dirSprite->dir = enemy->dir;
 
+
+    
+
     dSpriteTick(enemy->dirSprite, enemy->entity.pos, delta);
 }
 
@@ -2369,11 +2393,20 @@ bool pos_in_tile(v2 pos) {
 
 void shooterTick(ShooterEnemy *shooter, double delta) {
 
-    shooter->state = STATE_IDLE; // change later
+    enemy_default_handle_state(shooter, delta);
 
-    if (shooter->state == STATE_IDLE) {
+    
+
+
+    if (shooter->enemy.state == STATE_IDLE) {
         enemy_idle_movement(shooter, delta);
+    } else {
+        shooter->enemy.dir = v2_dir(shooter->enemy.entity.pos, player->pos);
+        shooter->enemy.move_dir = shooter->enemy.dir; 
+        shooter->enemy.speed_multiplier = 1;
     }
+
+
 
     // if (shooter->enemy.seeingPlayer) {
     //     v2 desired_dir = v2_dir(shooter->enemy.entity.pos, player->pos);
@@ -2404,7 +2437,6 @@ ShooterEnemy *createShooterEnemy(v2 pos) {
 
     shooter->shootCooldown = 2;
     shooter->shootCooldownTimer = 0;
-    shooter->state = STATE_IDLE;
 
     return shooter;
 }
@@ -2835,6 +2867,37 @@ void enemy_idle_movement(Enemy *enemy, double delta) {
         enemy->speed_multiplier = 0;
     }
 }
+
+void enemy_notice_player_effect(Enemy *enemy, double delta) {
+    // TODO
+}
+
+void enemy_default_handle_state(Enemy *enemy, double delta) {
+    if (enemy->seeingPlayer) {
+        if (!enemy->noticed_player) {
+            enemy->noticed_player = true;
+            enemy_notice_player_effect(enemy, delta);
+        }
+        enemy->forget_timer = enemy->time_to_forget; // add this
+    } else if (enemy->noticed_player) {
+        enemy->forget_timer -= delta;
+        if (enemy->forget_timer <= 0) {
+            enemy->noticed_player = false;
+            enemy->state = STATE_IDLE;
+        }
+    } else {
+        enemy->state = STATE_IDLE;
+    }
+    
+    if (enemy->noticed_player) {
+        enemy->pursue_timer -= delta;
+        if (enemy->pursue_timer <= 0) {
+            enemy->state = STATE_PURSUING;
+        }
+    } else {
+        enemy->pursue_timer = enemy->time_to_pursue;
+    }
+}   
 
 
 // #END
