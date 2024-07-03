@@ -15,6 +15,9 @@
         "close_code.h": "c",
         "sdl.h": "c",
         "sdl_main.h": "c",
-        "sounds_test,c": "c"
+        "sounds_test,c": "c",
+        "math.h": "c",
+        "globals.h": "c",
+        "stdio.h": "c"
     }
 }

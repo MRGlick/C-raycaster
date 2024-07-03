@@ -1,7 +1,7 @@
 
 #include "game_utils.c"
 #include "globals.h"
-#include "sounds.c"
+
 
 SDL_Renderer *renderer;
 SDL_Window *window;
@@ -22,7 +22,7 @@ SDL_Window *window;
     (SDL_Color) { 0, 0, 0, 0 }
 #define RENDER_DISTANCE 350
 #define WALL_HEIGHT 30
-#define NUM_WALL_THREADS 4
+#define NUM_WALL_THREADS 1
 
 #define BAKED_LIGHT_RESOLUTION 36
 
@@ -53,6 +53,11 @@ enum Types {
 };
 
 enum Tiles { WALL1 = 1, WALL2 = 2 };
+
+typedef enum {
+    STATE_IDLE,
+    STATE_PURSUING
+} EnemyState;
 
 // #STRUCTS
 
@@ -165,9 +170,16 @@ typedef struct Enemy {
     CircleCollider *collider;
     SDL_Texture *hit_texture;
     v2 dir;
+    double speed, speed_multiplier;
     bool seeingPlayer;
     v2 lastSeenPlayerPos;
     double maxHealth, health;
+    double sound_max_radius;
+    v2 move_dir;
+
+    v2 home_pos;
+    v2 current_wander_pos;
+    double wander_pause_timer;
 
 } Enemy;
 
@@ -180,6 +192,7 @@ typedef struct EnemyBullet {
     double speed;
     double lifeTime;
     double lifeTimer;
+    
 
 } EnemyBullet;
 
@@ -198,6 +211,10 @@ typedef struct ShooterEnemy {
     Enemy enemy;
     double shootCooldown;
     double shootCooldownTimer;
+
+
+    EnemyState state;
+    
 } ShooterEnemy;
 
 // #ENEMIES END
@@ -208,6 +225,12 @@ typedef struct CollisionData {
 } CollisionData;
 
 // #FUNC
+
+void enemy_idle_movement(Enemy *enemy, double delta);
+
+void enemy_handle_collisions(Enemy *enemy);
+
+void enemy_move(Enemy *enemy, double delta);
 
 int charge_time_to_shots(double charge_time);
 
@@ -347,23 +370,44 @@ void getTextureFiles(char *fileName, int fileCount, SDL_Texture ***textures);
 
 // #FUNC END
 
-// #VAR
 
+
+// #TEXTURES
 SDL_Texture *mimran_jumpscare;
-
 SDL_Texture *shooter_hit_texture;
-
 SDL_Texture *healthbar_texture;
-
-SDL_Color vignette_color = {0, 0, 0};
-
 SDL_Texture *vignette_texture;
+SDL_Texture *enemy_bullet_texture;
+SDL_Texture *floorAndCeiling;
+SDL_Texture *wallTexture;
+SDL_Texture *entityTexture;
+SDL_Texture *crosshair;
+SDL_Texture *fenceTexture;
+SDL_Texture **wallFrames;
+SDL_Texture **shootHitEffectFrames;
+SDL_Texture *skybox_texture;
+SDL_Texture **enemy_bullet_destroy_anim;
+TextureData *floorTexture;
+TextureData *floorTexture2;
+TextureData *floorLightTexture;
+TextureData *ceilingTexture;
+TextureData *ceilingLightTexture;
 
+// #SPRITES
+Sprite *animatedWallSprite;
+Sprite *leftHandSprite;
+
+// #SOUNDS
+Sound *enemy_default_hit;
+Sound *enemy_default_kill;
+Sound *player_default_shoot;
+Sound *player_default_hurt;
+
+// #VAR
+SDL_Color vignette_color = {0, 0, 0};
 bool is_loading = false;
 double loading_progress = 0;
-
 BakedLightColor baked_light_grid[TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION][TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION];
-
 bool fullscreen = false;
 bool running = true;
 arraylist *gameobjects;
@@ -371,47 +415,20 @@ Player *player = NULL;
 bool keyPressArr[26];
 bool render_debug = false;
 bool lockMouse = true;
-bool renderLight = false;
 bool isLMouseDown = false;
-
 double startFov = 90;
 double fov = 90;
 const char *font = "font.ttf";
 const SDL_Color fogColor = {0, 0, 0, 255};
-
-TextureData *floorTexture;
-TextureData *floorTexture2;
-TextureData *floorLightTexture;
-TextureData *ceilingTexture;
-TextureData *ceilingLightTexture;
-
-SDL_Texture *enemy_bullet_texture;
-SDL_Texture *floorAndCeiling;
-SDL_Texture *wallTexture;
-SDL_Texture *entityTexture;
-SDL_Texture *crosshair;
-SDL_Texture *fenceTexture;
-
 double tanHalfFOV;
 double tanHalfStartFOV;
-
 double ambient_light = 0.5;
-
 int floorRenderStart;
-
 int **levelTileMap;
 int **floorTileMap;
 int **ceilingTileMap;
-
 const int tileSize = WINDOW_WIDTH / TILEMAP_WIDTH;
-
 double realFps;
-
-SDL_Texture **wallFrames;
-SDL_Texture **shootHitEffectFrames;
-SDL_Texture *skybox_texture;
-SDL_Texture **enemy_bullet_destroy_anim;
-
 bool isCameraShaking = false;
 int camerashake_current_priority = 0;
 int cameraShakeTicks;
@@ -419,25 +436,14 @@ int cameraShakeTicksLeft = 0;
 double cameraShakeTimeToNextTick = 0.02;
 double cameraShakeCurrentStrength = 0;
 bool cameraShakeFadeActive = false;
-
 RenderObject *wallStripesToRender[RESOLUTION_X];
-
 v2 cameraOffset = {0, 0};
-
-Sprite *animatedWallSprite;
-
-Sprite *leftHandSprite;
-
 v2 playerForward;
-
 char *levelToLoad = NULL;
-
 const double PLAYER_SHOOT_COOLDOWN = 0.5;
-
-Sound *enemy_default_hit;
-Sound *enemy_default_kill;
-
 // #VAR END
+
+// #DEBUG VAR
 
 // #MAIN
 int main(int argc, char *argv[]) {
@@ -499,12 +505,21 @@ Enemy createEnemy(v2 pos) {
     enemy.maxHealth = 5;
     enemy.health = enemy.maxHealth;
     enemy.dir = (v2){1, 0};
+    enemy.move_dir = (v2){0, 0};
+    enemy.speed = 50;
+    enemy.speed_multiplier = 1;
+
+    // idle movement
+    enemy.home_pos = pos;
+    enemy.current_wander_pos = pos;
+    enemy.wander_pause_timer = 10;
 
     enemy.entity.pos = pos;
     enemy.entity.size = to_vec(50);
     enemy.entity.sprite = NULL;
     enemy.entity.affected_by_light = true;
     enemy.hit_texture = NULL;
+    enemy.sound_max_radius = 400;
 
     enemy.dirSprite = createDirSprite(16);
     for (int i = 0; i < 16; i++) {
@@ -533,9 +548,10 @@ Enemy createEnemy(v2 pos) {
 
 void init() {  // #INIT
 
-
-    enemy_default_hit = create_sound("Sounds/enemy_default_hit.wav", 1);
-    enemy_default_kill = create_sound("Sounds/enemy_default_kill.wav", 1);
+    player_default_hurt = create_sound("Sounds/player_default_hurt.wav");
+    player_default_shoot = create_sound("Sounds/player_default_shoot.wav");
+    enemy_default_hit = create_sound("Sounds/enemy_default_hit.wav");
+    enemy_default_kill = create_sound("Sounds/enemy_default_kill.wav");
 
     init_cd_print();
 
@@ -611,7 +627,7 @@ void init() {  // #INIT
         load_level(levelToLoad);
 
     } else {
-        load_level("default_level.hclevel");
+        load_level("Levels/new_default_level.hclevel");
     }
 
     skybox_texture = make_texture(renderer, "Textures/skybox.bmp");
@@ -622,7 +638,9 @@ void init() {  // #INIT
 
 }  // #INIT END
 
-v2 get_player_forward() { return v2_rotate_to((v2){1, 0}, deg_to_rad(player->angle)); }
+v2 get_player_forward() {
+    return v2_rotate_to((v2){1, 0}, deg_to_rad(player->angle));
+}
 
 void handle_input(SDL_Event event) {
     switch (event.type) {
@@ -690,9 +708,6 @@ void key_pressed(SDL_Keycode key) {
 
     if (key == SDLK_LSHIFT) {
         player->sprinting = true;
-    }
-    if (key == SDLK_l) {
-        renderLight = !renderLight;
     }
     if (key == SDLK_F11) {
         fullscreen = !fullscreen;
@@ -1230,7 +1245,10 @@ RenderObject *getWallStripe(int i) {
     if (currentRenderObj == NULL) {
         printf("tf is this trash lang \n");
     }
-    currentRenderObj->dist_squared = dist * dist;
+
+    double real_dist = dist / cos_angle_to_forward;
+
+    currentRenderObj->dist_squared = real_dist * real_dist;
     currentRenderObj->val = stripe;
     currentRenderObj->type = WALL_STRIPE;
 
@@ -1494,7 +1512,6 @@ void renderHUD() {
 
     SDL_RenderFillRect(renderer, &playerPendingShotsRect);
 
-    
 }
 
 void drawSkybox() {
@@ -1917,7 +1934,7 @@ void load_level(char *file) {
             ceilingTileMap[r][c] = data[idx++];
             if (ceilingTileMap[r][c] == (int)P_CEILING_LIGHT) {
                 LightPoint *test_point = malloc(sizeof(LightPoint));
-                test_point->color = (SDL_Color){255, 255, 255};//{255, 200, 100};
+                test_point->color = (SDL_Color){100, 200, 255};//{255, 200, 100};
                 test_point->strength = 1;
                 test_point->radius = 400;
                 test_point->pos = (v2){(c + 0.5) * tileSize, (r + 0.5) * tileSize};
@@ -2084,6 +2101,8 @@ Effect *createEffect(v2 pos, v2 size, Sprite *sprite, double lifeTime) {
 
 // Todo: add shoot cooldown for base shooting
 void playerShoot() {
+
+    play_sound(player_default_shoot, 0.3);
     shakeCamera(10, 4, true, 1);
 
     player->canShoot = false;
@@ -2148,12 +2167,18 @@ void effectTick(Effect *effect, double delta) {
 void enemyTick(Enemy *enemy, double delta) {
     enemy->collider->pos = enemy->entity.pos;
 
+
+    enemy_move(enemy, delta);
+    enemy_handle_collisions(enemy);
+
     // add player vision
 
     v2 dir = v2_dir(enemy->entity.pos, player->pos);
     RayCollisionData rayData = castRayForAll(v2_add(enemy->entity.pos, v2_mul(dir, to_vec(enemy->collider->radius + 0.01))), dir);
 
     enemy->seeingPlayer = rayData.hit && (Player *)rayData.collider == player;
+
+    if (enemy->dirSprite != NULL) enemy->dirSprite->dir = enemy->dir;
 
     dSpriteTick(enemy->dirSprite, enemy->entity.pos, delta);
 }
@@ -2169,40 +2194,13 @@ void enemyTakeDmg(Enemy *enemy, int dmg) {
     hit_effect->entity.affected_by_light = false;
     add_game_object(hit_effect, EFFECT);
     
-    play_sound(enemy_default_hit);
+    play_spatial_sound(enemy_default_hit, 1, player->pos, enemy->entity.pos, enemy->sound_max_radius);
 
     if (enemy->health <= 0) {
         // play death anim
-        play_sound(enemy_default_kill);
+        play_spatial_sound(enemy_default_kill, 1, player->pos, enemy->entity.pos, enemy->sound_max_radius);
         remove_game_object(enemy, ENEMY);
     }
-
-    // switch (type) {
-    //     case (int)ENEMY:;
-    //         Enemy *e = (Enemy *)enemy;
-    //         e->health -= dmg;
-    //         if (e->health <= 0) {
-    //             // play death anim
-    //             remove_game_object(e, ENEMY);
-    //         }
-    //         break;
-    //     case (int)ENEMY_SHOOTER:;
-    //         ShooterEnemy *shooter = (ShooterEnemy *)enemy;
-    //         shooter->enemy.health -= dmg;
-    //         shakeCamera(15, 4, true);
-    //         Sprite *sprite = createSprite(false, 0);
-    //         sprite->texture = shooter_hit_texture;
-    //         Effect *hit_effect = createEffect(v2_add(shooter->enemy.entity.pos, v2_dir(shooter->enemy.entity.pos, player->pos)), to_vec(50), sprite, 0.1);
-    //         hit_effect->entity.height = shooter->enemy.entity.height;
-    //         hit_effect->entity.affected_by_light = false;
-    //         add_game_object(hit_effect, EFFECT);
-
-    //         if (shooter->enemy.health <= 0) {
-    //             // play death anim
-    //             remove_game_object(shooter, ENEMY_SHOOTER);
-    //         }
-    //         break;
-    // }
 }
 
 RayCollisionData castRayForEntities(v2 pos, v2 dir) {
@@ -2358,21 +2356,39 @@ void shooterEnemyShoot(ShooterEnemy *shooter) {
     add_game_object(bullet, BULLET);
 }
 
+bool pos_in_tile(v2 pos) {
+    int row = pos.y / tileSize;
+    int col = pos.x / tileSize;
+
+    if (!in_range(row, 0, TILEMAP_HEIGHT - 1) || !in_range(col, 0, TILEMAP_WIDTH - 1)) return false;
+
+    return levelTileMap[row][col] == P_WALL;
+}
+
+
+
 void shooterTick(ShooterEnemy *shooter, double delta) {
 
-    enemyTick((Enemy *)shooter, delta);
+    shooter->state = STATE_IDLE; // change later
 
-    if (shooter->enemy.seeingPlayer) {
-        v2 desired_dir = v2_dir(shooter->enemy.entity.pos, player->pos);
-        shooter->enemy.dir = v2_normalize(v2_lerp(shooter->enemy.dir, desired_dir, delta * 2));
-        shooter->enemy.dirSprite->dir = shooter->enemy.dir;
-        if (shooter->shootCooldownTimer <= 0) {
-            shooterEnemyShoot(shooter);
-            shooter->shootCooldownTimer = shooter->shootCooldown;
-        } else {
-            shooter->shootCooldownTimer -= delta;
-        }
+    if (shooter->state == STATE_IDLE) {
+        enemy_idle_movement(shooter, delta);
     }
+
+    // if (shooter->enemy.seeingPlayer) {
+    //     v2 desired_dir = v2_dir(shooter->enemy.entity.pos, player->pos);
+    //     shooter->enemy.dir = v2_normalize(v2_lerp(shooter->enemy.dir, desired_dir, delta * 4));
+    //     shooter->enemy.dirSprite->dir = shooter->enemy.dir;
+    //     if (shooter->shootCooldownTimer <= 0) {
+    //         shooterEnemyShoot(shooter);
+    //         shooter->shootCooldownTimer = shooter->shootCooldown;
+    //     } else {
+    //         shooter->shootCooldownTimer -= delta;
+    //     }
+    // }
+
+
+    enemyTick((Enemy *)shooter, delta);
 }
 
 ShooterEnemy *createShooterEnemy(v2 pos) {
@@ -2388,6 +2404,7 @@ ShooterEnemy *createShooterEnemy(v2 pos) {
 
     shooter->shootCooldown = 2;
     shooter->shootCooldownTimer = 0;
+    shooter->state = STATE_IDLE;
 
     return shooter;
 }
@@ -2612,7 +2629,7 @@ void reset_level() {
     if (isValidLevel(levelToLoad)) {
         load_level(levelToLoad);
     } else {
-        load_level("default_level.hclevel");
+        load_level("Levels/new_default_level.hclevel");
     }
 }
 
@@ -2620,9 +2637,10 @@ void player_take_dmg(int dmg) {
     player->health -= dmg;
 
     // play some effect or animation
+    play_sound(player_default_hurt, 0.5);
     shakeCamera(20, 10, true, 2);
 
-    double progress_to_death = (double)(player->maxHealth - player->health) / player->maxHealth; // when it reaches 1, ur cooked
+    double progress_to_death = (double)(player->maxHealth - player->health) / player->maxHealth; // when it reaches 1, youre cooked
     vignette_color = (SDL_Color){255 * progress_to_death, 0, 0};
 
     if (player->health <= 0) {
@@ -2727,8 +2745,6 @@ void update_loading_progress(double progress) {
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderFillRect(renderer, &bar);
 
-    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "hello", "this is op af", window);
-
     SDL_RenderPresent(renderer);
 }
 
@@ -2776,5 +2792,49 @@ void enemy_bullet_destroy(EnemyBullet *bullet) {
 int charge_time_to_shots(double charge_time) {
     return (int)(charge_time * 3);
 }
+
+void enemy_move(Enemy *enemy, double delta) {
+
+    v2 vel = v2_mul(enemy->move_dir, to_vec(enemy->speed * enemy->speed_multiplier));
+    vel = v2_mul(vel, to_vec(delta));
+
+    enemy->entity.pos = v2_add(enemy->entity.pos, vel);
+    
+}
+
+void enemy_handle_collisions(Enemy *enemy) {
+    CollisionData coldata = getCircleTileMapCollision(*enemy->collider);
+    if (coldata.didCollide) {
+        enemy->entity.pos = v2_add(enemy->entity.pos, coldata.offset);
+    }
+}
+
+void enemy_idle_movement(Enemy *enemy, double delta) {
+    double dist_to_wander_pos = v2_distance_squared(enemy->entity.pos, enemy->current_wander_pos);
+    v2 dir_to_wander_pos = v2_dir(enemy->entity.pos, enemy->current_wander_pos);
+
+    enemy->wander_pause_timer -= delta;
+    if (enemy->wander_pause_timer <= 0) {
+        v2 random_dir = v2_rotate((v2){1, 0}, randf_range(0, 360));
+        RayCollisionData ray = castRay(enemy->entity.pos, random_dir);
+        double max_travel_dist = 200;
+        if (ray.hit) max_travel_dist = min(max_travel_dist, v2_distance(ray.startpos, ray.collpos));
+
+        double travel_dist = randf_range(max_travel_dist / 2, max_travel_dist);
+        enemy->current_wander_pos = v2_add(enemy->home_pos, v2_mul(random_dir, to_vec(travel_dist)));
+
+        enemy->wander_pause_timer = 10;
+    }
+
+    if (dist_to_wander_pos > 10) {
+        enemy->dir = dir_to_wander_pos;
+        enemy->move_dir = enemy->dir;
+        enemy->speed_multiplier = 0.7;
+    } else {
+        enemy->move_dir = V2_ZERO;
+        enemy->speed_multiplier = 0;
+    }
+}
+
 
 // #END

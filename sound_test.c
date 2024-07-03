@@ -2,6 +2,7 @@
 #define SDL_MAIN_HANDLED
 
 #include "sounds.c"
+#include <time.h>
 
 double max(double a, double b) {
     return a > b? a : b;
@@ -10,16 +11,26 @@ double max(double a, double b) {
 int main() {
 
     SDL_Init(SDL_INIT_AUDIO);
-    Sound *test_sound = create_sound("Sounds/test_sine2.wav");
-    Sound *test_sound2 = create_sound("Sounds/test_triangle_16bit.wav");
+    Sound *sounds[] = {
+        create_sound("Sounds/enemy_default_kill.wav"),
+        create_sound("Sounds/player_default_shoot.wav"),
+        create_sound("Sounds/enemy_default_hit.wav"),
+        create_sound("Sounds/player_default_hurt.wav")
+    };
+
+    time_t rawtime;
+
+    time ( &rawtime );
+    srand(rawtime);
+
     for (int i = 0; i < 10; i++) {
-        test_sound->volume_multiplier = 1;
-        if (i % 2 == 0) {
-            play_sound(test_sound, 1);
-        } else {
-            play_sound(test_sound2, 1);
-        }
-        SDL_Delay(800);
+        int choice = (int)((double)rand() / RAND_MAX * 4);
+        play_sound(sounds[choice], 1);
+        printf("Choice: %d \n", choice);
+        SDL_Delay(100);    
     }
-    SDL_Delay(1000);
+    
+
+    
+    SDL_Delay(5000);
 }

@@ -3,13 +3,14 @@
 
 
 
-#include "vec2.c"
-#include "arraylist.c" // stdio, stdlib
-#include "color.c"
+
 #include <stdarg.h>
 #include <math.h>
 #include <SDL.h>
-
+#include "vec2.c"
+#include "arraylist.c" // stdio, stdlib
+#include "color.c"
+#include "sounds.c"
 
 #define RENDERER_FLAGS (SDL_RENDERER_ACCELERATED)
 #define EPSILON 0.001
@@ -53,8 +54,6 @@ typedef struct Pixel {
 double last_print_time;
 const double DEG_TO_RAD = PI / 180;
 const double RAD_TO_DEG = 180 / PI;
-
-
 
 
 void init_cd_print() {
@@ -287,3 +286,18 @@ int get_num_digits(int num) {
     }
     return res;
 }
+
+void play_spatial_sound(Sound *sound, double base_volume, v2 listener_pos, v2 sound_pos, double sound_max_radius) {
+    double dist = v2_distance(listener_pos, sound_pos);
+    if (dist > sound_max_radius) return;
+
+    double volume_multiplier = (1 - inverse_lerp(0, sound_max_radius, dist)) * SDL_clamp(base_volume, 0, 1);
+
+    volume_multiplier = SDL_clamp(volume_multiplier, 0, 1);
+
+    volume_multiplier *= volume_multiplier; // to make it more realistic ig
+
+    play_sound(sound, volume_multiplier);
+}
+
+// #END
