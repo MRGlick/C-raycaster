@@ -217,7 +217,7 @@ extern DECLSPEC Uint32 SDLCALL SDL_WasInit(Uint32 flags);
  *
  * \since This function is available since SDL 2.0.0.
  *
- * \sa SDL_Init
+ * \sa SDL_Init1
  * \sa SDL_QuitSubSystem
  */
 extern DECLSPEC void SDLCALL SDL_Quit(void);

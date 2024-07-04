@@ -191,6 +191,12 @@ typedef struct Enemy {
     double time_to_forget;
     double forget_timer;
 
+    double pause_timer;
+
+    double max_vision_distance;
+
+    v2 dir_to_player;
+    double dist_squared_to_player;
 
 
 } Enemy;
@@ -234,6 +240,8 @@ typedef struct CollisionData {
 } CollisionData;
 
 // #FUNC
+
+void enemy_pause(Enemy *enemy, double sec);
 
 void enemy_default_handle_state(Enemy *enemy, double delta);
 
@@ -396,10 +404,12 @@ SDL_Texture *wallTexture;
 SDL_Texture *entityTexture;
 SDL_Texture *crosshair;
 SDL_Texture *fenceTexture;
+SDL_Texture *skybox_texture;
 SDL_Texture **wallFrames;
 SDL_Texture **shootHitEffectFrames;
-SDL_Texture *skybox_texture;
 SDL_Texture **enemy_bullet_destroy_anim;
+SDL_Texture **exclam_notice_anim;
+
 TextureData *floorTexture;
 TextureData *floorTexture2;
 TextureData *floorLightTexture;
@@ -532,8 +542,15 @@ Enemy createEnemy(v2 pos) {
     enemy.forget_timer = enemy.time_to_forget;
 
     enemy.noticed_player = false;
-    enemy.time_to_pursue = 0.5;
+    enemy.time_to_pursue = 1;
     enemy.pursue_timer = enemy.time_to_pursue;
+
+    enemy.pause_timer = 0;
+
+    enemy.max_vision_distance = 200;
+
+    enemy.dir_to_player = v2_dir(pos, player->pos);
+    enemy.dist_squared_to_player = v2_distance_squared(pos, player->pos);
 
     enemy.entity.pos = pos;
     enemy.entity.size = to_vec(50);
@@ -568,6 +585,9 @@ Enemy createEnemy(v2 pos) {
 }
 
 void init() {  // #INIT
+
+    exclam_notice_anim = malloc(sizeof(SDL_Texture *) * 6);
+    getTextureFiles("Textures/ExclamNoticeAnim/noticeAnim", 6, &exclam_notice_anim);
 
     player_default_hurt = create_sound("Sounds/player_default_hurt.wav");
     player_default_shoot = create_sound("Sounds/player_default_shoot.wav");
@@ -1805,10 +1825,10 @@ void freeObject(void *val, int type) {
             break;
         case (int)SPRITE:;  // not gonna destroy the texture
             Sprite *s = val;
-            for (int i = 0; i < s->animCount; i++) {
-                Animation anim = s->animations[i];
-                free(anim.frames);
-            }
+            // for (int i = 0; i < s->animCount; i++) {
+            //     Animation anim = s->animations[i];
+            //     free(anim.frames);
+            // }
             free(s->animations);
             free(s);
             break;
@@ -2161,9 +2181,7 @@ void playerShoot() {
 
     
 
-    hitEffect->entity.sprite->animations[0] = create_animation(5, 0, NULL);
-
-    for (int i = 0; i < 5; i++) hitEffect->entity.sprite->animations[0].frames[i] = shootHitEffectFrames[i];
+    hitEffect->entity.sprite->animations[0] = create_animation(5, 0, shootHitEffectFrames);
     
     hitEffect->entity.sprite->animations[0].fps = 12;
     hitEffect->entity.sprite->animations[0].loop = false;
@@ -2188,16 +2206,32 @@ void effectTick(Effect *effect, double delta) {
 void enemyTick(Enemy *enemy, double delta) {
     enemy->collider->pos = enemy->entity.pos;
 
+    bool paused = enemy->pause_timer > 0;
 
-    enemy_move(enemy, delta);
-    enemy_handle_collisions(enemy);
+    if (paused) {
+        enemy->pause_timer -= delta;
+    } else {
+        enemy_move(enemy, delta);
+        enemy_handle_collisions(enemy);
+    }
+
 
     // add player vision
 
-    v2 dir = v2_dir(enemy->entity.pos, player->pos);
-    RayCollisionData rayData = castRayForAll(v2_add(enemy->entity.pos, v2_mul(dir, to_vec(enemy->collider->radius + 0.01))), dir);
+    enemy->dir_to_player = v2_dir(enemy->entity.pos, player->pos);
+    enemy->dist_squared_to_player = v2_distance_squared(enemy->entity.pos, player->pos);
 
-    enemy->seeingPlayer = rayData.hit && (Player *)rayData.collider == player;
+    v2 dir = enemy->dir_to_player;
+    double dist_sqr = enemy->dist_squared_to_player;
+
+    if (dist_sqr > enemy->max_vision_distance * enemy->max_vision_distance) {
+        enemy->seeingPlayer = false;
+    } else {
+        RayCollisionData rayData = castRayForAll(v2_add(enemy->entity.pos, v2_mul(dir, to_vec(enemy->collider->radius + 0.01))), dir);
+        enemy->seeingPlayer = rayData.hit && (Player *)rayData.collider == player;
+    }
+
+    
 
     if (enemy->dirSprite != NULL) enemy->dirSprite->dir = enemy->dir;
 
@@ -2208,7 +2242,6 @@ void enemyTick(Enemy *enemy, double delta) {
 }
 
 void enemyTakeDmg(Enemy *enemy, int dmg) {
-
     enemy->health -= dmg;
     shakeCamera(15, 4, true, 0);
     Sprite *sprite = createSprite(false, 0);
@@ -2405,20 +2438,6 @@ void shooterTick(ShooterEnemy *shooter, double delta) {
         shooter->enemy.move_dir = shooter->enemy.dir; 
         shooter->enemy.speed_multiplier = 1;
     }
-
-
-
-    // if (shooter->enemy.seeingPlayer) {
-    //     v2 desired_dir = v2_dir(shooter->enemy.entity.pos, player->pos);
-    //     shooter->enemy.dir = v2_normalize(v2_lerp(shooter->enemy.dir, desired_dir, delta * 4));
-    //     shooter->enemy.dirSprite->dir = shooter->enemy.dir;
-    //     if (shooter->shootCooldownTimer <= 0) {
-    //         shooterEnemyShoot(shooter);
-    //         shooter->shootCooldownTimer = shooter->shootCooldown;
-    //     } else {
-    //         shooter->shootCooldownTimer -= delta;
-    //     }
-    // }
 
 
     enemyTick((Enemy *)shooter, delta);
@@ -2799,10 +2818,7 @@ void enemy_bullet_destroy(EnemyBullet *bullet) {
    
    
     Sprite *sprite = createSprite(true, 1);
-    sprite->animations[0] = create_animation(5, 0, NULL);
-    for (int i = 0; i < 5; i++) {
-        sprite->animations[0].frames[i] = enemy_bullet_destroy_anim[i];
-    }
+    sprite->animations[0] = create_animation(5, 0, enemy_bullet_destroy_anim);
     sprite->animations[0].playing = true;
     sprite->animations[0].fps = 10;
     sprite->animations[0].loop = false;
@@ -2869,28 +2885,55 @@ void enemy_idle_movement(Enemy *enemy, double delta) {
 }
 
 void enemy_notice_player_effect(Enemy *enemy, double delta) {
-    // TODO
+
+    if (enemy == NULL) return;
+
+    Sprite *sprite = createSprite(true, 1);
+    sprite->animations[0] = create_animation(6, 0, exclam_notice_anim);
+    sprite->animations[0].fps = 10;
+    sprite->animations[0].loop = false;
+    spritePlayAnim(sprite, 0);
+
+    Effect *effect = createEffect(enemy->entity.pos, to_vec(100), sprite, 1);
+    effect->entity.height = get_max_height() * 3/4;
+
+    add_game_object(effect, EFFECT);
+}
+
+void enemy_notice_player(Enemy *enemy, double delta) {
+    if (enemy->noticed_player) return;
+    enemy->noticed_player = true;
+    enemy_notice_player_effect(enemy, delta);
+
+    enemy->dir = v2_dir(enemy->entity.pos, player->pos);
+    enemy_pause(enemy, enemy->time_to_pursue);
 }
 
 void enemy_default_handle_state(Enemy *enemy, double delta) {
     if (enemy->seeingPlayer) {
         if (!enemy->noticed_player) {
-            enemy->noticed_player = true;
-            enemy_notice_player_effect(enemy, delta);
+            enemy_notice_player(enemy, delta);
         }
-        enemy->forget_timer = enemy->time_to_forget; // add this
+        enemy->forget_timer = enemy->time_to_forget;
+
     } else if (enemy->noticed_player) {
         enemy->forget_timer -= delta;
+
         if (enemy->forget_timer <= 0) {
             enemy->noticed_player = false;
             enemy->state = STATE_IDLE;
+        } else {
+            enemy->dir = v2_dir(enemy->entity.pos, player->pos);
         }
+
     } else {
         enemy->state = STATE_IDLE;
     }
     
     if (enemy->noticed_player) {
+
         enemy->pursue_timer -= delta;
+
         if (enemy->pursue_timer <= 0) {
             enemy->state = STATE_PURSUING;
         }
@@ -2898,6 +2941,10 @@ void enemy_default_handle_state(Enemy *enemy, double delta) {
         enemy->pursue_timer = enemy->time_to_pursue;
     }
 }   
+
+void enemy_pause(Enemy *enemy, double sec) {
+    enemy->pause_timer = sec;
+}
 
 
 // #END
