@@ -2918,7 +2918,7 @@ void enemy_bullet_destroy(EnemyBullet *bullet) {
 
     v2 pos = v2_sub(bullet->entity.pos, v2_mul(bullet->dir, to_vec(5)));
 
-    Effect *effect = createEffect(pos, to_vec(50), sprite, 1);
+    Effect *effect = createEffect(pos, to_vec(50), sprite, 0.35);
     effect->entity.height = bullet->entity.height;
     effect->entity.affected_by_light = false;
 
