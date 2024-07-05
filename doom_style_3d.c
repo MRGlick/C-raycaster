@@ -8,14 +8,13 @@ SDL_Window *window;
 
 // #DEFINITIONS
 
-#define TPS 300
-#define FPS 300
+#define TPS 120
 #define WINDOW_WIDTH 1024
 #define WINDOW_HEIGHT 580
 #define RESOLUTION_X 360
 #define RESOLUTION_Y 180
 #define X_SENSITIVITY 0.1
-#define Y_SENSITIVITY 0.5
+#define Y_SENSITIVITY 0.8
 #define COLOR_BLACK \
     (SDL_Color) { 0, 0, 0 }
 #define TRANSPARENT \
@@ -34,22 +33,29 @@ enum Types {
     RAYCAST, 
     CIRCLE_COLLIDER, 
     RAY_COLL_DATA, 
-    ENTITY, 
     RENDER_OBJECT, 
     WALL_STRIPE, 
     LIGHT_POINT, 
     SPRITE, 
     PARTICLES, 
     PARTICLE, 
-    EFFECT, 
+    
     BULLET, 
     DIR_SPRITE, 
+    
+    ENTITY_START,
 
+    ENTITY,
+    EFFECT,
+        ENEMY_START,
+        
+        ENEMY,
+        ENEMY_SHOOTER,
+        ENEMY_EXPLODER,
+        
+        ENEMY_END,
 
-
-
-    ENEMY, // enemy types start
-    ENEMY_SHOOTER 
+    ENTITY_END
 };
 
 enum Tiles { WALL1 = 1, WALL2 = 2 };
@@ -107,7 +113,8 @@ typedef struct CircleCollider {
 typedef struct Player {
     v2 pos, vel;
     double speed, angle, torque, collSize;
-    double height;
+    double pitch_angle;
+    double pitch;
     bool sprinting;
     bool canShoot;
     double shootCooldown;
@@ -198,6 +205,8 @@ typedef struct Enemy {
     v2 dir_to_player;
     double dist_squared_to_player;
 
+    bool collided_last_frame;
+
 
 } Enemy;
 
@@ -230,7 +239,19 @@ typedef struct ShooterEnemy {
     double shootCooldown;
     double shootCooldownTimer;
 
+    int mode;
+    double mode_timer;
+    v2 resting_move_dir;
+    
+    v2 attacking_move_dir;
+    double attacking_shoot_timer;
+
+
 } ShooterEnemy;
+
+typedef struct ExploderEnemy {
+    Enemy enemy;
+} ExploderEnemy;
 
 // #ENEMIES END
 
@@ -240,6 +261,12 @@ typedef struct CollisionData {
 } CollisionData;
 
 // #FUNC
+
+void exploder_tick(ExploderEnemy *exploder, double delta);
+
+bool is_entity_type(int type);
+
+ExploderEnemy *enemy_exploder_create(v2 pos);
 
 void enemy_pause(Enemy *enemy, double sec);
 
@@ -381,7 +408,7 @@ double angleDist(double a1, double a2);
 
 void shakeCamera(double strength, int ticks, bool fade, int priority);
 
-ShooterEnemy *createShooterEnemy(v2 pos);
+ShooterEnemy *enemy_shooter_create(v2 pos);
 
 
 
@@ -547,10 +574,12 @@ Enemy createEnemy(v2 pos) {
 
     enemy.pause_timer = 0;
 
-    enemy.max_vision_distance = 200;
+    enemy.max_vision_distance = 300;
 
     enemy.dir_to_player = v2_dir(pos, player->pos);
     enemy.dist_squared_to_player = v2_distance_squared(pos, player->pos);
+
+    enemy.collided_last_frame = false;
 
     enemy.entity.pos = pos;
     enemy.entity.size = to_vec(50);
@@ -701,8 +730,9 @@ void handle_input(SDL_Event event) {
             }
             player->angle += event.motion.xrel * X_SENSITIVITY;
             player->handOffset.x = lerp(player->handOffset.x, -event.motion.xrel * 2, 0.06);
-            // player->height += event.motion.yrel * Y_SENSITIVITY;
-            // player->height = clamp(player->height, -30, 30);
+            player->pitch += event.motion.yrel * Y_SENSITIVITY;
+            player->handOffset.y = lerp(player->handOffset.y, -event.motion.yrel * 2, 0.06);
+            player->pitch = clamp(player->pitch, -280, 280);
             break;
         case SDL_MOUSEBUTTONDOWN:
             if (event.button.button == SDL_BUTTON_LEFT) {
@@ -817,10 +847,10 @@ void playerTick(double delta) {
 
     if (!v2_equal(keyVec, to_vec(0))) {
         double t = sin(mili_to_sec(SDL_GetTicks64()) * (15 + (int)player->sprinting * 5)) * 3;
-        player->height = t;
+        //player->pitch = t;
         player->handOffset.y = t * 2.5;
     } else {
-        player->height = lerp(player->height, 0, 0.1);
+        //player->pitch = lerp(player->pitch, 0, 0.1);
         player->handOffset.y = lerp(player->handOffset.y, 0, 0.1);
     }
 
@@ -879,14 +909,14 @@ void objectTick(void *obj, int type, double delta) {
         case (int)PARTICLES:
             particlesTick(obj, delta);
             break;
-        case (int)ENEMY:
-            enemyTick(obj, delta);
-            break;
         case (int)BULLET:
             bulletTick(obj, delta);
             break;
         case (int)ENEMY_SHOOTER:
             shooterTick(obj, delta);
+            break;
+        case (int)ENEMY_EXPLODER:
+            exploder_tick(obj, delta);
             break;
     }
 }
@@ -1019,7 +1049,7 @@ v2 worldToScreen(v2 pos, double height) {
     double y_pos = WINDOW_HEIGHT / 2 + wallSize / 2 - (height / dist_to_viewplane);
 
     x_pos += cameraOffset.x;
-    y_pos += -player->height + cameraOffset.y;
+    y_pos += -player->pitch + cameraOffset.y;
 
     return (v2){x_pos, y_pos};
 }
@@ -1051,26 +1081,37 @@ void calcFloorAndCeiling() {
 
     SDL_LockTexture(floorAndCeiling, NULL, &pixels, &pitch);
 
-    TextureData *floorTex = floorTexture;
-    TextureData *ceilingTex = floorTexture;
-    v2 textureSize = (v2){floorTex->w, floorTex->h};
+    TextureData *textureData = floorTexture;
+    v2 textureSize = (v2){textureData->w, textureData->h};
 
-    for (int row = RESOLUTION_Y / 2; row < RESOLUTION_Y; row++) {
+    for (int row = 0; row < RESOLUTION_Y; row++) {
+
         int screenY = row * WINDOW_HEIGHT / RESOLUTION_Y;
 
-        v2 left = screenToFloor((v2){0, screenY});
-        v2 right = screenToFloor((v2){RESOLUTION_X - 1, screenY});
+        bool is_ceiling = screenY + player->pitch < WINDOW_HEIGHT / 2;
+
+        v2 left = screenToFloor((v2){0, screenY + player->pitch});
+        v2 right = screenToFloor((v2){RESOLUTION_X - 1, screenY + player->pitch});
+
         for (int col = 0; col < RESOLUTION_X; col++) {
+
+            ((int *)pixels)[row * RESOLUTION_X + col] = 0x000000ff;
+
+            
+
             int screenX = col * WINDOW_WIDTH / RESOLUTION_X;
 
             v2 point = v2_lerp(left, right, (double)col / RESOLUTION_X);
 
             
-            double light;
-            if (row < RESOLUTION_Y * 3/4) {
-                light = inverse_lerp(RESOLUTION_Y / 2, RESOLUTION_Y * 3/4, row) * 0.8;
-            } else {
-                light = 0.8;
+            double light = 0.8;
+
+            int offsetted_row = row + (player->pitch / WINDOW_HEIGHT * RESOLUTION_Y);
+
+            if (in_range(offsetted_row, RESOLUTION_Y/4, RESOLUTION_Y/2)) {
+                light = (1 - inverse_lerp(RESOLUTION_Y/4, RESOLUTION_Y/2, offsetted_row)) * 0.8;
+            } else if (in_range(offsetted_row, RESOLUTION_Y/2, RESOLUTION_Y * 3/4)) {
+                light = inverse_lerp(RESOLUTION_Y/2, RESOLUTION_Y * 3/4, offsetted_row) * 0.8;
             }
 
             int color = light * 255;
@@ -1081,27 +1122,29 @@ void calcFloorAndCeiling() {
             int floorTile = -1;
             int ceilingTile = -1;
 
-			
-
             if (in_range(tileRow, 0, TILEMAP_HEIGHT - 1) && in_range(tileCol, 0, TILEMAP_WIDTH - 1)) {
                 floorTile = floorTileMap[tileRow][tileCol];
                 ceilingTile = ceilingTileMap[tileRow][tileCol];
             }
 
-            if (floorTile == P_FLOOR) {
-                floorTex = floorTexture2;
-            } else if (floorTile == P_FLOOR_LIGHT) {
-                floorTex = floorLightTexture;
-            } else {
-                floorTex = floorTexture;
-            }
+            bool has_ceiling = ceilingTile != -1;
 
-            if (ceilingTile == P_CEILING) {
-                ceilingTex = ceilingTexture;
-            } else if (ceilingTile == P_CEILING_LIGHT) {
-                ceilingTex = ceilingLightTexture;
-            } else {
-                ceilingTex = ceilingTexture;
+            if (is_ceiling && !has_ceiling) {
+                continue;
+            } else if (has_ceiling && is_ceiling) {
+                if (ceilingTile == P_CEILING) {
+                    textureData = ceilingTexture;
+                } else if (ceilingTile == P_CEILING_LIGHT) {
+                    textureData = ceilingLightTexture;
+                }
+            } else { // its a floor
+                if (floorTile == P_FLOOR) {
+                    textureData = floorTexture2;
+                } else if (floorTile == P_FLOOR_LIGHT) {
+                    textureData = floorLightTexture;
+                } else {
+                    textureData = floorTexture;
+                }
             }
 
             int floor_row = row;
@@ -1112,7 +1155,11 @@ void calcFloorAndCeiling() {
 
             int floor_pixel_idx = floor_row * RESOLUTION_X + floor_col;
 
-            Pixel floor_pixel = TextureData_get_pixel(floorTex, loop_clamp(point.x / tileSize * 36, 0, 36), loop_clamp(point.y / tileSize * 36, 0, 36));
+            Pixel floor_pixel = TextureData_get_pixel(
+                textureData,
+                loop_clamp(point.x / tileSize * 36, 0, 36), 
+                loop_clamp(point.y / tileSize * 36, 0, 36)
+            );
 
             floor_pixel.r *= light;
             floor_pixel.g *= light;
@@ -1137,37 +1184,6 @@ void calcFloorAndCeiling() {
 
             ((int *)pixels)[floor_pixel_idx] = floor_pixel_i;
 
-            int ceil_col = col;
-            int ceil_row = RESOLUTION_Y / 2 - abs(RESOLUTION_Y / 2 - row);
-
-            int ceil_pixel_idx = ceil_row * RESOLUTION_X + ceil_col;
-
-            Pixel ceil_pixel;
-
-            if (ceilingTile == -1) {
-                ceil_pixel = (Pixel){0, 0, 0, 0};
-            } else {
-                ceil_pixel = TextureData_get_pixel(ceilingTex, loop_clamp(point.x / tileSize * 36, 0, 36), loop_clamp(point.y / tileSize * 36, 0, 36));
-                ceil_pixel.r *= light;
-                ceil_pixel.g *= light;
-                ceil_pixel.b *= light;
-
-                int rgb[3] = {
-                    ceil_pixel.r * baked_light_color.r,
-                    ceil_pixel.g * baked_light_color.g,
-                    ceil_pixel.b * baked_light_color.b
-                };
-
-                clampColors(rgb);
-
-                ceil_pixel.r = rgb[0];
-                ceil_pixel.g = rgb[1];
-                ceil_pixel.b = rgb[2];
-            }
-
-            int ceil_pixel_i = ceil_pixel.r << 24 | ceil_pixel.g << 16 | ceil_pixel.b << 8 | ceil_pixel.a;
-
-            ((int *)pixels)[ceil_pixel_idx] = ceil_pixel_i;
         }
     }
 
@@ -1177,7 +1193,7 @@ void calcFloorAndCeiling() {
 void drawFloorAndCeiling() {
     drawSkybox();
 
-    v2 offsets = (v2){cameraOffset.x, cameraOffset.y - player->height};
+    v2 offsets = (v2){cameraOffset.x, cameraOffset.y};
 
     SDL_Rect rect = {offsets.x, offsets.y, WINDOW_WIDTH, WINDOW_HEIGHT};
 
@@ -1343,40 +1359,25 @@ arraylist *getRenderList() {
         RenderObject *currentRObj = malloc(sizeof(RenderObject));
         v2 pos;
 
-        switch (object->type) {
-            case (int)ENTITY:
-                currentRObj->val = object->val;
-                currentRObj->type = ENTITY;
-                pos = ((Entity *)object->val)->pos;
-                break;
-            case (int)EFFECT:
-                currentRObj->val = &((Effect *)(object->val))->entity;
-                currentRObj->type = ENTITY;
-                pos = ((Entity *)currentRObj->val)->pos;
-                break;
-            case (int)PARTICLES:
-                currentRObj->val = object->val;
-                currentRObj->type = PARTICLES;
-                pos = ((Particles *)currentRObj->val)->pos;
-                break;
-            case (int)ENEMY:
-                currentRObj->val = object->val;
-                currentRObj->type = ENEMY;
-                pos = ((Enemy *)object->val)->entity.pos;
-                break;
-            case (int)ENEMY_SHOOTER:
-                currentRObj->val = object->val;
-                currentRObj->type = ENEMY;
-                pos = ((Enemy *)object->val)->entity.pos;
-                break;
-            case (int)BULLET:
-                currentRObj->val = object->val;
-                currentRObj->type = BULLET;
-                pos = ((EnemyBullet *)object->val)->entity.pos;
-                break;
-            default:
-                continue;
+        if (is_enemy_type(object->type)) {
+
+            currentRObj->val = object->val;
+            currentRObj->type = ENEMY;
+            pos = ((Enemy *)object->val)->entity.pos;
+
+        } else if (is_entity_type(object->type)) {
+
+            currentRObj->val = object->val;
+            currentRObj->type = ENTITY;
+            pos = ((Entity *)object->val)->pos;
+
+        } else if (object->type == BULLET) {
+
+            currentRObj->val = object->val;
+            currentRObj->type = BULLET;
+            pos = ((EnemyBullet *)object->val)->entity.pos;
         }
+
         currentRObj->dist_squared = v2_distance_squared(pos, player->pos);
 
         bool added = false;
@@ -1422,7 +1423,7 @@ void renderWallStripe(WallStripe *stripe) {
 
     SDL_Rect dstRect = {
         stripe->i * WINDOW_WIDTH / RESOLUTION_X + cameraOffset.x, 
-        WINDOW_HEIGHT / 2 - stripe->size / 2 - player->height + cameraOffset.y,
+        WINDOW_HEIGHT / 2 - stripe->size / 2 - player->pitch + cameraOffset.y,
         WINDOW_WIDTH / RESOLUTION_X + 1,
         stripe->size
     };
@@ -1560,7 +1561,7 @@ void drawSkybox() {
 
     double x = loop_clamp(player->angle / startFov * WINDOW_WIDTH, 0, WINDOW_WIDTH);
 
-    double yOffsets = -player->height;
+    double yOffsets = -player->pitch;
 
     SDL_Rect skybox_rect = {-x, yOffsets, WINDOW_WIDTH * 2, WINDOW_HEIGHT / 2};
 
@@ -1956,7 +1957,7 @@ void load_level(char *file) {
             if (floorTileMap[r][c] == (int)P_FLOOR_LIGHT) {
                 LightPoint *test_point = malloc(sizeof(LightPoint));
                 test_point->color = (SDL_Color){255, 100, 10};//{255, 200, 100};
-                test_point->strength = 2;
+                test_point->strength = 3;
                 test_point->radius = 140;
                 test_point->pos = (v2){(c + 0.5) * tileSize, (r + 0.5) * tileSize};
                 add_game_object(test_point, LIGHT_POINT);
@@ -1976,7 +1977,7 @@ void load_level(char *file) {
             if (ceilingTileMap[r][c] == (int)P_CEILING_LIGHT) {
                 LightPoint *test_point = malloc(sizeof(LightPoint));
                 test_point->color = (SDL_Color){100, 200, 255};//{255, 200, 100};
-                test_point->strength = 1;
+                test_point->strength = 3;
                 test_point->radius = 400;
                 test_point->pos = (v2){(c + 0.5) * tileSize, (r + 0.5) * tileSize};
                 add_game_object(test_point, LIGHT_POINT);
@@ -1996,7 +1997,7 @@ void load_level(char *file) {
                     arraylist_add(gameobjects, player, PLAYER);
                     break;
                 case (int)P_SHOOTER:;
-                    ShooterEnemy *shooter = createShooterEnemy(tileMid);
+                    ShooterEnemy *shooter = enemy_shooter_create(tileMid);
                     arraylist_add(gameobjects, shooter, ENEMY_SHOOTER);
                     break;
             }
@@ -2163,7 +2164,9 @@ void playerShoot() {
             Entity entity = *((Entity *)ray_data.collider);
             effect_height = entity.height - entity.size.y / 2;
             
+            enemy_pause(ray_data.collider, 0.4);
             enemyTakeDmg(ray_data.collider, 1);
+            
             
         }
     } else {
@@ -2212,6 +2215,7 @@ void enemyTick(Enemy *enemy, double delta) {
         enemy->pause_timer -= delta;
     } else {
         enemy_move(enemy, delta);
+        enemy->collided_last_frame = false;
         enemy_handle_collisions(enemy);
     }
 
@@ -2404,7 +2408,7 @@ void bulletTick(EnemyBullet *bullet, double delta) {
     }
 }
 
-void shooterEnemyShoot(ShooterEnemy *shooter) {
+void enemy_shooter_shoot(ShooterEnemy *shooter) {
     EnemyBullet *bullet = createDefaultBullet(shooter->enemy.entity.pos, shooter->enemy.dir);
     if (bullet == NULL) {
         printf("Bullet is null \n");
@@ -2424,7 +2428,12 @@ bool pos_in_tile(v2 pos) {
 
 
 
-void shooterTick(ShooterEnemy *shooter, double delta) {
+void shooterTick(ShooterEnemy *shooter, double delta) { 
+
+    const int MODE_RESTING = 0;
+    const int MODE_SHOOTING = 1;
+
+    const int PREFFERED_DISTANCE = 200;
 
     enemy_default_handle_state(shooter, delta);
 
@@ -2434,16 +2443,48 @@ void shooterTick(ShooterEnemy *shooter, double delta) {
     if (shooter->enemy.state == STATE_IDLE) {
         enemy_idle_movement(shooter, delta);
     } else {
-        shooter->enemy.dir = v2_dir(shooter->enemy.entity.pos, player->pos);
-        shooter->enemy.move_dir = shooter->enemy.dir; 
-        shooter->enemy.speed_multiplier = 1;
+        shooter->mode_timer -= delta;
+        if (shooter->mode_timer <= 0) {
+            shooter->mode = shooter->mode == MODE_RESTING? MODE_SHOOTING : MODE_RESTING; // could make this simpler(1 - mode) but it will be less readable
+            if (shooter->mode == MODE_RESTING) {
+                shooter->mode_timer = 4;
+            } else {
+                shooter->mode_timer = 2;
+            }
+        }
+
+        if (shooter->mode == MODE_RESTING) {
+            if (shooter->enemy.collided_last_frame || v2_equal(shooter->resting_move_dir, V2_ZERO)) {
+                v2 random_dir = v2_get_random_dir();
+                shooter->resting_move_dir = random_dir;
+            }
+            v2 final = v2_rotate(shooter->resting_move_dir, v2_get_angle(shooter->enemy.dir_to_player));
+            shooter->enemy.move_dir = v2_lerp(shooter->enemy.move_dir, final, delta);
+            shooter->enemy.speed_multiplier = 0.8;
+            shooter->enemy.dir = shooter->enemy.dir_to_player;
+        } else {
+            if (shooter->enemy.collided_last_frame || v2_equal(shooter->attacking_move_dir, V2_ZERO)) {
+                v2 random_dir = v2_get_random_dir();
+                shooter->attacking_move_dir = random_dir;
+            }
+            v2 final = v2_rotate(shooter->attacking_move_dir, v2_get_angle(shooter->enemy.dir_to_player));
+            shooter->enemy.move_dir = v2_lerp(shooter->enemy.move_dir, final, delta);
+            shooter->enemy.speed_multiplier = 1.2;
+            shooter->enemy.dir = shooter->enemy.dir_to_player;
+
+            shooter->attacking_shoot_timer -= delta;
+            if (shooter->attacking_shoot_timer <= 0) {
+                enemy_shooter_shoot(shooter);
+                shooter->attacking_shoot_timer = 0.65;
+            }
+        }
     }
 
 
     enemyTick((Enemy *)shooter, delta);
 }
 
-ShooterEnemy *createShooterEnemy(v2 pos) {
+ShooterEnemy *enemy_shooter_create(v2 pos) {
     ShooterEnemy *shooter = malloc(sizeof(ShooterEnemy));
     if (shooter == NULL) {
         printf("Failed to allocate memory \n");
@@ -2453,6 +2494,12 @@ ShooterEnemy *createShooterEnemy(v2 pos) {
     shooter->enemy.maxHealth = 5;
     shooter->enemy.health = shooter->enemy.maxHealth;
     shooter->enemy.hit_texture = shooter_hit_texture;
+
+    shooter->resting_move_dir = V2_ZERO;
+    shooter->attacking_move_dir = V2_ZERO;
+    shooter->mode = 1;
+    shooter->mode_timer = 2;
+    shooter->attacking_shoot_timer = 0.65;
 
     shooter->shootCooldown = 2;
     shooter->shootCooldownTimer = 0;
@@ -2669,7 +2716,7 @@ double get_max_height() {
 }
 
 bool is_enemy_type(int type) {
-    if (type >= (int)ENEMY) {
+    if (in_range(type, ENEMY_START, ENEMY_END)) {
         return true;
     }
     return false;
@@ -2854,6 +2901,7 @@ void enemy_handle_collisions(Enemy *enemy) {
     CollisionData coldata = getCircleTileMapCollision(*enemy->collider);
     if (coldata.didCollide) {
         enemy->entity.pos = v2_add(enemy->entity.pos, coldata.offset);
+        enemy->collided_last_frame = true;
     }
 }
 
@@ -2894,8 +2942,9 @@ void enemy_notice_player_effect(Enemy *enemy, double delta) {
     sprite->animations[0].loop = false;
     spritePlayAnim(sprite, 0);
 
-    Effect *effect = createEffect(enemy->entity.pos, to_vec(100), sprite, 1);
+    Effect *effect = createEffect(enemy->entity.pos, to_vec(400), sprite, 0.51);
     effect->entity.height = get_max_height() * 3/4;
+    effect->entity.affected_by_light = false;
 
     add_game_object(effect, EFFECT);
 }
@@ -2944,6 +2993,21 @@ void enemy_default_handle_state(Enemy *enemy, double delta) {
 
 void enemy_pause(Enemy *enemy, double sec) {
     enemy->pause_timer = sec;
+}
+
+ExploderEnemy *enemy_exploder_create(v2 pos) {
+    ExploderEnemy *exploder = malloc(sizeof(ExploderEnemy));
+    exploder->enemy = createEnemy(pos);
+    
+    return exploder;
+}
+
+bool is_entity_type(int type) {
+    return in_range(type, ENTITY_START, ENTITY_END);
+}
+
+void exploder_tick(ExploderEnemy *exploder, double delta) {
+    
 }
 
 

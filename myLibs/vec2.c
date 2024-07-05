@@ -111,6 +111,7 @@ double v2_cos_angle_between(v2 a, v2 b) {
     return v2_dot(a, b) / (v2_length(a) * v2_length(b));
 }
 
+
 double v2_angle_between(v2 a, v2 b) {
     double lengthA = v2_length(a);
     double lengthB = v2_length(b);
@@ -237,3 +238,10 @@ v2 v2_clamp(v2 vec, v2 minVec, v2 maxVec) {
 
     return result;
 }
+
+v2 v2_get_random_dir() {
+    double random = (double)rand() / RAND_MAX;
+    return v2_rotate((v2){1, 0}, random * 2 * PI);
+}
+
+// #END
