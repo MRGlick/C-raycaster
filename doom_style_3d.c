@@ -213,6 +213,8 @@ typedef struct Enemy {
     bool collided_last_frame;
 
 
+    void (*tick)(struct Enemy *, double);
+
 } Enemy;
 
 typedef struct EnemyBullet {
@@ -276,7 +278,7 @@ void dir_sprite_play_anim(DirectionalSprite *dir_sprite, int anim);
 
 void dir_sprite_play_anim(DirectionalSprite *dir_sprite, int anim);
 
-void exploder_tick(ExploderEnemy *exploder, double delta);
+void exploder_tick(Enemy *enemy, double delta);
 
 bool is_entity_type(int type);
 
@@ -396,7 +398,7 @@ void effectTick(Effect *effect, double delta);
 
 void bulletTick(EnemyBullet *bullet, double delta);
 
-void shooterTick(ShooterEnemy *shooter, double delta);
+void shooterTick(Enemy *enemy, double delta);
 
 Sprite *createSprite(bool isAnimated, int animCount);
 
@@ -577,6 +579,8 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
     enemy.speed = 50;
     enemy.speed_multiplier = 1;
     enemy.state = STATE_IDLE;
+    
+    enemy.tick = NULL;
 
     // idle movement
     enemy.home_pos = pos;
@@ -930,6 +934,14 @@ void spriteTick(Sprite *sprite, double delta) {
 void objectTick(void *obj, int type, double delta) {
     
     update_entity_collisions(obj, type);
+
+    if (is_enemy_type(type)) {
+        Enemy *enemy = obj;
+        if (enemy->tick != NULL) {
+            enemy->tick(enemy, delta);
+            return;
+        }
+    }
     
     switch (type) {
         case (int)PLAYER:
@@ -948,12 +960,7 @@ void objectTick(void *obj, int type, double delta) {
         case (int)BULLET:
             bulletTick(obj, delta);
             break;
-        case (int)ENEMY_SHOOTER:
-            shooterTick(obj, delta);
-            break;
-        case (int)ENEMY_EXPLODER:
-            exploder_tick(obj, delta);
-            break;
+        
     }
 }
 
@@ -2474,7 +2481,9 @@ bool pos_in_tile(v2 pos) {
 
 
 
-void shooterTick(ShooterEnemy *shooter, double delta) { 
+void shooterTick(Enemy *enemy, double delta) { 
+
+    ShooterEnemy *shooter = enemy;
 
     const int MODE_RESTING = 0;
     const int MODE_SHOOTING = 1;
@@ -2540,6 +2549,7 @@ ShooterEnemy *enemy_shooter_create(v2 pos) {
     shooter->enemy.maxHealth = 5;
     shooter->enemy.health = shooter->enemy.maxHealth;
     shooter->enemy.hit_texture = shooter_hit_texture;
+    shooter->enemy.tick = shooterTick;
 
     shooter->resting_move_dir = V2_ZERO;
     shooter->attacking_move_dir = V2_ZERO;
@@ -2549,6 +2559,7 @@ ShooterEnemy *enemy_shooter_create(v2 pos) {
 
     shooter->shootCooldown = 2;
     shooter->shootCooldownTimer = 0;
+
 
     return shooter;
 }
@@ -3066,6 +3077,7 @@ ExploderEnemy *enemy_exploder_create(v2 pos) {
     dir_sprite_play_anim(dir_sprite, 1);
     
     exploder->enemy = createEnemy(pos, dir_sprite);
+    exploder->enemy.tick = exploder_tick;
 
     exploder->enemy.entity.height = get_max_height() * 0.18;
     return exploder;
@@ -3075,8 +3087,10 @@ bool is_entity_type(int type) {
     return in_range(type, ENTITY_START, ENTITY_END);
 }
 
-void exploder_tick(ExploderEnemy *exploder, double delta) {
+void exploder_tick(Enemy *enemy, double delta) {
     
+    ExploderEnemy *exploder = enemy;
+
     enemy_default_handle_state(exploder, delta);
 
     if (exploder->enemy.state == STATE_IDLE) {
