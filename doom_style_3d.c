@@ -90,6 +90,10 @@ typedef struct DirectionalSprite {
     Sprite **sprites;
     v2 dir;  // global direction
     int dirCount;
+
+    int current_anim;
+    int playing;
+    int fps;
 } DirectionalSprite;
 
 typedef struct Raycast {
@@ -177,6 +181,7 @@ typedef struct Enemy {
     CircleCollider *collider;
     SDL_Texture *hit_texture;
     v2 dir;
+    v2 vel;
     double speed, speed_multiplier;
     bool seeingPlayer;
     v2 lastSeenPlayerPos;
@@ -251,6 +256,9 @@ typedef struct ShooterEnemy {
 
 typedef struct ExploderEnemy {
     Enemy enemy;
+
+    double explosion_kb;
+    double explosion_radius;
 } ExploderEnemy;
 
 // #ENEMIES END
@@ -261,6 +269,12 @@ typedef struct CollisionData {
 } CollisionData;
 
 // #FUNC
+
+void exploder_explode(ExploderEnemy *exploder);
+
+void dir_sprite_play_anim(DirectionalSprite *dir_sprite, int anim);
+
+void dir_sprite_play_anim(DirectionalSprite *dir_sprite, int anim);
 
 void exploder_tick(ExploderEnemy *exploder, double delta);
 
@@ -364,7 +378,7 @@ void freeAnimation(Animation *anim);
 
 SDL_Texture *getSpriteCurrentTexture(Sprite *sprite);
 
-Sprite *getDSpriteCurrentSprite(DirectionalSprite *dSprite, v2 spritePos);
+Sprite *dir_sprite_current_sprite(DirectionalSprite *dSprite, v2 spritePos);
 
 void objectTick(void *obj, int type, double delta);
 
@@ -436,6 +450,9 @@ SDL_Texture **wallFrames;
 SDL_Texture **shootHitEffectFrames;
 SDL_Texture **enemy_bullet_destroy_anim;
 SDL_Texture **exclam_notice_anim;
+SDL_Texture **exploder_frames;
+SDL_Texture **shooter_bullet_default_frames;
+SDL_Texture **shooter_bullet_explode_frames;
 
 TextureData *floorTexture;
 TextureData *floorTexture2;
@@ -550,11 +567,12 @@ void initParticles() {
     add_game_object(particles, PARTICLES);
 }
 
-Enemy createEnemy(v2 pos) {
+Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
     Enemy enemy;
     enemy.maxHealth = 5;
     enemy.health = enemy.maxHealth;
     enemy.dir = (v2){1, 0};
+    enemy.vel = (v2){0, 0};
     enemy.move_dir = (v2){0, 0};
     enemy.speed = 50;
     enemy.speed_multiplier = 1;
@@ -576,8 +594,8 @@ Enemy createEnemy(v2 pos) {
 
     enemy.max_vision_distance = 300;
 
-    enemy.dir_to_player = v2_dir(pos, player->pos);
-    enemy.dist_squared_to_player = v2_distance_squared(pos, player->pos);
+    enemy.dir_to_player = V2_ZERO;
+    enemy.dist_squared_to_player = 0;
 
     enemy.collided_last_frame = false;
 
@@ -588,17 +606,22 @@ Enemy createEnemy(v2 pos) {
     enemy.hit_texture = NULL;
     enemy.sound_max_radius = 400;
 
-    enemy.dirSprite = createDirSprite(16);
-    for (int i = 0; i < 16; i++) {
-        char *baseFileName = "Textures/CubeEnemyAnim/CubeEnemy";
-        char num[get_num_digits(i + 1)];
-        sprintf(num, "%d", i + 1);
-        char *fileWithNum = concat(baseFileName, num);
-        char *fileWithExtension = concat(fileWithNum, ".bmp");
+    if (dir_sprite == NULL) {
+        enemy.dirSprite = createDirSprite(16);
+        for (int i = 0; i < 16; i++) {
+            char *baseFileName = "Textures/CubeEnemyAnim/CubeEnemy";
+            char num[get_num_digits(i + 1)];
+            sprintf(num, "%d", i + 1);
+            char *fileWithNum = concat(baseFileName, num);
+            char *fileWithExtension = concat(fileWithNum, ".bmp");
 
-        enemy.dirSprite->sprites[i] = createSprite(false, 0);
-        enemy.dirSprite->sprites[i]->texture = make_texture(renderer, fileWithExtension);
+            enemy.dirSprite->sprites[i] = createSprite(false, 0);
+            enemy.dirSprite->sprites[i]->texture = make_texture(renderer, fileWithExtension);
+        }
+    } else {
+        enemy.dirSprite = dir_sprite;
     }
+
     enemy.dirSprite->dir = (v2){1, 0};
 
     enemy.entity.height = get_max_height() * 0.1;
@@ -614,6 +637,16 @@ Enemy createEnemy(v2 pos) {
 }
 
 void init() {  // #INIT
+
+    shooter_bullet_default_frames = malloc(sizeof(SDL_Texture *) * 4);
+    shooter_bullet_explode_frames = malloc(sizeof(SDL_Texture *) * 4);
+
+    getTextureFiles("Textures/CubeEnemyAnim/CEBulletHitAnim/Default/Bullet", 4, &shooter_bullet_default_frames);
+    getTextureFiles("Textures/CubeEnemyAnim/CEBulletHitAnim/Explode/Bullet", 4, &shooter_bullet_explode_frames);
+
+    exploder_frames = malloc(sizeof(SDL_Texture *) * 80);
+    getTextureFiles("Textures/ExploderEnemyAnim/exploderEnemyAnim", 80, &exploder_frames);
+
 
     exclam_notice_anim = malloc(sizeof(SDL_Texture *) * 6);
     getTextureFiles("Textures/ExclamNoticeAnim/noticeAnim", 6, &exclam_notice_anim);
@@ -705,6 +738,9 @@ void init() {  // #INIT
     SDL_RenderSetLogicalSize(renderer, WINDOW_WIDTH, WINDOW_HEIGHT);
 
 	
+    ExploderEnemy *test = enemy_exploder_create(v2_add(player->pos, (v2){50, 0}));
+    add_game_object(test, ENEMY_EXPLODER);
+
 
 }  // #INIT END
 
@@ -1251,7 +1287,7 @@ void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height, bool af
 }
 
 void renderDirSprite(DirectionalSprite *dSprite, v2 pos, v2 size, double height) {
-    SDL_Texture *texture = getSpriteCurrentTexture(getDSpriteCurrentSprite(dSprite, pos));
+    SDL_Texture *texture = getSpriteCurrentTexture(dir_sprite_current_sprite(dSprite, pos));
 
     renderTexture(texture, pos, size, height, true);
 }
@@ -1653,33 +1689,24 @@ void init_player(v2 pos) {
 
 // CLEAR
 RayCollisionData ray_object(Raycast ray, obj *object) {
+
+    if (is_enemy_type(object->type)) {
+        Enemy *enemy = object->val;
+        RayCollisionData enemy_ray_data = ray_circle(ray, *enemy->collider);
+        if (enemy_ray_data.hit) {
+            enemy_ray_data.collider = (ShooterEnemy *)object->val;
+            enemy_ray_data.colliderType = ENEMY_SHOOTER;
+        }
+
+        return enemy_ray_data;
+    }
+
     switch (object->type) {
-        case (int)ENEMY:;
-            Enemy *enemy = object->val;
-            RayCollisionData enemyRayData = ray_circle(ray, *enemy->collider);
-            if (enemyRayData.hit) {
-                enemyRayData.collider = enemy;
-                enemyRayData.colliderType = ENEMY;
-            }
-
-            return enemyRayData;
-            break;
-        case (int)ENEMY_SHOOTER:;
-            Enemy *shooter = object->val;
-            RayCollisionData shooterRayData = ray_circle(ray, *shooter->collider);
-            if (shooterRayData.hit) {
-                shooterRayData.collider = (ShooterEnemy *)object->val;
-                shooterRayData.colliderType = ENEMY_SHOOTER;
-            }
-
-            return shooterRayData;
-            break;
         case (int)PLAYER:;
             RayCollisionData playerRayData = ray_circle(ray, *player->collider);
             if (playerRayData.hit) {
                 playerRayData.collider = player;
             }
-
             return playerRayData;
             break;
     }
@@ -2303,11 +2330,14 @@ DirectionalSprite *createDirSprite(int dirCount) {
     dSprite->dir = (v2){1, 0};
     dSprite->dirCount = dirCount;
     dSprite->sprites = malloc(sizeof(Sprite *) * dirCount);
+    dSprite->current_anim = 0;
+    dSprite->playing = false;
+    dSprite->fps = 12;
 
     return dSprite;
 }
 
-Sprite *getDSpriteCurrentSprite(DirectionalSprite *dSprite, v2 spritePos) {
+Sprite *dir_sprite_current_sprite(DirectionalSprite *dSprite, v2 spritePos) {
     double player_angle_to_sprite = v2_get_angle(v2_dir(player->pos, spritePos));
 
     if (dSprite->dirCount < 2) {
@@ -2336,7 +2366,21 @@ Sprite *getDSpriteCurrentSprite(DirectionalSprite *dSprite, v2 spritePos) {
 }
 
 void dSpriteTick(DirectionalSprite *dSprite, v2 spritePos, double delta) {
-    spriteTick(getDSpriteCurrentSprite(dSprite, spritePos), delta);
+
+    if (dSprite == NULL) return;
+
+    for (int i = 0; i < dSprite->dirCount; i++) {
+        Animation *anim = &(dSprite->sprites[i]->animations[dSprite->current_anim]);
+        if (anim == NULL) {
+            //cd_print(true, "Thing at index %d is null?? \n", i);
+            continue;
+        }
+        anim->fps = dSprite->fps;
+        anim->playing = dSprite->playing;
+        animationTick(anim, delta);
+    }
+
+    // spriteTick(dir_sprite_current_sprite(dSprite, spritePos), delta);
 }
 
 double angleDist(double a1, double a2) {
@@ -2357,8 +2401,10 @@ EnemyBullet *createDefaultBullet(v2 pos, v2 dir) {
 
     bullet->entity.pos = pos;
     bullet->entity.size = to_vec(20);
-    bullet->entity.sprite = createSprite(false, 0);
-    bullet->entity.sprite->texture = enemy_bullet_texture;  // CHANGE LATER
+    bullet->entity.sprite = createSprite(true, 1);
+    bullet->entity.sprite->animations[0] = create_animation(4, 0, shooter_bullet_default_frames);
+    bullet->entity.sprite->animations[0].fps = 12;
+    spritePlayAnim(bullet->entity.sprite, 0);
     bullet->entity.height = WINDOW_HEIGHT / 6;
     bullet->entity.affected_by_light = false;
     bullet->dirSprite = NULL;
@@ -2409,7 +2455,7 @@ void bulletTick(EnemyBullet *bullet, double delta) {
 }
 
 void enemy_shooter_shoot(ShooterEnemy *shooter) {
-    EnemyBullet *bullet = createDefaultBullet(shooter->enemy.entity.pos, shooter->enemy.dir);
+    EnemyBullet *bullet = createDefaultBullet(shooter->enemy.entity.pos, v2_rotate(shooter->enemy.dir, randf_range(-0.1, 0.1)));
     if (bullet == NULL) {
         printf("Bullet is null \n");
         return;
@@ -2490,7 +2536,7 @@ ShooterEnemy *enemy_shooter_create(v2 pos) {
         printf("Failed to allocate memory \n");
         return NULL;
     }
-    shooter->enemy = createEnemy(pos);
+    shooter->enemy = createEnemy(pos, NULL);
     shooter->enemy.maxHealth = 5;
     shooter->enemy.health = shooter->enemy.maxHealth;
     shooter->enemy.hit_texture = shooter_hit_texture;
@@ -2865,9 +2911,9 @@ void enemy_bullet_destroy(EnemyBullet *bullet) {
    
    
     Sprite *sprite = createSprite(true, 1);
-    sprite->animations[0] = create_animation(5, 0, enemy_bullet_destroy_anim);
+    sprite->animations[0] = create_animation(4, 0, shooter_bullet_explode_frames);
     sprite->animations[0].playing = true;
-    sprite->animations[0].fps = 10;
+    sprite->animations[0].fps = 12;
     sprite->animations[0].loop = false;
 
     v2 pos = v2_sub(bullet->entity.pos, v2_mul(bullet->dir, to_vec(5)));
@@ -2893,7 +2939,9 @@ void enemy_move(Enemy *enemy, double delta) {
     v2 vel = v2_mul(enemy->move_dir, to_vec(enemy->speed * enemy->speed_multiplier));
     vel = v2_mul(vel, to_vec(delta));
 
-    enemy->entity.pos = v2_add(enemy->entity.pos, vel);
+    enemy->vel = v2_lerp(enemy->vel, vel, delta * 2);
+
+    enemy->entity.pos = v2_add(enemy->entity.pos, enemy->vel);
     
 }
 
@@ -2910,7 +2958,7 @@ void enemy_idle_movement(Enemy *enemy, double delta) {
     v2 dir_to_wander_pos = v2_dir(enemy->entity.pos, enemy->current_wander_pos);
 
     enemy->wander_pause_timer -= delta;
-    if (enemy->wander_pause_timer <= 0) {
+    if (enemy->wander_pause_timer <= 0 || enemy->collided_last_frame) {
         v2 random_dir = v2_rotate((v2){1, 0}, randf_range(0, 360));
         RayCollisionData ray = castRay(enemy->entity.pos, random_dir);
         double max_travel_dist = 200;
@@ -2919,7 +2967,7 @@ void enemy_idle_movement(Enemy *enemy, double delta) {
         double travel_dist = randf_range(max_travel_dist / 2, max_travel_dist);
         enemy->current_wander_pos = v2_add(enemy->home_pos, v2_mul(random_dir, to_vec(travel_dist)));
 
-        enemy->wander_pause_timer = 10;
+        enemy->wander_pause_timer = 6;
     }
 
     if (dist_to_wander_pos > 10) {
@@ -2997,8 +3045,29 @@ void enemy_pause(Enemy *enemy, double sec) {
 
 ExploderEnemy *enemy_exploder_create(v2 pos) {
     ExploderEnemy *exploder = malloc(sizeof(ExploderEnemy));
-    exploder->enemy = createEnemy(pos);
+
+    exploder->explosion_kb = 15;
+    exploder->explosion_radius = 30;
     
+    const int ANIM_LENGTH = 5;
+
+    DirectionalSprite *dir_sprite = createDirSprite(16);
+    for (int i = 0; i < 16; i++) {
+        Sprite *sprite = createSprite(true, 2);
+        sprite->animations[0] = create_animation(ANIM_LENGTH, 0, &exploder_frames[i * 5]);
+        sprite->animations[1] = create_animation(1, 0, &exploder_frames[i * 5]);
+        if (&sprite->animations[0] == NULL || &sprite->animations[1] == NULL) {
+            printf("Something went wrong \n");
+            exit(1);
+        }
+
+        dir_sprite->sprites[i] = sprite;
+    }
+    dir_sprite_play_anim(dir_sprite, 1);
+    
+    exploder->enemy = createEnemy(pos, dir_sprite);
+
+    exploder->enemy.entity.height = get_max_height() * 0.18;
     return exploder;
 }
 
@@ -3008,6 +3077,74 @@ bool is_entity_type(int type) {
 
 void exploder_tick(ExploderEnemy *exploder, double delta) {
     
+    enemy_default_handle_state(exploder, delta);
+
+    if (exploder->enemy.state == STATE_IDLE) {
+        enemy_idle_movement(exploder, delta);
+    } else {
+        exploder->enemy.move_dir = exploder->enemy.dir_to_player;
+        exploder->enemy.dir = exploder->enemy.dir_to_player;
+        exploder->enemy.speed_multiplier = 1;
+
+        if (exploder->enemy.dist_squared_to_player < 400) {
+            exploder_explode(exploder);
+            return;
+        }
+    }
+    
+
+    if (!v2_equal(exploder->enemy.move_dir, V2_ZERO)) {
+        dir_sprite_play_anim(exploder->enemy.dirSprite, 0);
+    } else {
+        dir_sprite_play_anim(exploder->enemy.dirSprite, 1);
+        exploder->enemy.dirSprite->playing = false;
+    }
+
+    cd_print(true, "current anim: %d \n", exploder->enemy.dirSprite->current_anim);
+
+    enemyTick(exploder, delta);
+
+}
+
+void dir_sprite_play_anim(DirectionalSprite *dir_sprite, int anim) {
+    if (dir_sprite->current_anim == anim) return;
+    
+    for (int i = 0; i < dir_sprite->dirCount; i++) {
+        dir_sprite->sprites[i]->animations[anim].frame = 0;
+    }
+
+    dir_sprite->current_anim = anim;
+    dir_sprite->playing = true;
+}
+
+void exploder_explode(ExploderEnemy *exploder) {
+    for (int i = 0; i < gameobjects->length; i++) {
+        obj *gameobject = arraylist_get(gameobjects, i);
+        if (is_enemy_type(gameobject->type)) {
+            Enemy *enemy = gameobject->val;
+            double explosion_radius_squared = exploder->explosion_radius * exploder->explosion_radius;
+            double dist_squared = v2_distance_squared(enemy->entity.pos, exploder->enemy.entity.pos);
+            if (dist_squared < explosion_radius_squared) {
+                enemyTakeDmg(enemy, 1);
+                double kb = lerp(exploder->explosion_kb, 0, inverse_lerp(0, explosion_radius_squared, dist_squared));
+                enemy->vel = v2_mul(v2_dir(exploder->enemy.entity.pos, enemy->entity.pos), to_vec(kb));
+            }
+            
+        }
+    }
+
+    double explosion_radius_squared = exploder->explosion_radius * exploder->explosion_radius;
+    double dist_squared = v2_distance_squared(player->pos, exploder->enemy.entity.pos);
+    if (dist_squared < explosion_radius_squared) {
+        player_take_dmg(1);
+        double kb = lerp(exploder->explosion_kb, 0, inverse_lerp(0, explosion_radius_squared, dist_squared));
+        player->vel = v2_mul(v2_dir(exploder->enemy.entity.pos, player->pos), to_vec(kb));
+    }
+
+
+
+
+    remove_game_object(exploder, ENEMY_EXPLODER);
 }
 
 
