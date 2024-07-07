@@ -60,6 +60,13 @@ enum Types {
 
 enum Tiles { WALL1 = 1, WALL2 = 2 };
 
+typedef enum AbilityType {
+    A_PRIMARY,
+    A_SECONDARY,
+    A_UTILITY,
+    A_SPECIAL
+} AbilityType;
+
 typedef enum {
     STATE_IDLE,
     STATE_PURSUING
@@ -114,6 +121,22 @@ typedef struct CircleCollider {
     double radius;
 } CircleCollider;
 
+typedef struct Ability {
+    void (*activate)(struct Ability *);
+    void (*tick)(struct Ability *, double);
+    bool can_use;
+    double cooldown;
+    double timer;
+    AbilityType type;
+} Ability;
+
+typedef struct Rapidfire {
+    Ability ability;
+    double shot_timer;
+    double shot_amount;
+    double shots_left;
+} Rapidfire;
+
 typedef struct Player {
     v2 pos, vel;
     double speed, angle, torque, collSize;
@@ -129,6 +152,8 @@ typedef struct Player {
     v2 handOffset;
     int health, maxHealth;
     CircleCollider *collider;
+
+    Ability *primary, *secondary, *utility, *special;
 } Player;
 
 typedef struct Entity {
@@ -234,9 +259,9 @@ typedef struct BakedLightColor {
     double r, g, b;
 } BakedLightColor;
 
+
+
 // ENEMY IDEAS:
-// Regular pew pew enemy
-// Small enemy that chases you and explodes
 // Enemy which reflects shots
 // Big enemy that splits into multiple enemies
 
@@ -271,6 +296,18 @@ typedef struct CollisionData {
 } CollisionData;
 
 // #FUNC
+
+void _shoot();
+
+void ability_secondary_shoot_tick(Ability *ability, double delta);
+
+void ability_secondary_shoot_activate(Ability *ability);
+
+Rapidfire ability_secondary_shoot_create();
+
+Ability ability_primary_shoot_create();
+
+void default_ability_tick(Ability *ability, double delta);
 
 void exploder_explode(ExploderEnemy *exploder);
 
@@ -412,7 +449,7 @@ Particles *createParticles(int amount, Sprite *sprite);
 
 void particlesTick(Particles *particles, u64 delta);
 
-void playerShoot();
+void ability_shoot_activate(Ability *ability);
 
 void enemyTakeDmg(Enemy *enemy, int dmg);
 
@@ -485,6 +522,7 @@ bool keyPressArr[26];
 bool render_debug = false;
 bool lockMouse = true;
 bool isLMouseDown = false;
+bool isRMouseDown = false;
 double startFov = 90;
 double fov = 90;
 const char *font = "font.ttf";
@@ -778,23 +816,17 @@ void handle_input(SDL_Event event) {
             if (event.button.button == SDL_BUTTON_LEFT) {
                 isLMouseDown = true;
             }
+            if (event.button.button == SDL_BUTTON_RIGHT) {
+                isRMouseDown = true;
+            }
             break;
         case SDL_MOUSEBUTTONUP:
             if (event.button.button == SDL_BUTTON_LEFT) {
                 isLMouseDown = false;
             }
-
-            if (player->shootChargeTimer > 0.4) {
-                player->pendingShots = charge_time_to_shots(player->shootChargeTimer);
-                player->shootChargeTimer = 0;
-                player->ShootTickTimer = 0.15;
-            } else if (player->canShoot) {
-                player->pendingShots = 0;
-                player->shootChargeTimer = 0;
-                playerShoot();
-                player->canShoot = false;
+            if (event.button.button == SDL_BUTTON_RIGHT) {
+                isRMouseDown = false;
             }
-
             break;
     }
 }
@@ -858,24 +890,24 @@ void playerTick(double delta) {
 
     player->collider->pos = player->pos;
 
-    bool reached_max_charge = charge_time_to_shots(player->shootChargeTimer) == player->max_pending_shots;
+    if (player->primary != NULL) player->primary->tick(player->primary, delta);
+    if (player->secondary != NULL) {
+        printf("Should tick. \n");
+        player->secondary->tick(player->secondary, delta);
+    } else {
+        printf("Shouldn't tick. \n");
+    }
+    if (player->utility != NULL) player->utility->tick(player->utility, delta);
+    if (player->special != NULL) player->special->tick(player->special, delta);
 
     if (isLMouseDown) {
-        if (!reached_max_charge) player->shootChargeTimer += delta;
-        
-        shakeCamera(80 * min(15, player->shootChargeTimer), 5, false, 0);
-        
-        speed_multiplier *= 0.5;
+        if (player->primary != NULL) {
+            player->primary->activate(player->primary);
+        }
     }
-
-
-    if (player->pendingShots > 0) {
-        player->ShootTickTimer -= delta;
-
-        if (player->ShootTickTimer <= 0) {
-            player->ShootTickTimer = 0.15;
-            playerShoot();
-            player->pendingShots -= 1;
+    if (isRMouseDown) {
+        if (player->secondary != NULL) {
+            player->secondary->activate(player->secondary);
         }
     }
 
@@ -887,10 +919,8 @@ void playerTick(double delta) {
 
     if (!v2_equal(keyVec, to_vec(0))) {
         double t = sin(mili_to_sec(SDL_GetTicks64()) * (15 + (int)player->sprinting * 5)) * 3;
-        //player->pitch = t;
         player->handOffset.y = t * 2.5;
     } else {
-        //player->pitch = lerp(player->pitch, 0, 0.1);
         player->handOffset.y = lerp(player->handOffset.y, 0, 0.1);
     }
 
@@ -908,19 +938,9 @@ void playerTick(double delta) {
     }
 
     v2 finalVel = v2_mul(player->vel, to_vec(player->speed * speed_multiplier));
-    if (delta == 0) {
-        player->pos = v2_add(player->pos, v2_mul(finalVel, to_vec(0.016)));
-    } else {
-        player->pos = v2_add(player->pos, v2_mul(finalVel, to_vec(delta)));
-    }
-
-    if (!player->canShoot) {
-        player->shootCooldown -= delta;
-        if (player->shootCooldown <= 0) {
-            player->canShoot = true;
-            player->shootCooldown = PLAYER_SHOOT_COOLDOWN;
-        }
-    }
+    
+    player->pos = v2_add(player->pos, v2_mul(finalVel, to_vec(delta == 0 ? 0.016 : delta)));
+    
 }
 
 void spriteTick(Sprite *sprite, double delta) {
@@ -1692,6 +1712,16 @@ void init_player(v2 pos) {
     player->collider->pos = player->pos;
     player->maxHealth = 10;
     player->health = player->maxHealth;
+
+    Ability *default_primary = malloc(sizeof(Ability));
+    Rapidfire *default_secondary = malloc(sizeof(Rapidfire));
+    *default_primary = ability_primary_shoot_create();
+    *default_secondary = ability_secondary_shoot_create();
+
+    player->primary = default_primary;
+    player->secondary = default_secondary;
+    player->utility = NULL;
+    player->special = NULL;
 }
 
 // CLEAR
@@ -2176,58 +2206,13 @@ Effect *createEffect(v2 pos, v2 size, Sprite *sprite, double lifeTime) {
 }
 
 // Todo: add shoot cooldown for base shooting
-void playerShoot() {
+void ability_shoot_activate(Ability *ability) {
 
-    play_sound(player_default_shoot, 0.3);
-    shakeCamera(10, 4, true, 1);
+    if (!ability->can_use) return;
 
-    player->canShoot = false;
-    spritePlayAnim(leftHandSprite, 1);
+    ability->can_use = false;
 
-    if (player->pendingShots > 0) {
-        player->vel = v2_mul(get_player_forward(), to_vec(-1));
-    }
-
-    RayCollisionData ray_data = castRayForAll(player->pos, playerForward);
-
-    double effect_height = get_max_height() / 2;
-
-    if (ray_data.hit) {
-        if (is_enemy_type(ray_data.colliderType)) {
-            
-            Entity entity = *((Entity *)ray_data.collider);
-            effect_height = entity.height - entity.size.y / 2;
-            
-            enemy_pause(ray_data.collider, 0.4);
-            enemyTakeDmg(ray_data.collider, 1);
-            
-            
-        }
-    } else {
-        return;
-    }
-
-    v2 effectPos = v2_add(ray_data.collpos, v2_mul(playerForward, to_vec(-4)));
-
-    Effect *hitEffect = createEffect(effectPos, to_vec(35), createSprite(true, 1), 1);
-
-    if (hitEffect == NULL) {
-        printf("hit effect is null \n");
-        return;
-    }
-
-    
-
-    hitEffect->entity.sprite->animations[0] = create_animation(5, 0, shootHitEffectFrames);
-    
-    hitEffect->entity.sprite->animations[0].fps = 12;
-    hitEffect->entity.sprite->animations[0].loop = false;
-    hitEffect->entity.height = effect_height;
-    hitEffect->entity.affected_by_light = false;
-
-    spritePlayAnim(hitEffect->entity.sprite, 0);
-
-    add_game_object(hitEffect, EFFECT);
+    _shoot();
 }
 
 void effectTick(Effect *effect, double delta) {
@@ -2546,7 +2531,7 @@ ShooterEnemy *enemy_shooter_create(v2 pos) {
         return NULL;
     }
     shooter->enemy = createEnemy(pos, NULL);
-    shooter->enemy.maxHealth = 5;
+    shooter->enemy.maxHealth = 8;
     shooter->enemy.health = shooter->enemy.maxHealth;
     shooter->enemy.hit_texture = shooter_hit_texture;
     shooter->enemy.tick = shooterTick;
@@ -3161,5 +3146,114 @@ void exploder_explode(ExploderEnemy *exploder) {
     remove_game_object(exploder, ENEMY_EXPLODER);
 }
 
+
+Ability ability_primary_shoot_create() {
+    return (Ability) {
+        .activate = ability_shoot_activate,
+        .tick = default_ability_tick,
+        .can_use = false,
+        .cooldown = 0.2,
+        .timer = 0.2,
+        .type = A_PRIMARY,
+    };
+}
+
+void default_ability_tick(Ability *ability, double delta) {
+    if (!ability->can_use) {
+        ability->timer -= delta;
+        if (ability->timer <= 0) {
+            ability->timer = ability->cooldown;
+            ability->can_use = true;
+        }
+    }
+}
+
+Rapidfire ability_secondary_shoot_create() {
+    return (Rapidfire) {
+        .ability.activate = ability_secondary_shoot_activate,
+        .ability.tick = ability_secondary_shoot_tick,
+        .ability.can_use = false,
+        .ability.cooldown = 10,
+        .ability.timer = 0,
+        .ability.type = A_SECONDARY,
+        .shot_amount = 7,
+        .shot_timer = 0.1,
+        .shots_left = 0
+    };
+}
+
+void ability_secondary_shoot_activate(Ability *ability) {
+    if (!ability->can_use) return;
+    ability->can_use = false;
+
+    Rapidfire *rapid_fire = (Rapidfire *)ability;
+    rapid_fire->shots_left = rapid_fire->shot_amount;
+}
+
+void ability_secondary_shoot_tick(Ability *ability, double delta) {
+    Rapidfire *rapid_fire = (Rapidfire *)ability;
+
+    cd_print(true, "Entering tick \n");
+
+    if (rapid_fire->shots_left > 0) {
+        rapid_fire->shot_timer -= delta;
+        if (rapid_fire->shot_timer <= 0) {
+            rapid_fire->shot_timer = 0.1;
+
+            player->vel = v2_sub(player->vel, v2_mul(playerForward, to_vec(1.5)));
+
+            _shoot();
+            rapid_fire->shots_left--;
+        }
+    }
+
+    default_ability_tick(ability, delta);
+}
+
+void _shoot() {
+
+    play_sound(player_default_shoot, 0.3);
+    shakeCamera(10, 4, true, 1);
+    spritePlayAnim(leftHandSprite, 1);
+
+    RayCollisionData ray_data = castRayForAll(player->pos, playerForward);
+
+    double effect_height = get_max_height() / 2;
+
+    if (!ray_data.hit) return;
+
+    
+    if (is_enemy_type(ray_data.colliderType)) {
+        
+        Entity entity = *((Entity *)ray_data.collider);
+        effect_height = entity.height - entity.size.y / 2;
+        
+        enemy_pause(ray_data.collider, 0.4);
+        enemyTakeDmg(ray_data.collider, 1);
+    }
+    
+
+    v2 effectPos = v2_add(ray_data.collpos, v2_mul(playerForward, to_vec(-4)));
+
+    Effect *hitEffect = createEffect(effectPos, to_vec(35), createSprite(true, 1), 1);
+
+    if (hitEffect == NULL) {
+        printf("hit effect is null \n");
+        return;
+    }
+
+    
+
+    hitEffect->entity.sprite->animations[0] = create_animation(5, 0, shootHitEffectFrames);
+    
+    hitEffect->entity.sprite->animations[0].fps = 12;
+    hitEffect->entity.sprite->animations[0].loop = false;
+    hitEffect->entity.height = effect_height;
+    hitEffect->entity.affected_by_light = false;
+
+    spritePlayAnim(hitEffect->entity.sprite, 0);
+
+    add_game_object(hitEffect, EFFECT);
+}
 
 // #END
