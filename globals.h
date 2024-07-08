@@ -12,7 +12,8 @@ typedef enum Placeable {
     P_FLOOR_LIGHT,
     P_CEILING,
     P_CEILING_LIGHT,
-    P_SHOOTER
+    P_SHOOTER,
+    P_EXPLODER
 } Placeable;
 
 typedef struct LevelEditorEntity {

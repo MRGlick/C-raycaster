@@ -275,6 +275,8 @@ typedef struct Enemy {
 
     void (*tick)(struct Enemy *, double);
 
+    void (*on_take_dmg)(struct Enemy *, double);
+
 } Enemy;
 
 typedef struct EnemyBullet {
@@ -332,6 +334,10 @@ typedef struct CollisionData {
 
 // #FUNC
 
+void place_entity(v2 pos, int type);
+
+void exploder_on_take_dmg(Enemy *enemy, double dmg);
+
 void particle_tick(Particle *particle, double delta);
 
 void particle_spawner_spawn(ParticleSpawner *spawner);
@@ -343,8 +349,6 @@ ParticleSpawner create_particle_spawner(v2 pos, double height);
 void draw_3d_line(v2 pos1, double h1, v2 pos2, double h2);
 
 void _shoot(double spread);
-
-void ability_secondary_shoot_tick(Ability *ability, double delta);
 
 void ability_secondary_shoot_activate(Ability *ability);
 
@@ -515,6 +519,8 @@ void getTextureFiles(char *fileName, int fileCount, SDL_Texture ***textures);
 
 
 // #TEXTURES
+SDL_Texture *exploder_hit;
+SDL_Texture **exploder_explosion_texture;
 SDL_Texture **shooter_dirs_textures;
 SDL_Texture *defualt_particle_texture;
 SDL_Texture *mimran_jumpscare;
@@ -547,6 +553,8 @@ Sprite *animatedWallSprite;
 Sprite *leftHandSprite;
 
 // #SOUNDS
+Sound *rapidfire_sound;
+Sound *exploder_explosion;
 Sound *enemy_default_hit;
 Sound *enemy_default_kill;
 Sound *player_default_shoot;
@@ -649,6 +657,7 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
     enemy.state = STATE_IDLE;
     
     enemy.tick = NULL;
+    enemy.on_take_dmg = NULL;
 
     // idle movement
     enemy.home_pos = pos;
@@ -705,7 +714,14 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
 
 void init() {  // #INIT
 
-    printf("%s \n", SDL_GetBasePath());
+    rapidfire_sound = create_sound("Sounds/shotgun_ability.wav");
+
+    exploder_explosion = create_sound("Sounds/exploder_explosion.wav");
+
+    exploder_hit = make_texture(renderer, "Textures/ExploderEnemyAnim/exploder_hit.bmp");
+
+    exploder_explosion_texture = malloc(sizeof(SDL_Texture *) * 12);
+    getTextureFiles("Textures/ExploderEnemyAnim/Explosion/explosion", 12, &exploder_explosion_texture);
 
     shooter_dirs_textures = malloc(sizeof(SDL_Texture *) * 16);
 
@@ -814,34 +830,6 @@ void init() {  // #INIT
     skybox_texture = make_texture(renderer, "Textures/skybox.bmp");
 
     SDL_RenderSetLogicalSize(renderer, WINDOW_WIDTH, WINDOW_HEIGHT);
-
-	
-    // ExploderEnemy *test = enemy_exploder_create(v2_add(player->pos, (v2){50, 0}));
-    // add_game_object(test, ENEMY_EXPLODER);
-
-    Sprite sprite_proto = {
-        .animations = NULL,
-        .animCount = 0,
-        .currentAnimationIdx = 0,
-        .texture = defualt_particle_texture,
-        .isAnimated = false
-    };
-
-    ParticleSpawner *spawner = malloc(sizeof(ParticleSpawner));
-    *spawner = create_particle_spawner(player->pos, get_max_height());
-    spawner->sprite = sprite_proto;
-    spawner->height_accel = -100000;
-    spawner->min_speed = 20;
-    spawner->max_speed = 90;
-    spawner->min_size = to_vec(1000);
-    spawner->max_size = to_vec(2000);
-    spawner->height_dir = 1;
-    spawner->spread = 2;
-    spawner->height = get_max_height();
-    spawner->bounciness = 1;
-    spawner->particle_lifetime = 5;
-
-    add_game_object(spawner, PARTICLE_SPAWNER);
 
 
 }  // #INIT END
@@ -987,10 +975,10 @@ void playerTick(double delta) {
         player->pos = v2_add(player->pos, player_coldata.offset);
     }
     if (player->sprinting) {
-        speed_multiplier *= 1.5;
-        fov = lerp(fov, startFov * 1.2, 0.1);
+        speed_multiplier *= 1.25;
+        fov = lerp(fov, startFov * 1.2, delta * 7);
     } else {
-        fov = lerp(fov, startFov, 0.1);
+        fov = lerp(fov, startFov, delta * 7);
     }
 
     v2 finalVel = v2_mul(player->vel, to_vec(player->speed * speed_multiplier));
@@ -2095,19 +2083,9 @@ void load_level(char *file) {
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
             int type = data[idx++];
+            v2 tile_middle = v2_add(v2_mul((v2){c, r}, to_vec(tileSize)), to_vec(tileSize / 2));
 
-            v2 tileMid = v2_add(v2_mul((v2){c, r}, to_vec(tileSize)), to_vec(tileSize / 2));
-
-            switch (type) {
-                case (int)P_PLAYER:
-                    init_player(tileMid);
-                    arraylist_add(gameobjects, player, PLAYER);
-                    break;
-                case (int)P_SHOOTER:;
-                    ShooterEnemy *shooter = enemy_shooter_create(tileMid);
-                    arraylist_add(gameobjects, shooter, ENEMY_SHOOTER);
-                    break;
-            }
+            place_entity(tile_middle, type);
         }
     }
 
@@ -2290,7 +2268,14 @@ void enemyTakeDmg(Enemy *enemy, int dmg) {
         // play death anim
         play_spatial_sound(enemy_default_kill, 1, player->pos, enemy->entity.pos, enemy->sound_max_radius);
         remove_game_object(enemy, ENEMY);
+        return;
     }
+
+
+    if (enemy->on_take_dmg != NULL){
+        printf("f \n");
+        enemy->on_take_dmg(enemy, (double)dmg);
+    } // its at the end bc it could free
 }
 
 RayCollisionData castRayForEntities(v2 pos, v2 dir) {
@@ -2412,7 +2397,7 @@ EnemyBullet *createDefaultBullet(v2 pos, v2 dir) {
     bullet->entity.affected_by_light = false;
     bullet->dirSprite = NULL;
     bullet->dmg = 1;
-    bullet->speed = 5;
+    bullet->speed = 4;
     bullet->dir = dir;
     bullet->lifeTime = 5;
     bullet->lifeTimer = bullet->lifeTime;
@@ -2546,6 +2531,7 @@ ShooterEnemy *enemy_shooter_create(v2 pos) {
     shooter->enemy.health = shooter->enemy.maxHealth;
     shooter->enemy.hit_texture = shooter_hit_texture;
     shooter->enemy.tick = shooterTick;
+    shooter->enemy.on_take_dmg = NULL;
 
     shooter->resting_move_dir = V2_ZERO;
     shooter->attacking_move_dir = V2_ZERO;
@@ -2946,7 +2932,7 @@ void enemy_move(Enemy *enemy, double delta) {
     v2 vel = v2_mul(enemy->move_dir, to_vec(enemy->speed * enemy->speed_multiplier));
     vel = v2_mul(vel, to_vec(delta));
 
-    enemy->vel = v2_lerp(enemy->vel, vel, delta * 2);
+    enemy->vel = v2_lerp(enemy->vel, vel, delta * 5);
 
     enemy->entity.pos = v2_add(enemy->entity.pos, enemy->vel);
     
@@ -3053,8 +3039,8 @@ void enemy_pause(Enemy *enemy, double sec) {
 ExploderEnemy *enemy_exploder_create(v2 pos) {
     ExploderEnemy *exploder = malloc(sizeof(ExploderEnemy));
 
-    exploder->explosion_kb = 15;
-    exploder->explosion_radius = 150;
+    exploder->explosion_kb = 4;
+    exploder->explosion_radius = 75;
     
     const int ANIM_LENGTH = 5;
 
@@ -3074,6 +3060,10 @@ ExploderEnemy *enemy_exploder_create(v2 pos) {
     
     exploder->enemy = createEnemy(pos, dir_sprite);
     exploder->enemy.tick = exploder_tick;
+    exploder->enemy.on_take_dmg = exploder_on_take_dmg;
+    exploder->enemy.hit_texture = exploder_hit;
+    exploder->enemy.time_to_pursue = 2;
+    exploder->enemy.speed = 90;
 
     exploder->enemy.entity.height = get_max_height() * 0.18;
     return exploder;
@@ -3128,15 +3118,32 @@ void dir_sprite_play_anim(DirectionalSprite *dir_sprite, int anim) {
 }
 
 void exploder_explode(ExploderEnemy *exploder) {
+
+    play_spatial_sound(exploder_explosion, 1, exploder->enemy.entity.pos, player->pos, exploder->enemy.sound_max_radius);
+
+    Sprite *sprite = createSprite(true, 1);
+    sprite->animations[0] = create_animation(12, 0, exploder_explosion_texture);
+    sprite->animations[0].fps = 12;
+    sprite->animations[0].loop = false;
+    sprite->animations[0].playing = true;
+
+    double size = 24000;
+    Effect *effect = createEffect(exploder->enemy.entity.pos, to_vec(size), sprite, 1);
+    effect->entity.affected_by_light = false;
+    effect->entity.height = size / 2;
+
+    add_game_object(effect, EFFECT);
+
     for (int i = 0; i < gameobjects->length; i++) {
         obj *gameobject = arraylist_get(gameobjects, i);
-        if (is_enemy_type(gameobject->type)) {
+        if (is_enemy_type(gameobject->type) && gameobject->val != (void *)exploder) {
             Enemy *enemy = gameobject->val;
             double explosion_radius_squared = exploder->explosion_radius * exploder->explosion_radius;
             double dist_squared = v2_distance_squared(enemy->entity.pos, exploder->enemy.entity.pos);
             if (dist_squared < explosion_radius_squared) {
-                enemyTakeDmg(enemy, 1);
+                enemyTakeDmg(enemy, 3);
                 double kb = lerp(exploder->explosion_kb, 0, inverse_lerp(0, explosion_radius_squared, dist_squared));
+                kb *= 2;
                 enemy->vel = v2_mul(v2_dir(exploder->enemy.entity.pos, enemy->entity.pos), to_vec(kb));
             }
             
@@ -3182,7 +3189,7 @@ void default_ability_tick(Ability *ability, double delta) {
 Rapidfire ability_secondary_shoot_create() {
     return (Rapidfire) {
         .ability.activate = ability_secondary_shoot_activate,
-        .ability.tick = ability_secondary_shoot_tick,
+        .ability.tick = default_ability_tick,
         .ability.can_use = false,
         .ability.cooldown = 10,
         .ability.timer = 0,
@@ -3197,31 +3204,23 @@ void ability_secondary_shoot_activate(Ability *ability) {
     if (!ability->can_use) return;
     ability->can_use = false;
 
-    shakeCamera(15, 25, true, 10);
+    shakeCamera(35, 15, true, 10);
+    play_sound(rapidfire_sound, 1);
 
     Rapidfire *rapid_fire = (Rapidfire *)ability;
     rapid_fire->shots_left = rapid_fire->shot_amount;
-}
 
-void ability_secondary_shoot_tick(Ability *ability, double delta) {
-    Rapidfire *rapid_fire = (Rapidfire *)ability;
-
-    if (rapid_fire->shots_left > 0) {
-        rapid_fire->shot_timer -= delta;
-        if (rapid_fire->shot_timer <= 0) {
-            rapid_fire->shot_timer = 0.01;
-
-            player->vel = v2_sub(player->vel, v2_mul(playerForward, to_vec(0.75)));
-
-            _shoot(0.05);
-            rapid_fire->shots_left--;
-        }
+    while (rapid_fire->shots_left > 0) {
+        _shoot(0.05);
+        rapid_fire->shots_left--;
     }
 
-    default_ability_tick(ability, delta);
+    player->vel = v2_mul(playerForward, to_vec(-5));
 }
 
 void _shoot(double spread) {
+
+    double pitch = player->pitch + randf_range(1000 * -spread, 1000 * spread);
 
     play_sound(player_default_shoot, 0.3);
     shakeCamera(10, 4, true, 1);
@@ -3236,10 +3235,10 @@ void _shoot(double spread) {
     
     double max_distance;
 
-    if (in_range(player->pitch, -0.01, 0.01)) {
+    if (in_range(pitch, -0.01, 0.01)) {
         max_distance = INFINITY;
     } else {
-        double p = abs(player->pitch); // for debugging
+        double p = abs(pitch); // for debugging
         max_distance = 9000 / p;
     }
 
@@ -3251,7 +3250,7 @@ void _shoot(double spread) {
     double distance_to_collpos = v2_distance(player->pos, ray_data.collpos);
 
     if (distance_to_collpos > max_distance) {
-        effect_height = player->pitch < 0? get_max_height() : 0;
+        effect_height = pitch < 0? get_max_height() : 0;
         hit_ground_or_ceiling = true;
     }
 
@@ -3261,11 +3260,11 @@ void _shoot(double spread) {
         Entity entity = *((Entity *)ray_data.collider);
         effect_height = entity.height;
         
-        enemy_pause(ray_data.collider, 0.4);
+        enemy_pause(ray_data.collider, 0.1);
         enemyTakeDmg(ray_data.collider, 1);
     } else if (!hit_ground_or_ceiling) {
         
-        effect_height = get_max_height() / 2 + -player->pitch * distance_to_collpos; // an estimate. wouldnt work well with high spread, but hopefully hard to notice. nvm, works very well.
+        effect_height = get_max_height() / 2 + -pitch * distance_to_collpos; // an estimate. wouldnt work well with high spread, but hopefully hard to notice. nvm, works very well.
     }
     
 
@@ -3397,6 +3396,29 @@ void particle_tick(Particle *particle, double delta) {
     }
 
     effectTick((Effect *)particle, delta);
+}
+
+void exploder_on_take_dmg(Enemy *enemy, double dmg) {
+    
+    if (enemy->health < 2) {
+        exploder_explode(enemy);
+    }
+}
+
+void place_entity(v2 pos, int type) {
+    switch (type) {
+        case (int)P_PLAYER:
+            init_player(pos);
+            add_game_object(player, PLAYER);
+            break;
+        case (int)P_SHOOTER:;
+            ShooterEnemy *shooter = enemy_shooter_create(pos);
+            add_game_object(shooter, ENEMY_SHOOTER);
+            break;
+        case (int)P_EXPLODER:;
+            ExploderEnemy *exploder = enemy_exploder_create(pos);
+            add_game_object(exploder, ENEMY_EXPLODER);
+    }
 }
 
 

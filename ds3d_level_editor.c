@@ -238,16 +238,13 @@ void remove_object(v2 pos) {
 
 
 void key_pressed(SDL_Keycode key) {
+
+    if (in_range(key, SDLK_1, SDLK_9)) {
+        current_selection = key - SDLK_1;
+        return;
+    }
+
     switch (key) {
-        case SDLK_1:
-            current_selection = 0;
-            break;
-        case SDLK_2:
-            current_selection = 1;
-            break;
-        case SDLK_3:
-            current_selection = 2;
-            break;
         case SDLK_f:
             current_selection = 0;
             place_mode = PLACEMODE_FLOOR;
@@ -333,6 +330,9 @@ Placeable get_current_selection() {
                 case 1:
                     return P_SHOOTER;
                     break;
+                case 2:
+                    return P_EXPLODER;
+                    break;
                 default:
                     return P_IDK;
                     break;
@@ -398,6 +398,9 @@ char *get_current_selection_string() {
         case P_CEILING_LIGHT:
             return "Current: Ceiling light";
             break;
+        case P_EXPLODER:
+            return "Current: Exploder";
+            break;
         case P_IDK:
             return "Current: IDK";
             break;
@@ -457,29 +460,6 @@ void draw_player() {
     SDL_RenderFillRect(renderer, &rect);
 }
 
-void draw_entity(v2 pos, EntityID id) {
-
-    int opacity = place_mode == PLACEMODE_ENTITY ? 255 : 30;
-
-    SDL_Rect rect = {
-        pos.x - 10,
-        pos.y - 10,
-        20,
-        20
-    };
-
-    switch (id) {
-        case (int)ENTITY_SHOOTER:
-            SDL_SetRenderDrawColor(renderer, 10, 80, 10, opacity);
-            break;
-        default:
-            SDL_SetRenderDrawColor(renderer, 255, 255, 255, opacity);
-            break;
-    }
-
-    SDL_RenderFillRect(renderer, &rect);
-}
-
 void draw_gridlines() {
     switch (place_mode) {
         case (int)PLACEMODE_FLOOR:
@@ -505,54 +485,31 @@ void draw_gridlines() {
 }
 
 
-void set_color_by_type(Placeable type) {
-    int opacity = 30;
+void set_color_by_type(Placeable type, int opacity) {
     switch (type) {
         case P_WALL:
-            if (place_mode == PLACEMODE_WALL) {
-                opacity = 255;
-            }
             SDL_SetRenderDrawColor(renderer, 255, 255, 255, opacity);
-            
             break;
         case P_PLAYER:
-            if (place_mode == PLACEMODE_ENTITY) {
-                opacity = 255;
-            }
             SDL_SetRenderDrawColor(renderer, 255, 0, 0, opacity);
             break;
         case P_SHOOTER:
-            if (place_mode == PLACEMODE_ENTITY) {
-                opacity = 255;
-            }
             SDL_SetRenderDrawColor(renderer, 20, 120, 20, opacity);
             break;
         case P_FLOOR:
-            if (place_mode == PLACEMODE_FLOOR) {
-                opacity = 255;
-            }
             SDL_SetRenderDrawColor(renderer, 200, 100, 0, opacity);
             break;
         case P_FLOOR_LIGHT:
-            if (place_mode == PLACEMODE_FLOOR) {
-                opacity = 255;
-            }
             SDL_SetRenderDrawColor(renderer, 230, 130, 30, opacity);
             break;
         case P_CEILING:
-            if (place_mode == PLACEMODE_CEILING) {
-                opacity = 255;
-            }
             SDL_SetRenderDrawColor(renderer, 200, 200, 200, opacity);
             break;
         case P_CEILING_LIGHT:
-            if (place_mode == PLACEMODE_CEILING) {
-                opacity = 255;
-            }
             SDL_SetRenderDrawColor(renderer, 230, 230, 230, opacity);
             break;
-        case P_DOOR:
-            SDL_SetRenderDrawColor(renderer, 255, 255, 0, 255);
+        case P_EXPLODER:
+            SDL_SetRenderDrawColor(renderer, 230, 200, 30, opacity);
             break;
     }
 } 
@@ -571,19 +528,19 @@ void draw() {
 
 
 
-            set_color_by_type(floor_tilemap[y][x]);
+            set_color_by_type(floor_tilemap[y][x], place_mode == PLACEMODE_FLOOR? 255 : 30);
 
             SDL_RenderFillRect(renderer, &rect);
 
-            set_color_by_type(wall_tilemap[y][x]);
+            set_color_by_type(wall_tilemap[y][x], place_mode == PLACEMODE_WALL? 255 : 30);
 
             SDL_RenderFillRect(renderer, &rect);
 
-            set_color_by_type(entity_tilemap[y][x]);
+            set_color_by_type(entity_tilemap[y][x], place_mode == PLACEMODE_ENTITY? 255 : 30);
 
             SDL_RenderFillRect(renderer, &rect);
 
-            set_color_by_type(ceiling_tilemap[y][x]);
+            set_color_by_type(ceiling_tilemap[y][x], place_mode == PLACEMODE_CEILING? 255 : 30);
 
             SDL_RenderFillRect(renderer, &rect);
 
