@@ -18,6 +18,7 @@
         "sounds_test,c": "c",
         "math.h": "c",
         "globals.h": "c",
-        "stdio.h": "c"
+        "stdio.h": "c",
+        "initializer_list": "c"
     }
 }

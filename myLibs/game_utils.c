@@ -148,7 +148,7 @@ double randf_range(double min, double max) {
 SDL_Texture *make_texture(SDL_Renderer *renderer, char *bmp_file) {
     SDL_Surface *surface = SDL_LoadBMP(bmp_file);
     if (surface == NULL) {
-        printf("%s path: %s\n", SDL_GetError(), bmp_file);
+        printf("%s path: '%s'\n", SDL_GetError(), bmp_file);
         return NULL;
     }
 

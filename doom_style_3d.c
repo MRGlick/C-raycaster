@@ -25,34 +25,45 @@ SDL_Window *window;
 
 #define BAKED_LIGHT_RESOLUTION 36
 
+#define PARTICLE_GRAVITY 1
+
 #define OUT_OF_SCREEN_POS \
     (v2) { WINDOW_WIDTH * 100, WINDOW_HEIGHT * 100 }
 
-enum Types { 
-    PLAYER, 
-    RAYCAST, 
-    CIRCLE_COLLIDER, 
-    RAY_COLL_DATA, 
-    RENDER_OBJECT, 
-    WALL_STRIPE, 
-    LIGHT_POINT, 
-    SPRITE, 
-    PARTICLES, 
-    PARTICLE, 
+// #TYPES
+
+enum Types {
+    PLAYER,
+    RAYCAST,
+    CIRCLE_COLLIDER,
+    RAY_COLL_DATA,
+    RENDER_OBJECT,
+    WALL_STRIPE,
+    LIGHT_POINT,
+    SPRITE,
+    PARTICLE_SPAWNER,
     
-    BULLET, 
-    DIR_SPRITE, 
+    DIR_SPRITE,
     
     ENTITY_START,
+    
+        ENTITY,
 
-    ENTITY,
-    EFFECT,
+        BULLET,
+
+        EFFECT_START,
+
+            EFFECT,
+            PARTICLE,
+
+        EFFECT_END,
+        
         ENEMY_START,
-        
-        ENEMY,
-        ENEMY_SHOOTER,
-        ENEMY_EXPLODER,
-        
+            
+            ENEMY,
+            ENEMY_SHOOTER,
+            ENEMY_EXPLODER,
+            
         ENEMY_END,
 
     ENTITY_END
@@ -170,29 +181,53 @@ typedef struct LightPoint {
     SDL_Color color;
 } LightPoint;
 
-typedef struct Particle {
-    Entity entity;
-    v2 vel;
-    double lifeTimer;
-} Particle;
-
-typedef struct Particles {
-    v2 pos;
-    double height;
-
-    Particle **particles;
-    v2 particleSize;
-    int particleAmount;
-    double particleLifetime;
-    Sprite *particleSprite;
-    v2 startVel;
-    v2 gravity;
-} Particles;
-
 typedef struct Effect {
     Entity entity;
     double lifeTime;
 } Effect;
+
+typedef struct Particle {
+    Effect effect;
+    v2 vel;
+    double h_vel;
+    v2 accel;
+    double h_accel;
+    double bounciness;
+    double floor_drag;
+} Particle;
+
+typedef struct ParticleSpawner {
+    v2 pos;
+    double height;
+
+    v2 dir;
+    double height_dir;
+
+    double spread;
+
+    v2 accel;
+    double height_accel;
+
+    double min_speed, max_speed;
+
+    v2 min_size, max_size;
+
+    int spawn_rate; // per second
+
+    double spawn_timer;
+
+    double bounciness;
+
+    double floor_drag;
+
+    Sprite sprite;
+
+    double particle_lifetime;
+
+    bool active;
+
+} ParticleSpawner;
+
 
 typedef struct RenderObject {
     void *val;
@@ -297,7 +332,17 @@ typedef struct CollisionData {
 
 // #FUNC
 
-void _shoot();
+void particle_tick(Particle *particle, double delta);
+
+void particle_spawner_spawn(ParticleSpawner *spawner);
+
+void particle_spawner_tick(ParticleSpawner *spawner, double delta);
+
+ParticleSpawner create_particle_spawner(v2 pos, double height);
+
+void draw_3d_line(v2 pos1, double h1, v2 pos2, double h2);
+
+void _shoot(double spread);
 
 void ability_secondary_shoot_tick(Ability *ability, double delta);
 
@@ -355,7 +400,7 @@ bool is_enemy_type(int type);
 
 double get_max_height();
 
-v2 worldToScreen(v2 pos, double height);
+v2 worldToScreen(v2 pos, double height, bool allow_out_of_screen);
 
 void clampColors(int rgb[3]);
 
@@ -445,10 +490,6 @@ void spritePlayAnim(Sprite *sprite, int idx);
 
 Sprite *getRandomWallSprite();
 
-Particles *createParticles(int amount, Sprite *sprite);
-
-void particlesTick(Particles *particles, u64 delta);
-
 void ability_shoot_activate(Ability *ability);
 
 void enemyTakeDmg(Enemy *enemy, int dmg);
@@ -474,6 +515,8 @@ void getTextureFiles(char *fileName, int fileCount, SDL_Texture ***textures);
 
 
 // #TEXTURES
+SDL_Texture **shooter_dirs_textures;
+SDL_Texture *defualt_particle_texture;
 SDL_Texture *mimran_jumpscare;
 SDL_Texture *shooter_hit_texture;
 SDL_Texture *healthbar_texture;
@@ -594,19 +637,6 @@ int main(int argc, char *argv[]) {
     SDL_Quit();
 }
 
-void initParticles() {
-    Particles *particles = createParticles(8, NULL);
-    Sprite *sprite = createSprite(false, 0);
-    sprite->texture = entityTexture;
-    v2_print(player->pos, "\n");
-    particles->particleSprite = sprite;
-    particles->pos = player->pos;
-    particles->startVel = to_vec(0);
-    particles->gravity = to_vec(0);
-    particles->height = WINDOW_HEIGHT / 6;
-    add_game_object(particles, PARTICLES);
-}
-
 Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
     Enemy enemy;
     enemy.maxHealth = 5;
@@ -642,7 +672,7 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
     enemy.collided_last_frame = false;
 
     enemy.entity.pos = pos;
-    enemy.entity.size = to_vec(50);
+    enemy.entity.size = to_vec(9500);
     enemy.entity.sprite = NULL;
     enemy.entity.affected_by_light = true;
     enemy.hit_texture = NULL;
@@ -651,14 +681,9 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
     if (dir_sprite == NULL) {
         enemy.dirSprite = createDirSprite(16);
         for (int i = 0; i < 16; i++) {
-            char *baseFileName = "Textures/CubeEnemyAnim/CubeEnemy";
-            char num[get_num_digits(i + 1)];
-            sprintf(num, "%d", i + 1);
-            char *fileWithNum = concat(baseFileName, num);
-            char *fileWithExtension = concat(fileWithNum, ".bmp");
 
             enemy.dirSprite->sprites[i] = createSprite(false, 0);
-            enemy.dirSprite->sprites[i]->texture = make_texture(renderer, fileWithExtension);
+            enemy.dirSprite->sprites[i]->texture = shooter_dirs_textures[i];
         }
     } else {
         enemy.dirSprite = dir_sprite;
@@ -680,11 +705,28 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
 
 void init() {  // #INIT
 
+    printf("%s \n", SDL_GetBasePath());
+
+    shooter_dirs_textures = malloc(sizeof(SDL_Texture *) * 16);
+
+    for (int i = 0; i < 16; i++) {
+        char *baseFileName = "Textures/ShooterEnemy/frame";
+        char num[get_num_digits(i + 1)];
+        sprintf(num, "%d", i + 1);
+        char *fileWithNum = concat(baseFileName, num);
+        char *fileWithExtension = concat(fileWithNum, ".bmp");
+        printf("%s \n", fileWithExtension);
+
+        shooter_dirs_textures[i] = make_texture(renderer, fileWithExtension);
+    }
+
+    defualt_particle_texture = make_texture(renderer, "Textures/base_particle.bmp");
+
     shooter_bullet_default_frames = malloc(sizeof(SDL_Texture *) * 4);
     shooter_bullet_explode_frames = malloc(sizeof(SDL_Texture *) * 4);
 
-    getTextureFiles("Textures/CubeEnemyAnim/CEBulletHitAnim/Default/Bullet", 4, &shooter_bullet_default_frames);
-    getTextureFiles("Textures/CubeEnemyAnim/CEBulletHitAnim/Explode/Bullet", 4, &shooter_bullet_explode_frames);
+    getTextureFiles("Textures/ShooterEnemy/Bullet/Default/Bullet", 4, &shooter_bullet_default_frames);
+    getTextureFiles("Textures/ShooterEnemy/Bullet/Explode/Bullet", 4, &shooter_bullet_explode_frames);
 
     exploder_frames = malloc(sizeof(SDL_Texture *) * 80);
     getTextureFiles("Textures/ExploderEnemyAnim/exploderEnemyAnim", 80, &exploder_frames);
@@ -700,15 +742,9 @@ void init() {  // #INIT
 
     init_cd_print();
 
-    enemy_bullet_destroy_anim = malloc(sizeof(SDL_Texture *) * 5);
-
-    getTextureFiles("Textures/CubeEnemyAnim/CEBulletHitAnim/CEBullethitAnim", 5, &enemy_bullet_destroy_anim);
-
     mimran_jumpscare = make_texture(renderer, "Textures/scary_monster2.bmp");
 
-    shooter_hit_texture = make_texture(renderer, "Textures/CubeEnemyAnim/CubeEnemyHit2.bmp");
-
-    enemy_bullet_texture = make_texture(renderer, "Textures/CubeEnemyAnim/CubeEnemyBullet.bmp");
+    shooter_hit_texture = make_texture(renderer, "Textures/ShooterEnemy/hit_frame1.bmp");
 
     healthbar_texture = make_texture(renderer, "Textures/health_bar.bmp");
 
@@ -780,8 +816,32 @@ void init() {  // #INIT
     SDL_RenderSetLogicalSize(renderer, WINDOW_WIDTH, WINDOW_HEIGHT);
 
 	
-    ExploderEnemy *test = enemy_exploder_create(v2_add(player->pos, (v2){50, 0}));
-    add_game_object(test, ENEMY_EXPLODER);
+    // ExploderEnemy *test = enemy_exploder_create(v2_add(player->pos, (v2){50, 0}));
+    // add_game_object(test, ENEMY_EXPLODER);
+
+    Sprite sprite_proto = {
+        .animations = NULL,
+        .animCount = 0,
+        .currentAnimationIdx = 0,
+        .texture = defualt_particle_texture,
+        .isAnimated = false
+    };
+
+    ParticleSpawner *spawner = malloc(sizeof(ParticleSpawner));
+    *spawner = create_particle_spawner(player->pos, get_max_height());
+    spawner->sprite = sprite_proto;
+    spawner->height_accel = -100000;
+    spawner->min_speed = 20;
+    spawner->max_speed = 90;
+    spawner->min_size = to_vec(1000);
+    spawner->max_size = to_vec(2000);
+    spawner->height_dir = 1;
+    spawner->spread = 2;
+    spawner->height = get_max_height();
+    spawner->bounciness = 1;
+    spawner->particle_lifetime = 5;
+
+    add_game_object(spawner, PARTICLE_SPAWNER);
 
 
 }  // #INIT END
@@ -891,12 +951,8 @@ void playerTick(double delta) {
     player->collider->pos = player->pos;
 
     if (player->primary != NULL) player->primary->tick(player->primary, delta);
-    if (player->secondary != NULL) {
-        printf("Should tick. \n");
-        player->secondary->tick(player->secondary, delta);
-    } else {
-        printf("Shouldn't tick. \n");
-    }
+    if (player->secondary != NULL) player->secondary->tick(player->secondary, delta);
+    
     if (player->utility != NULL) player->utility->tick(player->utility, delta);
     if (player->special != NULL) player->special->tick(player->special, delta);
 
@@ -967,15 +1023,17 @@ void objectTick(void *obj, int type, double delta) {
         case (int)PLAYER:
             playerTick(delta);
             break;
+        case (int)PARTICLE:
+            particle_tick(obj, delta);
+            break;
         case (int)EFFECT:
             effectTick(obj, delta);
             break;
-        case (int)SPRITE:;
-            Sprite *sprite = obj;
-            animationTick(&sprite->animations[sprite->currentAnimationIdx], delta);
+        case (int)SPRITE:
+            spriteTick(obj, delta);
             break;
-        case (int)PARTICLES:
-            particlesTick(obj, delta);
+        case (int)PARTICLE_SPAWNER:
+            particle_spawner_tick(obj, delta);
             break;
         case (int)BULLET:
             bulletTick(obj, delta);
@@ -1011,7 +1069,8 @@ void tick(double delta) {
                 camerashake_current_priority = -9999;
             } else {
                 v2 rawShake = {randf_range(-cameraShakeCurrentStrength, cameraShakeCurrentStrength), randf_range(-cameraShakeCurrentStrength, cameraShakeCurrentStrength)};
-                cameraOffset = v2_mul(rawShake, to_vec((double)cameraShakeTicksLeft / cameraShakeTicks));
+                double fade_factor = cameraShakeFadeActive? (double)cameraShakeTicksLeft / cameraShakeTicks : 1;
+                cameraOffset = v2_mul(rawShake, to_vec(fade_factor));
             }
         }
     }
@@ -1080,23 +1139,40 @@ v2 getRayDirByIdx(int i) {
     return rayDir;
 }
 
-v2 worldToScreen(v2 pos, double height) {
-    // know: player pos, distance to pos, angle to pos
-    // need to find:
+v2 worldToScreen(v2 pos, double height, bool allow_out_of_screen) { // gotta refactor this.
+    
+    if (v2_equal(pos, player->pos)) {
+        return (v2){WINDOW_WIDTH / 2, WINDOW_HEIGHT};
+    }
 
     double signed_angle_to_forward = v2_signed_angle_between(playerForward, v2_sub(pos, player->pos));
 
-    double signed_angle_degrees = deg_to_rad(signed_angle_to_forward);
+    double signed_angle_degrees = rad_to_deg(signed_angle_to_forward);
 
-    if (!in_range(signed_angle_degrees, -0.5 * fov, 0.5 * fov)) {
+    if (!allow_out_of_screen && !in_range(signed_angle_degrees, -0.5 * fov, 0.5 * fov)) {
         return OUT_OF_SCREEN_POS;
+    } else {
+        if (!in_range(signed_angle_degrees, -90, 90)) {
+            double dist_to_viewplane = abs(v2_distance(pos, player->pos) * v2_cos_angle_between(playerForward, v2_sub(pos, player->pos)));
+
+            pos = v2_add(pos, v2_mul(playerForward, to_vec(dist_to_viewplane + 2)));
+
+            // we need to recalculate prev variables
+            signed_angle_to_forward = v2_signed_angle_between(playerForward, v2_sub(pos, player->pos));
+
+            signed_angle_degrees = deg_to_rad(signed_angle_to_forward);
+        }
     }
+
 
     double cos_angle_to_forward = v2_cos_angle_between(playerForward, v2_sub(pos, player->pos));
 
     double dist_to_player = v2_distance(pos, player->pos);
 
+
     double dist_to_viewplane = dist_to_player * cos_angle_to_forward;
+    
+    if (dist_to_viewplane == 0) dist_to_viewplane = 0.001;
 
     double fov_width_at_texture = 2 * dist_to_viewplane * tanHalfFOV;
 
@@ -1105,11 +1181,12 @@ v2 worldToScreen(v2 pos, double height) {
     double texture_thing_width = dist_to_player * sin(angle); 
 
     double x_pos_sign = signed_angle_to_forward >= 0 ? 1 : -1;
-    double x_pos = WINDOW_WIDTH / 2 + (texture_thing_width / fov_width_at_texture * WINDOW_WIDTH) * x_pos_sign;
+    double ratio = fov_width_at_texture == 0? 0 : texture_thing_width / fov_width_at_texture;
+    double x_pos = WINDOW_WIDTH / 2 + (ratio * WINDOW_WIDTH) * x_pos_sign;
 
     double fov_factor = tanHalfStartFOV / tanHalfFOV;
     double wallSize = WALL_HEIGHT * WINDOW_HEIGHT / dist_to_viewplane * fov_factor;
-    double y_pos = WINDOW_HEIGHT / 2 + wallSize / 2 - (height / dist_to_viewplane);
+    double y_pos = WINDOW_HEIGHT / 2 + wallSize / 2 - height / dist_to_viewplane;
 
     x_pos += cameraOffset.x;
     y_pos += -player->pitch + cameraOffset.y;
@@ -1158,7 +1235,11 @@ void calcFloorAndCeiling() {
 
         for (int col = 0; col < RESOLUTION_X; col++) {
 
-            ((int *)pixels)[row * RESOLUTION_X + col] = 0x000000ff;
+            if (is_ceiling) {
+                ((int *)pixels)[row * RESOLUTION_X + col] = 0x00000000;
+            } else {
+                ((int *)pixels)[row * RESOLUTION_X + col] = 0x000000ff;
+            }
 
             
 
@@ -1266,7 +1347,7 @@ void drawFloorAndCeiling() {
 void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height, bool affected_by_light) {
     
 
-    v2 screen_pos = worldToScreen(pos, height);
+    v2 screen_pos = worldToScreen(pos, height, false);
 
     if (v2_equal(screen_pos, OUT_OF_SCREEN_POS)) {
         return;
@@ -1278,7 +1359,6 @@ void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height, bool af
     double dist_to_viewplane = dist_to_player * cos_angle_to_forward;
 
     v2 final_size = v2_div(size, to_vec(dist_to_player));
-    final_size = v2_div(to_vec(300 * WALL_HEIGHT), to_vec(dist_to_viewplane));
 
     SDL_Rect dstRect = {
         screen_pos.x - final_size.x / 2,
@@ -1434,11 +1514,6 @@ arraylist *getRenderList() {
             currentRObj->type = ENTITY;
             pos = ((Entity *)object->val)->pos;
 
-        } else if (object->type == BULLET) {
-
-            currentRObj->val = object->val;
-            currentRObj->type = BULLET;
-            pos = ((EnemyBullet *)object->val)->entity.pos;
         }
 
         currentRObj->dist_squared = v2_distance_squared(pos, player->pos);
@@ -1508,12 +1583,6 @@ void renderWallStripe(WallStripe *stripe) {
     SDL_SetTextureColorMod(texture, rgb[0], rgb[1], rgb[2]);
     SDL_RenderCopy(renderer, texture, &srcRect, &dstRect);
     free(stripe);
-}
-
-void renderParticles(Particles *particles) {
-    for (int i = 0; i < particles->particleAmount; i++) {
-        renderEntity(particles->particles[i]->entity);
-    }
 }
 
 BakedLightColor get_light_color_by_pos(v2 pos) {
@@ -1661,9 +1730,6 @@ void render(double delta) {  // #RENDER
                 break;
             case (int)WALL_STRIPE:
                 renderWallStripe((WallStripe *)rObj->val);
-                break;
-            case (int)PARTICLES:
-                renderParticles((Particles *)rObj->val);
                 break;
             case (int)ENEMY:;
                 Enemy *enemy = rObj->val;
@@ -1875,14 +1941,7 @@ RayCollisionData ray_circle(Raycast ray, CircleCollider circle) {
 
 void freeObject(void *val, int type) {
     switch (type) {
-        case (int)PARTICLES:;
-            Particles *p = (Particles *)val;
-            for (int i = 0; i < p->particleAmount; i++) {
-                free(p->particles[i]);
-            }
-            free(p->particles);
-            free(p);
-            break;
+        case (int)PARTICLE:
         case (int)EFFECT:;
             Effect *effect = (Effect *)val;
             freeObject(effect->entity.sprite, SPRITE);
@@ -1890,10 +1949,6 @@ void freeObject(void *val, int type) {
             break;
         case (int)SPRITE:;  // not gonna destroy the texture
             Sprite *s = val;
-            // for (int i = 0; i < s->animCount; i++) {
-            //     Animation anim = s->animations[i];
-            //     free(anim.frames);
-            // }
             free(s->animations);
             free(s);
             break;
@@ -1905,6 +1960,7 @@ void freeObject(void *val, int type) {
             free(dSprite->sprites);
             free(dSprite);
             break;
+        
 
         case (int)BULLET:;
             EnemyBullet *bullet = val;
@@ -1938,19 +1994,6 @@ void shakeCamera(double strength, int ticks, bool fade, int priority) {
 
 void add_game_object(void *val, int type) {
     switch (type) {
-        case (int)PARTICLES:;
-            Particles *particles = (Particles *)val;
-            for (int i = 0; i < particles->particleAmount; i++) {
-                particles->particles[i]->vel = particles->startVel;
-                particles->particles[i]->lifeTimer = particles->particleLifetime;
-
-                particles->particles[i]->entity.pos = particles->pos;
-                particles->particles[i]->entity.size = particles->particleSize;
-                particles->particles[i]->entity.sprite = particles->particleSprite;
-                particles->particles[i]->entity.height = particles->height;
-            }
-            arraylist_add(gameobjects, particles, PARTICLES);
-            break;
         default:
             arraylist_add(gameobjects, val, type);
             break;
@@ -2156,39 +2199,6 @@ SDL_Texture *getSpriteCurrentTexture(Sprite *sprite) {
     }
 }
 
-Particles *createParticles(int amount, Sprite *sprite) {
-    Particles *particles = malloc(sizeof(Particles));
-    particles->pos = to_vec(0);
-    particles->particleSprite = sprite;
-    particles->particleAmount = amount;
-    particles->particleLifetime = 1;
-    particles->particles = malloc(sizeof(Particle *) * amount);
-    for (int i = 0; i < amount; i++) {
-        particles->particles[i] = malloc(sizeof(Particle));
-    }
-
-    return particles;
-}
-
-void particlesTick(Particles *particles, u64 delta) {
-    double deltaSec = mili_to_sec(delta);
-
-    for (int i = 0; i < particles->particleAmount; i++) {
-        Particle *particle = particles->particles[i];
-        particle->vel = v2_add(particle->vel, particles->gravity);
-
-        v2 finalVel = v2_mul(particle->vel, to_vec(deltaSec));
-        particle->entity.pos = v2_add(particle->entity.pos, finalVel);
-
-        particle->lifeTimer -= deltaSec;
-        if (particle->lifeTimer <= 0) {
-            particle->lifeTimer = particles->particleLifetime;
-            particle->vel = particles->startVel;
-            particle->entity.pos = particles->pos;
-        }
-    }
-}
-
 Effect *createEffect(v2 pos, v2 size, Sprite *sprite, double lifeTime) {
     Effect *effect = malloc(sizeof(Effect));
 
@@ -2212,7 +2222,7 @@ void ability_shoot_activate(Ability *ability) {
 
     ability->can_use = false;
 
-    _shoot();
+    _shoot(0.02);
 }
 
 void effectTick(Effect *effect, double delta) {
@@ -2269,7 +2279,7 @@ void enemyTakeDmg(Enemy *enemy, int dmg) {
     shakeCamera(15, 4, true, 0);
     Sprite *sprite = createSprite(false, 0);
     sprite->texture = enemy->hit_texture;
-    Effect *hit_effect = createEffect(v2_add(enemy->entity.pos, v2_dir(enemy->entity.pos, player->pos)), to_vec(50), sprite, 0.1);
+    Effect *hit_effect = createEffect(v2_add(enemy->entity.pos, v2_dir(enemy->entity.pos, player->pos)), enemy->entity.size, sprite, 0.1);
     hit_effect->entity.height = enemy->entity.height;
     hit_effect->entity.affected_by_light = false;
     add_game_object(hit_effect, EFFECT);
@@ -2392,16 +2402,17 @@ EnemyBullet *createDefaultBullet(v2 pos, v2 dir) {
     EnemyBullet *bullet = malloc(sizeof(EnemyBullet));
 
     bullet->entity.pos = pos;
-    bullet->entity.size = to_vec(20);
+    bullet->entity.size = to_vec(6000);
     bullet->entity.sprite = createSprite(true, 1);
     bullet->entity.sprite->animations[0] = create_animation(4, 0, shooter_bullet_default_frames);
     bullet->entity.sprite->animations[0].fps = 12;
+    bullet->entity.sprite->animations[0].loop = true;
     spritePlayAnim(bullet->entity.sprite, 0);
     bullet->entity.height = WINDOW_HEIGHT / 6;
     bullet->entity.affected_by_light = false;
     bullet->dirSprite = NULL;
     bullet->dmg = 1;
-    bullet->speed = 3.5;
+    bullet->speed = 5;
     bullet->dir = dir;
     bullet->lifeTime = 5;
     bullet->lifeTimer = bullet->lifeTime;
@@ -2447,7 +2458,7 @@ void bulletTick(EnemyBullet *bullet, double delta) {
 }
 
 void enemy_shooter_shoot(ShooterEnemy *shooter) {
-    EnemyBullet *bullet = createDefaultBullet(shooter->enemy.entity.pos, v2_rotate(shooter->enemy.dir, randf_range(-0.1, 0.1)));
+    EnemyBullet *bullet = createDefaultBullet(shooter->enemy.entity.pos, v2_rotate(shooter->enemy.dir, randf_range(-0.05, 0.05)));
     if (bullet == NULL) {
         printf("Bullet is null \n");
         return;
@@ -2487,7 +2498,7 @@ void shooterTick(Enemy *enemy, double delta) {
         if (shooter->mode_timer <= 0) {
             shooter->mode = shooter->mode == MODE_RESTING? MODE_SHOOTING : MODE_RESTING; // could make this simpler(1 - mode) but it will be less readable
             if (shooter->mode == MODE_RESTING) {
-                shooter->mode_timer = 4;
+                shooter->mode_timer = 3;
             } else {
                 shooter->mode_timer = 2;
             }
@@ -2914,7 +2925,7 @@ void enemy_bullet_destroy(EnemyBullet *bullet) {
 
     v2 pos = v2_sub(bullet->entity.pos, v2_mul(bullet->dir, to_vec(5)));
 
-    Effect *effect = createEffect(pos, to_vec(50), sprite, 0.35);
+    Effect *effect = createEffect(pos, bullet->entity.size, sprite, 0.35);
     effect->entity.height = bullet->entity.height;
     effect->entity.affected_by_light = false;
 
@@ -2986,7 +2997,7 @@ void enemy_notice_player_effect(Enemy *enemy, double delta) {
     sprite->animations[0].loop = false;
     spritePlayAnim(sprite, 0);
 
-    Effect *effect = createEffect(enemy->entity.pos, to_vec(400), sprite, 0.51);
+    Effect *effect = createEffect(enemy->entity.pos, to_vec(7000), sprite, 0.51);
     effect->entity.height = get_max_height() * 3/4;
     effect->entity.affected_by_light = false;
 
@@ -3043,7 +3054,7 @@ ExploderEnemy *enemy_exploder_create(v2 pos) {
     ExploderEnemy *exploder = malloc(sizeof(ExploderEnemy));
 
     exploder->explosion_kb = 15;
-    exploder->explosion_radius = 30;
+    exploder->explosion_radius = 150;
     
     const int ANIM_LENGTH = 5;
 
@@ -3176,8 +3187,8 @@ Rapidfire ability_secondary_shoot_create() {
         .ability.cooldown = 10,
         .ability.timer = 0,
         .ability.type = A_SECONDARY,
-        .shot_amount = 7,
-        .shot_timer = 0.1,
+        .shot_amount = 16,
+        .shot_timer = 0.06,
         .shots_left = 0
     };
 }
@@ -3186,6 +3197,8 @@ void ability_secondary_shoot_activate(Ability *ability) {
     if (!ability->can_use) return;
     ability->can_use = false;
 
+    shakeCamera(15, 25, true, 10);
+
     Rapidfire *rapid_fire = (Rapidfire *)ability;
     rapid_fire->shots_left = rapid_fire->shot_amount;
 }
@@ -3193,16 +3206,14 @@ void ability_secondary_shoot_activate(Ability *ability) {
 void ability_secondary_shoot_tick(Ability *ability, double delta) {
     Rapidfire *rapid_fire = (Rapidfire *)ability;
 
-    cd_print(true, "Entering tick \n");
-
     if (rapid_fire->shots_left > 0) {
         rapid_fire->shot_timer -= delta;
         if (rapid_fire->shot_timer <= 0) {
-            rapid_fire->shot_timer = 0.1;
+            rapid_fire->shot_timer = 0.01;
 
-            player->vel = v2_sub(player->vel, v2_mul(playerForward, to_vec(1.5)));
+            player->vel = v2_sub(player->vel, v2_mul(playerForward, to_vec(0.75)));
 
-            _shoot();
+            _shoot(0.05);
             rapid_fire->shots_left--;
         }
     }
@@ -3210,39 +3221,68 @@ void ability_secondary_shoot_tick(Ability *ability, double delta) {
     default_ability_tick(ability, delta);
 }
 
-void _shoot() {
+void _shoot(double spread) {
 
     play_sound(player_default_shoot, 0.3);
     shakeCamera(10, 4, true, 1);
     spritePlayAnim(leftHandSprite, 1);
 
-    RayCollisionData ray_data = castRayForAll(player->pos, playerForward);
+    v2 shoot_dir = v2_rotate(playerForward, randf_range(-PI * spread, PI * spread));
+
+
+    RayCollisionData ray_data = castRayForAll(player->pos, shoot_dir);
 
     double effect_height = get_max_height() / 2;
+    
+    double max_distance;
 
-    if (!ray_data.hit) return;
+    if (in_range(player->pitch, -0.01, 0.01)) {
+        max_distance = INFINITY;
+    } else {
+        double p = abs(player->pitch); // for debugging
+        max_distance = 9000 / p;
+    }
+
+    if (!ray_data.hit && max_distance == INFINITY) return;
+
+
+    bool hit_ground_or_ceiling = false;
+
+    double distance_to_collpos = v2_distance(player->pos, ray_data.collpos);
+
+    if (distance_to_collpos > max_distance) {
+        effect_height = player->pitch < 0? get_max_height() : 0;
+        hit_ground_or_ceiling = true;
+    }
 
     
-    if (is_enemy_type(ray_data.colliderType)) {
+    if (is_enemy_type(ray_data.colliderType) && !hit_ground_or_ceiling) {
         
         Entity entity = *((Entity *)ray_data.collider);
-        effect_height = entity.height - entity.size.y / 2;
+        effect_height = entity.height;
         
         enemy_pause(ray_data.collider, 0.4);
         enemyTakeDmg(ray_data.collider, 1);
+    } else if (!hit_ground_or_ceiling) {
+        
+        effect_height = get_max_height() / 2 + -player->pitch * distance_to_collpos; // an estimate. wouldnt work well with high spread, but hopefully hard to notice. nvm, works very well.
     }
     
 
-    v2 effectPos = v2_add(ray_data.collpos, v2_mul(playerForward, to_vec(-4)));
+    v2 effectPos;
 
-    Effect *hitEffect = createEffect(effectPos, to_vec(35), createSprite(true, 1), 1);
+    if (hit_ground_or_ceiling) {
+        effectPos = v2_add(player->pos, v2_mul(shoot_dir, to_vec(max_distance)));
+    } else {
+        effectPos = v2_add(ray_data.collpos, v2_mul(playerForward, to_vec(-4)));
+    }
+
+    Effect *hitEffect = createEffect(effectPos, to_vec(8000), createSprite(true, 1), 1);
 
     if (hitEffect == NULL) {
         printf("hit effect is null \n");
         return;
     }
-
-    
 
     hitEffect->entity.sprite->animations[0] = create_animation(5, 0, shootHitEffectFrames);
     
@@ -3254,6 +3294,110 @@ void _shoot() {
     spritePlayAnim(hitEffect->entity.sprite, 0);
 
     add_game_object(hitEffect, EFFECT);
+    
 }
+
+void draw_3d_line(v2 pos1, double h1, v2 pos2, double h2) {
+    v2 screen_pos_1 = worldToScreen(pos1, h1, true);
+    v2 screen_pos_2 = worldToScreen(pos2, h2, true);
+
+    SDL_RenderDrawLine(renderer, screen_pos_1.x, screen_pos_1.y, screen_pos_2.x, screen_pos_2.y);
+}
+
+ParticleSpawner create_particle_spawner(v2 pos, double height) {
+    ParticleSpawner spawner = {
+        .dir = (v2){1, 0},
+        .height_dir = 0,
+        .accel = (v2){0, 0},
+        .height_accel = PARTICLE_GRAVITY,
+        .pos = pos,
+        .height = height,
+        .spawn_rate = 8,
+        .spread = 0.1,
+        .min_speed = 10,
+        .max_speed = 10,
+        .min_size = to_vec(5),
+        .max_size = to_vec(15),
+        .floor_drag = 0.01,
+        .bounciness = 0.5,
+        .particle_lifetime = 1,
+        .active = true
+    };
+
+    spawner.spawn_timer = 1.0 / spawner.spawn_rate;
+
+    return spawner;
+}
+
+void particle_spawner_tick(ParticleSpawner *spawner, double delta) {
+
+    if (!spawner->active) return;
+    spawner->spawn_timer -= delta;
+    if (spawner->spawn_timer <= 0) {
+        spawner->spawn_timer = 1.0 / spawner->spawn_rate;
+        particle_spawner_spawn(spawner);
+    }
+}
+
+void particle_spawner_spawn(ParticleSpawner *spawner) {
+
+    Particle particle;
+    
+    double speed = randf_range(spawner->min_speed, spawner->max_speed);
+    v2 dir = v2_rotate(spawner->dir, randf_range(-PI * spawner->spread, PI * spawner->spread));
+    
+    double vel_x = dir.x * speed;
+    double vel_y = dir.y * speed;
+    double vel_z = spawner->height_dir * speed;
+
+    particle.vel = (v2){vel_x, vel_y};
+    particle.h_vel = vel_z;
+
+    particle.accel = spawner->accel;
+    particle.h_accel = spawner->height_accel;
+
+    particle.effect.lifeTime = spawner->particle_lifetime;
+
+    particle.bounciness = spawner->bounciness;
+    particle.floor_drag = spawner->floor_drag;
+
+    particle.effect.entity.pos = spawner->pos; // change later
+    particle.effect.entity.height = spawner->height;
+    particle.effect.entity.affected_by_light = true;
+    
+    double size_rand = randf_range(0, 1);
+    v2 size = v2_lerp(spawner->min_size, spawner->max_size, size_rand);
+    
+    particle.effect.entity.size = size;
+
+    particle.effect.entity.sprite = malloc(sizeof(Sprite));
+    *particle.effect.entity.sprite = spawner->sprite;
+
+
+    Particle *particle_object = malloc(sizeof(Particle));
+    *particle_object = particle;
+
+    add_game_object(particle_object, PARTICLE);
+
+}
+
+
+void particle_tick(Particle *particle, double delta) {
+
+    particle->vel = v2_add(particle->vel, v2_mul(particle->accel, to_vec(delta)));
+    particle->h_vel += particle->h_accel * delta;
+
+    particle->effect.entity.pos = v2_add(particle->effect.entity.pos, v2_mul(particle->vel, to_vec(delta)));
+    particle->effect.entity.height += particle->h_vel * delta;
+    double floor_bound = particle->effect.entity.size.y / 2;
+    if (particle->effect.entity.height < floor_bound) {
+        particle->effect.entity.height = floor_bound;
+        particle->h_vel *= -particle->bounciness;
+        particle->vel = v2_mul(particle->vel, to_vec(1 - particle->floor_drag));
+    }
+
+    effectTick((Effect *)particle, delta);
+}
+
 
 // #END
