@@ -23,7 +23,7 @@ SDL_Window *window;
 #define WALL_HEIGHT 30
 #define NUM_WALL_THREADS 1
 
-#define BAKED_LIGHT_RESOLUTION 36
+#define BAKED_LIGHT_RESOLUTION 18
 
 #define PARTICLE_GRAVITY 1
 
@@ -585,7 +585,7 @@ int floorRenderStart;
 int **levelTileMap;
 int **floorTileMap;
 int **ceilingTileMap;
-const int tileSize = WINDOW_WIDTH / TILEMAP_WIDTH;
+const int tileSize = WINDOW_WIDTH / 30;
 double realFps;
 bool isCameraShaking = false;
 int camerashake_current_priority = 0;
@@ -824,7 +824,7 @@ void init() {  // #INIT
         load_level(levelToLoad);
 
     } else {
-        load_level("Levels/new_default_level.hclevel");
+        load_level("Levels/default_level.hclevel");
     }
 
     skybox_texture = make_texture(renderer, "Textures/skybox.bmp");
@@ -1300,12 +1300,10 @@ void calcFloorAndCeiling() {
 			BakedLightColor baked_light_color = get_light_color_by_pos(point);
 
             int rgb[3] = {
-                floor_pixel.r * baked_light_color.r,
-                floor_pixel.g * baked_light_color.g,
-                floor_pixel.b * baked_light_color.b
+                SDL_clamp(floor_pixel.r * baked_light_color.r, 0, 255),
+                SDL_clamp(floor_pixel.g * baked_light_color.g, 0, 255),
+                SDL_clamp(floor_pixel.b * baked_light_color.b, 0, 255)
             };
-
-            clampColors(rgb);
 
 			floor_pixel.r = rgb[0];
 			floor_pixel.g = rgb[1];

@@ -25,6 +25,11 @@ typedef enum PlaceMode {
     PLACEMODE_ENTITY
 } PlaceMode;
 
+enum {
+    PAINTMODE_FILL,
+    PAINTMODE_DRAW
+};
+
 // typedef struct Tile {
 //     v2 pos;
 //     enum Tiles type;
@@ -38,9 +43,9 @@ void render(u64 delta);
 
 void handle_input(SDL_Event event);
 
-void place_object(v2 pos);
+void place_object(int row, int col);
 
-void remove_object(v2 pos);
+void remove_object(int row, int col);
 
 void init();
 
@@ -65,6 +70,7 @@ int **ceiling_tilemap;
 bool l_mouse_down = false;
 bool r_mouse_down = false;
 const int tile_size = WINDOW_WIDTH / TILEMAP_WIDTH;
+int paint_mode = PAINTMODE_DRAW;
 PlaceMode place_mode;
 char *level_file;
 LevelEditorEntity *player;
@@ -174,64 +180,75 @@ void remove_player() {
     }
 }
 
-void place_object(v2 pos) {
-    v2 tileMapPos = v2_floor(v2_div(pos, to_vec(tile_size)));
-    int x = tileMapPos.x;
-    int y = tileMapPos.y;
+void place_object(int r, int c) {
+
+    if (!in_range(r, 0, TILEMAP_HEIGHT - 1) || !in_range(c, 0, TILEMAP_WIDTH - 1)) return;
+    
+
 
     Placeable s = get_current_selection();
+    
+    if (place_mode == PLACEMODE_ENTITY && s == entity_tilemap[r][c]) return;
+    if (place_mode == PLACEMODE_WALL && s == wall_tilemap[r][c]) return;
+    if (place_mode == PLACEMODE_FLOOR && s == floor_tilemap[r][c]) return;
+    if (place_mode == PLACEMODE_CEILING && s == ceiling_tilemap[r][c]) return;
+
 
     switch (place_mode) {
         case (int)PLACEMODE_ENTITY:
             if (s == P_PLAYER) remove_player();
-            entity_tilemap[y][x] = s;
+            entity_tilemap[r][c] = s;
             break;
         case (int)PLACEMODE_FLOOR:
-            floor_tilemap[y][x] = s;
+            floor_tilemap[r][c] = s;
             break;
         case (int)PLACEMODE_CEILING:
-            ceiling_tilemap[y][x] = s;
+            ceiling_tilemap[r][c] = s;
             break;
         case (int)PLACEMODE_WALL:
-            wall_tilemap[y][x] = s;
+            wall_tilemap[r][c] = s;
             break;
     }
+
+    if (paint_mode == PAINTMODE_FILL) {
+        place_object(r - 1, c);
+        place_object(r + 1, c);
+        place_object(r, c - 1);
+        place_object(r, c + 1);
+    }
+
+    
 }
 
-// void removeEntitiesAt(v2 pos, double radius) {
-//     arraylist *entitiesToRemove = create_arraylist(10);
-//     for (int i = 0; i < entityList->length; i++) {
-//         LevelEditorEntity *entity = (LevelEditorEntity *)arraylist_get(entityList, i)->val;
-//         if (v2_distance_squared(pos, entity->pos) < radius * radius) {
-//             arraylist_add(entitiesToRemove, entity, -1);
-//         }
-//     }
+void remove_object(int row, int col) {
+    if (!in_range(row, 0, TILEMAP_HEIGHT - 1) || !in_range(col, 0, TILEMAP_WIDTH - 1)) return;
 
-//     for (int i = 0; i < entitiesToRemove->length; i++) {
-//         LevelEditorEntity *entity = arraylist_get(entitiesToRemove, i)->val;
-//         free(entity);
-//         arraylist_remove(entityList, arraylist_find(entityList, entity));
-//     }
-// }
 
-void remove_object(v2 pos) {
-    v2 tileMapPos = v2_floor(v2_div(pos, to_vec(tile_size)));
-    int x = tileMapPos.x;
-    int y = tileMapPos.y;
 
     switch (place_mode) {
         case PLACEMODE_ENTITY:
-            entity_tilemap[y][x] = -1;
+            if (entity_tilemap[row][col] == -1) return;
+            entity_tilemap[row][col] = -1;
             break;
         case PLACEMODE_WALL:
-            wall_tilemap[y][x] = -1;
+            if (wall_tilemap[row][col] == -1) return;
+            wall_tilemap[row][col] = -1;
             break;
         case PLACEMODE_CEILING:
-            ceiling_tilemap[y][x] = -1;
+            if (ceiling_tilemap[row][col] == -1) return;
+            ceiling_tilemap[row][col] = -1;
             break;
         case PLACEMODE_FLOOR:
-            floor_tilemap[y][x] = -1;
+            if (floor_tilemap[row][col] == -1) return;
+            floor_tilemap[row][col] = -1;
             break;
+    }
+
+    if (paint_mode == PAINTMODE_FILL) {
+        remove_object(row - 1, col);
+        remove_object(row + 1, col);
+        remove_object(row, col + 1);
+        remove_object(row, col - 1);
     }
     
 }
@@ -247,22 +264,32 @@ void key_pressed(SDL_Keycode key) {
     switch (key) {
         case SDLK_f:
             current_selection = 0;
+            paint_mode = PAINTMODE_DRAW;
             place_mode = PLACEMODE_FLOOR;
             break;
         case SDLK_c:
             current_selection = 0;
+            paint_mode = PAINTMODE_DRAW;
             place_mode = PLACEMODE_CEILING;
             break;
         case SDLK_e:
             current_selection = 0;
+            paint_mode = PAINTMODE_DRAW;
             place_mode = PLACEMODE_ENTITY;
             break;
         case SDLK_w:
             current_selection = 0;
+            paint_mode = PAINTMODE_DRAW;
             place_mode = PLACEMODE_WALL;
             break;
         case SDLK_F8:
             running = false;
+            break;
+        case SDLK_b:
+            paint_mode = PAINTMODE_DRAW;
+            break;
+        case SDLK_g:
+            paint_mode = PAINTMODE_FILL;
             break;
     }
 }
@@ -279,7 +306,10 @@ void mouse_down(int button) {
 
 void mouse_just_pressed(int button) {
     if (button == SDL_BUTTON_LEFT && place_mode == PLACEMODE_ENTITY) {
-        place_object(get_mouse_pos());
+        v2 mouse_pos = get_mouse_pos();
+        int row = mouse_pos.y / tile_size;
+        int col = mouse_pos.x / tile_size;
+        place_object(row, col);
     }
 }
 
@@ -415,9 +445,15 @@ v2 get_mouse_pos() {
 
 void tick(u64 delta) {
     if (l_mouse_down && place_mode != PLACEMODE_ENTITY) {
-        place_object(get_mouse_pos());
+        v2 mouse_pos = get_mouse_pos();
+        int row = mouse_pos.y / tile_size;
+        int col = mouse_pos.x / tile_size;
+        place_object(row, col);
     } else if (r_mouse_down) {
-        remove_object(get_mouse_pos());
+        v2 mouse_pos = get_mouse_pos();
+        int row = mouse_pos.y / tile_size;
+        int col = mouse_pos.x / tile_size;
+        remove_object(row, col);
     }
 
     char *title;

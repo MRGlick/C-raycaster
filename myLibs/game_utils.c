@@ -20,8 +20,8 @@
 #define u8 uint8_t
 
 #define in_range(a, min, max) (a <= max && a >= min) 
-#define min(a, b) a < b ? a : b
-#define max(a, b) a > b ? a : b
+#define min(a, b) (a < b ? a : b)
+#define max(a, b) (a > b ? a : b)
 
 #define new(type) malloc(sizeof(type))
 

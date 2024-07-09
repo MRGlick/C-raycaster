@@ -1,7 +1,7 @@
 
 
-#define TILEMAP_WIDTH 30
-#define TILEMAP_HEIGHT 20
+#define TILEMAP_WIDTH 60
+#define TILEMAP_HEIGHT 40
 
 typedef enum Placeable {
     P_IDK = -1,
