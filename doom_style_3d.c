@@ -1223,6 +1223,16 @@ void calcFloorAndCeiling() {
 
         for (int col = 0; col < RESOLUTION_X; col++) {
 
+            v2 point = v2_lerp(left, right, (double)col / RESOLUTION_X);
+
+            int tilemap_row = point.y / tileSize;
+            int tilemap_col = point.x / tileSize;
+            if (
+                in_range(tilemap_row, 0, TILEMAP_HEIGHT - 1)
+                && in_range(tilemap_col, 0, TILEMAP_WIDTH - 1)
+                && levelTileMap[tilemap_row][tilemap_col] == P_WALL
+            ) continue;
+
             if (is_ceiling) {
                 ((int *)pixels)[row * RESOLUTION_X + col] = 0x00000000;
             } else {
@@ -1233,7 +1243,8 @@ void calcFloorAndCeiling() {
 
             int screenX = col * WINDOW_WIDTH / RESOLUTION_X;
 
-            v2 point = v2_lerp(left, right, (double)col / RESOLUTION_X);
+
+
 
             
             double light = 0.8;
