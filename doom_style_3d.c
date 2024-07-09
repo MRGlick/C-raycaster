@@ -22,6 +22,7 @@ SDL_Window *window;
 #define RENDER_DISTANCE 350
 #define WALL_HEIGHT 30
 #define NUM_WALL_THREADS 1
+#define NUM_FLOOR_THREADS 2
 
 #define BAKED_LIGHT_RESOLUTION 18
 
@@ -731,7 +732,6 @@ void init() {  // #INIT
         sprintf(num, "%d", i + 1);
         char *fileWithNum = concat(baseFileName, num);
         char *fileWithExtension = concat(fileWithNum, ".bmp");
-        printf("%s \n", fileWithExtension);
 
         shooter_dirs_textures[i] = make_texture(renderer, fileWithExtension);
     }
@@ -1200,19 +1200,24 @@ v2 screenToFloor(v2 pos) {
     return v2_add(player->pos, v2_mul(rayDir, to_vec(dist)));
 }
 
-void calcFloorAndCeiling() {
-    // render by scanlines.
-    // interpolate between left and right points and put the correct texture
+struct floor_and_ceiling_thread_data {
+    int start_row;
+    int end_row; // exclusive
+    void **pixels;
+};
 
-    void *pixels;
-    int pitch;
+int calcFloorAndCeiling_Threaded(void *data) {
+    struct floor_and_ceiling_thread_data *data_struct = data;
+    void **pixels = data_struct->pixels;
+    int start_row = data_struct->start_row;
+    int end_row = data_struct->end_row;
 
-    SDL_LockTexture(floorAndCeiling, NULL, &pixels, &pitch);
+    printf("Start row: %d \n", start_row);
 
     TextureData *textureData = floorTexture;
     v2 textureSize = (v2){textureData->w, textureData->h};
 
-    for (int row = 0; row < RESOLUTION_Y; row++) {
+    for (int row = start_row; row < end_row; row++) {
 
         int screenY = row * WINDOW_HEIGHT / RESOLUTION_Y;
 
@@ -1234,9 +1239,9 @@ void calcFloorAndCeiling() {
             ) continue;
 
             if (is_ceiling) {
-                ((int *)pixels)[row * RESOLUTION_X + col] = 0x00000000;
+                ((int *)*pixels)[row * RESOLUTION_X + col] = 0x00000000;
             } else {
-                ((int *)pixels)[row * RESOLUTION_X + col] = 0x000000ff;
+                ((int *)*pixels)[row * RESOLUTION_X + col] = 0x000000ff;
             }
 
             
@@ -1323,12 +1328,162 @@ void calcFloorAndCeiling() {
 
             int floor_pixel_i = floor_pixel.r << 24 | floor_pixel.g << 16 | floor_pixel.b << 8 | floor_pixel.a;
 
-            ((int *)pixels)[floor_pixel_idx] = floor_pixel_i;
+            ((int *)*pixels)[floor_pixel_idx] = floor_pixel_i;
 
         }
     }
 
+
+
+}
+
+
+void calcFloorAndCeiling() {
+    // render by scanlines.
+    // interpolate between left and right points and put the correct texture
+
+    void *pixels;
+    int pitch;
+
+    SDL_LockTexture(floorAndCeiling, NULL, &pixels, &pitch);
+
+    SDL_Thread *threads[NUM_FLOOR_THREADS];
+    struct floor_and_ceiling_thread_data datas[NUM_FLOOR_THREADS];
+
+    for (int i = 0; i < NUM_FLOOR_THREADS; i++) {
+        datas[i].start_row = i * RESOLUTION_Y / NUM_FLOOR_THREADS;
+        datas[i].end_row = (i + 1) * RESOLUTION_Y / NUM_FLOOR_THREADS;
+        datas[i].pixels = &pixels;
+
+        threads[i] = SDL_CreateThread(calcFloorAndCeiling_Threaded, "floor thread", &datas[i]);
+    }
+
+
+    for (int i = 0; i < NUM_FLOOR_THREADS; i++) {
+        SDL_WaitThread(threads[i], NULL);
+        threads[i] = NULL;
+    }
+    
     SDL_UnlockTexture(floorAndCeiling);
+    // TextureData *textureData = floorTexture;
+    // v2 textureSize = (v2){textureData->w, textureData->h};
+
+    // for (int row = 0; row < RESOLUTION_Y; row++) {
+
+    //     int screenY = row * WINDOW_HEIGHT / RESOLUTION_Y;
+
+    //     bool is_ceiling = screenY + player->pitch < WINDOW_HEIGHT / 2;
+
+    //     v2 left = screenToFloor((v2){0, screenY + player->pitch});
+    //     v2 right = screenToFloor((v2){RESOLUTION_X - 1, screenY + player->pitch});
+
+    //     for (int col = 0; col < RESOLUTION_X; col++) {
+
+    //         v2 point = v2_lerp(left, right, (double)col / RESOLUTION_X);
+
+    //         int tilemap_row = point.y / tileSize;
+    //         int tilemap_col = point.x / tileSize;
+    //         if (
+    //             in_range(tilemap_row, 0, TILEMAP_HEIGHT - 1)
+    //             && in_range(tilemap_col, 0, TILEMAP_WIDTH - 1)
+    //             && levelTileMap[tilemap_row][tilemap_col] == P_WALL
+    //         ) continue;
+
+    //         if (is_ceiling) {
+    //             ((int *)pixels)[row * RESOLUTION_X + col] = 0x00000000;
+    //         } else {
+    //             ((int *)pixels)[row * RESOLUTION_X + col] = 0x000000ff;
+    //         }
+
+            
+
+    //         int screenX = col * WINDOW_WIDTH / RESOLUTION_X;
+
+
+
+
+            
+    //         double light = 0.8;
+
+    //         int offsetted_row = row + (player->pitch / WINDOW_HEIGHT * RESOLUTION_Y);
+
+    //         if (in_range(offsetted_row, RESOLUTION_Y/4, RESOLUTION_Y/2)) {
+    //             light = (1 - inverse_lerp(RESOLUTION_Y/4, RESOLUTION_Y/2, offsetted_row)) * 0.8;
+    //         } else if (in_range(offsetted_row, RESOLUTION_Y/2, RESOLUTION_Y * 3/4)) {
+    //             light = inverse_lerp(RESOLUTION_Y/2, RESOLUTION_Y * 3/4, offsetted_row) * 0.8;
+    //         }
+
+    //         int color = light * 255;
+
+    //         int tileRow = point.y / tileSize;
+    //         int tileCol = point.x / tileSize;
+
+    //         int floorTile = -1;
+    //         int ceilingTile = -1;
+
+    //         if (in_range(tileRow, 0, TILEMAP_HEIGHT - 1) && in_range(tileCol, 0, TILEMAP_WIDTH - 1)) {
+    //             floorTile = floorTileMap[tileRow][tileCol];
+    //             ceilingTile = ceilingTileMap[tileRow][tileCol];
+    //         }
+
+    //         bool has_ceiling = ceilingTile != -1;
+
+    //         if (is_ceiling && !has_ceiling) {
+    //             continue;
+    //         } else if (has_ceiling && is_ceiling) {
+    //             if (ceilingTile == P_CEILING) {
+    //                 textureData = ceilingTexture;
+    //             } else if (ceilingTile == P_CEILING_LIGHT) {
+    //                 textureData = ceilingLightTexture;
+    //             }
+    //         } else { // its a floor
+    //             if (floorTile == P_FLOOR) {
+    //                 textureData = floorTexture2;
+    //             } else if (floorTile == P_FLOOR_LIGHT) {
+    //                 textureData = floorLightTexture;
+    //             } else {
+    //                 textureData = floorTexture;
+    //             }
+    //         }
+
+    //         int floor_row = row;
+    //         int floor_col = col;
+
+    //         floor_row = clamp(floor_row, 0, RESOLUTION_Y - 1);
+    //         floor_col = clamp(floor_col, 0, WINDOW_WIDTH - 1);
+
+    //         int floor_pixel_idx = floor_row * RESOLUTION_X + floor_col;
+
+    //         Pixel floor_pixel = TextureData_get_pixel(
+    //             textureData,
+    //             loop_clamp(point.x / tileSize * 36, 0, 36), 
+    //             loop_clamp(point.y / tileSize * 36, 0, 36)
+    //         );
+
+    //         floor_pixel.r *= light;
+    //         floor_pixel.g *= light;
+    //         floor_pixel.b *= light;
+
+	// 		BakedLightColor baked_light_color = get_light_color_by_pos(point);
+
+    //         int rgb[3] = {
+    //             SDL_clamp(floor_pixel.r * baked_light_color.r, 0, 255),
+    //             SDL_clamp(floor_pixel.g * baked_light_color.g, 0, 255),
+    //             SDL_clamp(floor_pixel.b * baked_light_color.b, 0, 255)
+    //         };
+
+	// 		floor_pixel.r = rgb[0];
+	// 		floor_pixel.g = rgb[1];
+	// 		floor_pixel.b = rgb[2];
+            
+
+    //         int floor_pixel_i = floor_pixel.r << 24 | floor_pixel.g << 16 | floor_pixel.b << 8 | floor_pixel.a;
+
+    //         ((int *)pixels)[floor_pixel_idx] = floor_pixel_i;
+
+    //     }
+    // }
+
 }
 
 void drawFloorAndCeiling() {
@@ -2370,7 +2525,6 @@ void dSpriteTick(DirectionalSprite *dSprite, v2 spritePos, double delta) {
     for (int i = 0; i < dSprite->dirCount; i++) {
         Animation *anim = &(dSprite->sprites[i]->animations[dSprite->current_anim]);
         if (anim == NULL) {
-            //cd_print(true, "Thing at index %d is null?? \n", i);
             continue;
         }
         anim->fps = dSprite->fps;
@@ -3110,8 +3264,6 @@ void exploder_tick(Enemy *enemy, double delta) {
         dir_sprite_play_anim(exploder->enemy.dirSprite, 1);
         exploder->enemy.dirSprite->playing = false;
     }
-
-    cd_print(true, "current anim: %d \n", exploder->enemy.dirSprite->current_anim);
 
     enemyTick(exploder, delta);
 
