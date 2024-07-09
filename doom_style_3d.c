@@ -1355,7 +1355,9 @@ void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height, bool af
 
     double dist_to_viewplane = dist_to_player * cos_angle_to_forward;
 
-    v2 final_size = v2_div(size, to_vec(dist_to_player));
+    double fov_factor = tanHalfFOV / tanHalfStartFOV;
+
+    v2 final_size = v2_div(size, to_vec(dist_to_player * fov_factor));
 
     SDL_Rect dstRect = {
         screen_pos.x - final_size.x / 2,
@@ -2396,7 +2398,7 @@ EnemyBullet *createDefaultBullet(v2 pos, v2 dir) {
     EnemyBullet *bullet = malloc(sizeof(EnemyBullet));
 
     bullet->entity.pos = pos;
-    bullet->entity.size = to_vec(6000);
+    bullet->entity.size = to_vec(8000);
     bullet->entity.sprite = createSprite(true, 1);
     bullet->entity.sprite->animations[0] = create_animation(4, 0, shooter_bullet_default_frames);
     bullet->entity.sprite->animations[0].fps = 12;
@@ -2406,7 +2408,7 @@ EnemyBullet *createDefaultBullet(v2 pos, v2 dir) {
     bullet->entity.affected_by_light = false;
     bullet->dirSprite = NULL;
     bullet->dmg = 1;
-    bullet->speed = 4;
+    bullet->speed = 360;
     bullet->dir = dir;
     bullet->lifeTime = 5;
     bullet->lifeTimer = bullet->lifeTime;
@@ -2426,7 +2428,7 @@ bool intersectCircles(CircleCollider c1, CircleCollider c2) {
 
 void bulletTick(EnemyBullet *bullet, double delta) {
 
-    bullet->entity.pos = v2_add(bullet->entity.pos, v2_mul(bullet->dir, to_vec(bullet->speed)));
+    bullet->entity.pos = v2_add(bullet->entity.pos, v2_mul(bullet->dir, to_vec(bullet->speed * delta)));
     bullet->collider->pos = bullet->entity.pos;
 
     bullet->lifeTimer -= delta;
