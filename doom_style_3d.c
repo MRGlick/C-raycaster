@@ -25,7 +25,7 @@ SDL_Window *window;
 #define NUM_FLOOR_THREADS 2
 
 #define BAKED_LIGHT_RESOLUTION 36
-#define BAKED_LIGHT_CALC_RESOLUTION 8
+#define BAKED_LIGHT_CALC_RESOLUTION 4
 
 #define PARTICLE_GRAVITY 1
 
@@ -825,7 +825,7 @@ void init() {  // #INIT
         load_level(levelToLoad);
 
     } else {
-        load_level("Levels/default_level.hclevel");
+        load_level("Levels/light_interpolation_test.hclevel");
     }
 
     skybox_texture = make_texture(renderer, "Textures/skybox.bmp");
@@ -2224,7 +2224,7 @@ void load_level(char *file) {
             if (floorTileMap[r][c] == (int)P_FLOOR_LIGHT) {
                 LightPoint *test_point = malloc(sizeof(LightPoint));
                 test_point->color = (SDL_Color){255, 100, 10};//{255, 200, 100};
-                test_point->strength = 3;
+                test_point->strength = 4;
                 test_point->radius = 140;
                 test_point->pos = (v2){(c + 0.5) * tileSize, (r + 0.5) * tileSize};
                 add_game_object(test_point, LIGHT_POINT);
@@ -2243,8 +2243,8 @@ void load_level(char *file) {
             ceilingTileMap[r][c] = data[idx++];
             if (ceilingTileMap[r][c] == (int)P_CEILING_LIGHT) {
                 LightPoint *test_point = malloc(sizeof(LightPoint));
-                test_point->color = (SDL_Color){100, 200, 255};//{255, 200, 100};
-                test_point->strength = 3;
+                test_point->color = (SDL_Color){255, 170, 70};//{255, 200, 100};
+                test_point->strength = 8;
                 test_point->radius = 400;
                 test_point->pos = (v2){(c + 0.5) * tileSize, (r + 0.5) * tileSize};
                 add_game_object(test_point, LIGHT_POINT);
@@ -2840,10 +2840,13 @@ void bake_lights() {
    
     init_loading_screen();
 
-    const int CALC_RES = 4; // CHANGE
+    const int CALC_RES = BAKED_LIGHT_CALC_RESOLUTION; // CHANGE
 
     for (int r = 0; r < TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION; r++) {
         for (int c = 0; c < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; c++) {
+
+            if (r == TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION / 2) update_loading_progress(0.25);
+
             baked_light_grid[r][c] = (BakedLightColor){ambient_light, ambient_light, ambient_light};
 
             const int calc_tile_size = BAKED_LIGHT_RESOLUTION / CALC_RES;
@@ -2983,85 +2986,37 @@ void bake_lights() {
             baked_light_grid[r][c] = final;
         }
     }
+    update_loading_progress(0.75);
 
-    // int light_count = 0;
+    
+    int box_size_x = 5;
+    int box_size_y = 5;
 
-    // for (int i = 0; i < gameobjects->length; i++) {
-    //     obj *current = arraylist_get(gameobjects, i);
-	// 	if (current->type != LIGHT_POINT) continue;
-    //     light_count++;
-    // }
+    // box blur to make it nicer
+    for (int r = 0; r < TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION; r++) {
+        for (int c = 0; c < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; c++) {
+            BakedLightColor color_avg = {0, 0, 0};
+            int color_count = 0;
+            int top = max(r - box_size_y, 0);
+            int bottom = min(r + box_size_y, TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION - 1);
+            int left = max(c - box_size_x, 0);
+            int right = min(c + box_size_x, TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION - 1);
 
-    // if (light_count == 0) {
-    //     return;
-    // }
+            for (int br = top; br < bottom; br++) {
+                for (int bc = left; bc < right; bc++) {
+                    color_avg.r += baked_light_grid[br][bc].r;
+                    color_avg.g += baked_light_grid[br][bc].g;
+                    color_avg.b += baked_light_grid[br][bc].b;
+                    color_count++;
+                }
+            }
 
+            color_avg = (BakedLightColor){color_avg.r / color_count, color_avg.g / color_count, color_avg.b / color_count};
 
-
-    // int current_count = 0;
-
-    // for (int i = 0; i < gameobjects->length; i++) {
-    //     obj *current = arraylist_get(gameobjects, i);
-	// 	if (current->type != LIGHT_POINT) continue;
-    //     LightPoint *point = current->val;
-
-    //     v2 grid_pos = v2_mul(v2_div(point->pos, to_vec(tileSize)), to_vec(BAKED_LIGHT_RESOLUTION));
-    //     double scaled_radius = point->radius / tileSize * BAKED_LIGHT_RESOLUTION;
-
-    //     int row_lbound = max(grid_pos.y - scaled_radius, 0);
-    //     int row_rbound = min(grid_pos.y + scaled_radius, TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION);
-    //     int col_lbound = max(grid_pos.x - scaled_radius, 0);
-    //     int col_rbound = min(grid_pos.x + scaled_radius, TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION);
-
-    //     for (int r = row_lbound; r < row_rbound; r++) {
-    //         for (int c = col_lbound; c < col_rbound; c++) {
-
-    //             v2 current_pos = v2_mul(v2_div((v2){c, r}, to_vec(BAKED_LIGHT_RESOLUTION)), to_vec(tileSize));
-
-    //             double dist_to_point = v2_distance(point->pos, current_pos);
-
-    //             if (dist_to_point > point->radius) continue;
-
-    //             v2 dir = v2_div(v2_sub(point->pos, current_pos), to_vec(dist_to_point));
-
-	// 			RayCollisionData data = castRay(current_pos, dir);
-
-    //             BakedLightColor col = {0, 0, 0};
-
-	// 			if (!data.hit) {
-	// 				double s = clamp(lerp(1, 0, dist_to_point / point->radius), 0, 1);
-    //                 s *= s * s; // cubic
-    //                 double helper = s * point->strength;
-	// 				col.r += helper * (double)point->color.r / 255;
-	// 				col.g += helper * (double)point->color.g / 255;
-	// 				col.b += helper * (double)point->color.b / 255;
-	// 			} else {
-    //                 double dist_squared = v2_distance_squared(data.collpos, current_pos);
-
-    //                 if (dist_squared <= dist_to_point * dist_to_point) continue;
-
-    //                 double s = clamp(lerp(1, 0, dist_to_point / point->radius), 0, 1);
-    //                 s *= s * s; // cubic
-    //                 double helper = s * point->strength;
-    //                 col.r += helper * (double)point->color.r / 255;
-	// 				col.g += helper * (double)point->color.g / 255;
-	// 				col.b += helper * (double)point->color.b / 255;
-    //             }
-
-    //             baked_light_grid[r][c].r += col.r;
-    //             baked_light_grid[r][c].g += col.g;
-    //             baked_light_grid[r][c].b += col.b;
-
-
-                
-    //         }
-    //     }
-
-    //     current_count++;
-
-    //     double loading_progress = (double)current_count / light_count;
-    //     update_loading_progress(loading_progress);
-    // }
+            baked_light_grid[r][c] = color_avg;
+        }
+    }
+    update_loading_progress(1);
 
     remove_loading_screen();
 }
@@ -3456,10 +3411,10 @@ void exploder_explode(ExploderEnemy *exploder) {
             double explosion_radius_squared = exploder->explosion_radius * exploder->explosion_radius;
             double dist_squared = v2_distance_squared(enemy->entity.pos, exploder->enemy.entity.pos);
             if (dist_squared < explosion_radius_squared) {
-                enemyTakeDmg(enemy, 3);
                 double kb = lerp(exploder->explosion_kb, 0, inverse_lerp(0, explosion_radius_squared, dist_squared));
                 kb *= 2;
                 enemy->vel = v2_mul(v2_dir(exploder->enemy.entity.pos, enemy->entity.pos), to_vec(kb));
+                enemyTakeDmg(enemy, 3);
             }
             
         }
@@ -3468,9 +3423,9 @@ void exploder_explode(ExploderEnemy *exploder) {
     double explosion_radius_squared = exploder->explosion_radius * exploder->explosion_radius;
     double dist_squared = v2_distance_squared(player->pos, exploder->enemy.entity.pos);
     if (dist_squared < explosion_radius_squared) {
-        player_take_dmg(1);
         double kb = lerp(exploder->explosion_kb, 0, inverse_lerp(0, explosion_radius_squared, dist_squared));
         player->vel = v2_mul(v2_dir(exploder->enemy.entity.pos, player->pos), to_vec(kb));
+        player_take_dmg(1);
     }
 
 
