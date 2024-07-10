@@ -25,7 +25,7 @@ SDL_Window *window;
 #define NUM_FLOOR_THREADS 2
 
 #define BAKED_LIGHT_RESOLUTION 36
-#define BAKED_LIGHT_CALC_RESOLUTION 4
+#define BAKED_LIGHT_CALC_RESOLUTION 8
 
 #define PARTICLE_GRAVITY 1
 
@@ -825,7 +825,7 @@ void init() {  // #INIT
         load_level(levelToLoad);
 
     } else {
-        load_level("Levels/light_interpolation_test.hclevel");
+        load_level("Levels/default_level.hclevel");
     }
 
     skybox_texture = make_texture(renderer, "Textures/skybox.bmp");
@@ -2856,17 +2856,22 @@ void bake_lights() {
             int calc_row = ((int)(r * CALC_RES / BAKED_LIGHT_RESOLUTION)) * BAKED_LIGHT_RESOLUTION / CALC_RES;
             int calc_col = ((int)(c * CALC_RES / BAKED_LIGHT_RESOLUTION)) * BAKED_LIGHT_RESOLUTION / CALC_RES;
 
-            bool should_calculate = r == calc_row + calc_tile_size / 2 && c == calc_col + calc_tile_size / 2;
+            bool should_calculate = r == calc_row && c == calc_col;
             int tilemap_row = r / BAKED_LIGHT_RESOLUTION;
             int tilemap_col = c / BAKED_LIGHT_RESOLUTION;
 
-            cd_print(true, "calc row mid: %d, calc col mid: %d \n", calc_row + calc_tile_size / 2, calc_col + calc_tile_size / 2);
+            // cd_print(true, "calc row mid: %d, calc col mid: %d \n", calc_row + calc_tile_size / 2, calc_col + calc_tile_size / 2);
 
             bool is_in_wall = in_range(tilemap_row, 0, TILEMAP_HEIGHT - 1)
             && in_range(tilemap_col, 0, TILEMAP_WIDTH - 1)
             && levelTileMap[tilemap_row][tilemap_col] == P_WALL;
 
-            if (!should_calculate || is_in_wall) continue;
+            if (is_in_wall) continue;
+
+            if (!should_calculate) {
+                baked_light_grid[r][c] = baked_light_grid[calc_row][calc_col];
+                continue;
+            }
 
             //cd_print(false, "calc row: %d \n", r);
 
@@ -2913,84 +2918,82 @@ void bake_lights() {
                 baked_light_grid[r][c].b += col.b;
             }
         }
-    }
-
+    }  
     update_loading_progress(0.5);
     //return;// -----------------------------------------------------------------------------
 
-    for (int r = 0; r < TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION; r++) {
-        for (int c = 0; c < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; c++) {
+    // for (int r = 0; r < TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION; r++) {
+    //     for (int c = 0; c < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; c++) {
 
-            int tilemap_row = r / BAKED_LIGHT_RESOLUTION;
-            int tilemap_col = c / BAKED_LIGHT_RESOLUTION;
+    //         int tilemap_row = r / BAKED_LIGHT_RESOLUTION;
+    //         int tilemap_col = c / BAKED_LIGHT_RESOLUTION;
 
-            bool is_in_wall = in_range(tilemap_row, 0, TILEMAP_HEIGHT - 1)
-            && in_range(tilemap_col, 0, TILEMAP_WIDTH - 1)
-            && levelTileMap[tilemap_row][tilemap_col] == P_WALL;
+    //         bool is_in_wall = in_range(tilemap_row, 0, TILEMAP_HEIGHT - 1)
+    //         && in_range(tilemap_col, 0, TILEMAP_WIDTH - 1)
+    //         && levelTileMap[tilemap_row][tilemap_col] == P_WALL;
 
-            if (is_in_wall) continue;
+    //         if (is_in_wall) continue;
 
-            const int calc_tile_size = BAKED_LIGHT_RESOLUTION / CALC_RES; // correct
+    //         const int calc_tile_size = BAKED_LIGHT_RESOLUTION / CALC_RES; // correct
 
-            int calc_row = ((int)(r * CALC_RES / BAKED_LIGHT_RESOLUTION)) * BAKED_LIGHT_RESOLUTION / CALC_RES; // correct
-            int calc_col = ((int)(c * CALC_RES / BAKED_LIGHT_RESOLUTION)) * BAKED_LIGHT_RESOLUTION / CALC_RES;
+    //         int calc_row = ((int)(r * CALC_RES / BAKED_LIGHT_RESOLUTION)) * BAKED_LIGHT_RESOLUTION / CALC_RES; // correct
+    //         int calc_col = ((int)(c * CALC_RES / BAKED_LIGHT_RESOLUTION)) * BAKED_LIGHT_RESOLUTION / CALC_RES;
 
-            //cd_print(true, "calc row: %d \n", calc_row);
+    //         //cd_print(true, "calc row: %d \n", calc_row);
 
-            bool is_calc_pixel = calc_row + calc_tile_size / 2 == r && calc_col + calc_tile_size / 2 == c;
+    //         bool is_calc_pixel = calc_row + calc_tile_size / 2 == r && calc_col + calc_tile_size / 2 == c;
 
-            int up = calc_row - calc_tile_size + calc_tile_size / 2;
-            int down = calc_row + calc_tile_size / 2;
-            if (r > down) {
-                down += calc_tile_size;
-                up += calc_tile_size;
-            }
-            int left = calc_col - calc_tile_size + calc_tile_size / 2;
-            int right = calc_col + calc_tile_size / 2;
-            if (c > right) {
-                left += calc_tile_size;
-                right += calc_tile_size;
-            }
+    //         int up = calc_row - calc_tile_size + calc_tile_size / 2;
+    //         int down = calc_row + calc_tile_size / 2;
+    //         if (r > down) {
+    //             down += calc_tile_size;
+    //             up += calc_tile_size;
+    //         }
+    //         int left = calc_col - calc_tile_size + calc_tile_size / 2;
+    //         int right = calc_col + calc_tile_size / 2;
+    //         if (c > right) {
+    //             left += calc_tile_size;
+    //             right += calc_tile_size;
+    //         }
 
-            if (is_calc_pixel) {
-                //cd_print(false, "calc row: %d \n", calc_row + calc_tile_size);
-                continue;
-            }
+    //         if (is_calc_pixel) {
+    //             //cd_print(false, "calc row: %d \n", calc_row + calc_tile_size);
+    //             continue;
+    //         }
 
-            int upper_bound_rows = TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION;
-            int upper_bound_cols = TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION;
+    //         int upper_bound_rows = TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION;
+    //         int upper_bound_cols = TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION;
 
-            double x_idx = inverse_lerp(left, right, c);
-            double y_idx = inverse_lerp(up, down, r);
+    //         double x_idx = inverse_lerp(left, right, c);
+    //         double y_idx = inverse_lerp(up, down, r);
 
-            BakedLightColor dark = {ambient_light, ambient_light, ambient_light};
+    //         BakedLightColor dark = {ambient_light, ambient_light, ambient_light};
 
-            BakedLightColor up_left;
-            if (up > 0 && left > 0) up_left = baked_light_grid[up][left];
-            else up_left = dark;
-            BakedLightColor up_right;
-            if (up > 0 && right < upper_bound_cols) up_right = baked_light_grid[up][right];
-            else up_right = dark;
-            BakedLightColor down_left;
-            if (down < upper_bound_rows && left > 0) down_left = baked_light_grid[down][left];
-            else down_left = dark;
-            BakedLightColor down_right;
-            if (down < upper_bound_rows && right < upper_bound_cols) down_right = baked_light_grid[down][right];
-            else down_right = dark;
+    //         BakedLightColor up_left;
+    //         if (up > 0 && left > 0) up_left = baked_light_grid[up][left];
+    //         else up_left = dark;
+    //         BakedLightColor up_right;
+    //         if (up > 0 && right < upper_bound_cols) up_right = baked_light_grid[up][right];
+    //         else up_right = dark;
+    //         BakedLightColor down_left;
+    //         if (down < upper_bound_rows && left > 0) down_left = baked_light_grid[down][left];
+    //         else down_left = dark;
+    //         BakedLightColor down_right;
+    //         if (down < upper_bound_rows && right < upper_bound_cols) down_right = baked_light_grid[down][right];
+    //         else down_right = dark;
 
-            BakedLightColor lerp1 = _lerp_baked_light_color(up_left, up_right, x_idx);
-            BakedLightColor lerp2 = _lerp_baked_light_color(down_left, down_right, x_idx);
+    //         BakedLightColor lerp1 = _lerp_baked_light_color(up_left, up_right, 0.5);
+    //         BakedLightColor lerp2 = _lerp_baked_light_color(down_left, down_right, 0.5);
 
-            BakedLightColor final = _lerp_baked_light_color(lerp1, lerp2, y_idx);
+    //         BakedLightColor final = _lerp_baked_light_color(lerp1, lerp2, 0.5);
 
-            baked_light_grid[r][c] = final;
-        }
-    }
+    //         baked_light_grid[r][c] = final;
+    //     }
+    // }
     update_loading_progress(0.75);
 
-    
-    int box_size_x = 5;
-    int box_size_y = 5;
+    int box_size_x = 10;
+    int box_size_y = 10;
 
     // box blur to make it nicer
     for (int r = 0; r < TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION; r++) {
