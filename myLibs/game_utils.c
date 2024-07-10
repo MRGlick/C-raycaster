@@ -183,7 +183,7 @@ v2 get_texture_size(SDL_Texture *texture) {
 
 void cd_print(bool activate_cooldown, const char *text, ...) {
     u64 now  = SDL_GetTicks64();
-    if (mili_to_sec(now - last_print_time) < 0.1) return;
+    if (mili_to_sec(now - last_print_time) < 0.01) return;
     if (activate_cooldown) last_print_time = now;
 
     va_list args;
