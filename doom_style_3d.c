@@ -25,7 +25,7 @@ SDL_Window *window;
 #define NUM_FLOOR_THREADS 2
 
 #define BAKED_LIGHT_RESOLUTION 36
-#define BAKED_LIGHT_CALC_RESOLUTION 8
+#define BAKED_LIGHT_CALC_RESOLUTION 4
 
 #define PARTICLE_GRAVITY 1
 
@@ -825,7 +825,7 @@ void init() {  // #INIT
         load_level(levelToLoad);
 
     } else {
-        load_level("Levels/default_level.hclevel");
+        load_level("Levels/light_interpolation_test.hclevel");
     }
 
     skybox_texture = make_texture(renderer, "Textures/skybox.bmp");
@@ -2840,18 +2840,20 @@ void bake_lights() {
    
     init_loading_screen();
 
-    const int CALC_RES = BAKED_LIGHT_CALC_RESOLUTION; // CHANGE
+    const int CALC_RES = BAKED_LIGHT_CALC_RESOLUTION; // directly affects performance!
 
     for (int r = 0; r < TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION; r++) {
         for (int c = 0; c < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; c++) {
 
-            if (r == TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION / 2) update_loading_progress(0.25);
+            if (r % 100 == 0 && c == 0) {
+                double max_progress = 0.5;
+                double progress = (double)r / (TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION);
+                update_loading_progress(progress * max_progress);
+            }
 
             baked_light_grid[r][c] = (BakedLightColor){ambient_light, ambient_light, ambient_light};
 
             const int calc_tile_size = BAKED_LIGHT_RESOLUTION / CALC_RES;
-
-            //cd_print(true, "%.2f \n", (double)r * CALC_RES / BAKED_LIGHT_RESOLUTION);
 
             int calc_row = ((int)(r * CALC_RES / BAKED_LIGHT_RESOLUTION)) * BAKED_LIGHT_RESOLUTION / CALC_RES;
             int calc_col = ((int)(c * CALC_RES / BAKED_LIGHT_RESOLUTION)) * BAKED_LIGHT_RESOLUTION / CALC_RES;
@@ -2859,8 +2861,6 @@ void bake_lights() {
             bool should_calculate = r == calc_row && c == calc_col;
             int tilemap_row = r / BAKED_LIGHT_RESOLUTION;
             int tilemap_col = c / BAKED_LIGHT_RESOLUTION;
-
-            // cd_print(true, "calc row mid: %d, calc col mid: %d \n", calc_row + calc_tile_size / 2, calc_col + calc_tile_size / 2);
 
             bool is_in_wall = in_range(tilemap_row, 0, TILEMAP_HEIGHT - 1)
             && in_range(tilemap_col, 0, TILEMAP_WIDTH - 1)
@@ -2873,8 +2873,6 @@ void bake_lights() {
                 continue;
             }
 
-            //cd_print(false, "calc row: %d \n", r);
-
             for (int i = 0; i < gameobjects->length; i++) {
                 obj *current = arraylist_get(gameobjects, i);
                 if (current->type != LIGHT_POINT) continue;
@@ -2882,6 +2880,7 @@ void bake_lights() {
                 LightPoint *point = current->val;
 
                 v2 current_pos = v2_mul(v2_div((v2){c, r}, to_vec(BAKED_LIGHT_RESOLUTION)), to_vec(tileSize));
+                if (abs(current_pos.x - point->pos.x) > point->radius || abs(current_pos.y - point->pos.y) > point->radius) continue;
 
                 double dist_to_point = v2_distance(point->pos, current_pos);
 
@@ -2920,103 +2919,57 @@ void bake_lights() {
         }
     }  
     update_loading_progress(0.5);
-    //return;// -----------------------------------------------------------------------------
 
-    // for (int r = 0; r < TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION; r++) {
-    //     for (int c = 0; c < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; c++) {
-
-    //         int tilemap_row = r / BAKED_LIGHT_RESOLUTION;
-    //         int tilemap_col = c / BAKED_LIGHT_RESOLUTION;
-
-    //         bool is_in_wall = in_range(tilemap_row, 0, TILEMAP_HEIGHT - 1)
-    //         && in_range(tilemap_col, 0, TILEMAP_WIDTH - 1)
-    //         && levelTileMap[tilemap_row][tilemap_col] == P_WALL;
-
-    //         if (is_in_wall) continue;
-
-    //         const int calc_tile_size = BAKED_LIGHT_RESOLUTION / CALC_RES; // correct
-
-    //         int calc_row = ((int)(r * CALC_RES / BAKED_LIGHT_RESOLUTION)) * BAKED_LIGHT_RESOLUTION / CALC_RES; // correct
-    //         int calc_col = ((int)(c * CALC_RES / BAKED_LIGHT_RESOLUTION)) * BAKED_LIGHT_RESOLUTION / CALC_RES;
-
-    //         //cd_print(true, "calc row: %d \n", calc_row);
-
-    //         bool is_calc_pixel = calc_row + calc_tile_size / 2 == r && calc_col + calc_tile_size / 2 == c;
-
-    //         int up = calc_row - calc_tile_size + calc_tile_size / 2;
-    //         int down = calc_row + calc_tile_size / 2;
-    //         if (r > down) {
-    //             down += calc_tile_size;
-    //             up += calc_tile_size;
-    //         }
-    //         int left = calc_col - calc_tile_size + calc_tile_size / 2;
-    //         int right = calc_col + calc_tile_size / 2;
-    //         if (c > right) {
-    //             left += calc_tile_size;
-    //             right += calc_tile_size;
-    //         }
-
-    //         if (is_calc_pixel) {
-    //             //cd_print(false, "calc row: %d \n", calc_row + calc_tile_size);
-    //             continue;
-    //         }
-
-    //         int upper_bound_rows = TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION;
-    //         int upper_bound_cols = TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION;
-
-    //         double x_idx = inverse_lerp(left, right, c);
-    //         double y_idx = inverse_lerp(up, down, r);
-
-    //         BakedLightColor dark = {ambient_light, ambient_light, ambient_light};
-
-    //         BakedLightColor up_left;
-    //         if (up > 0 && left > 0) up_left = baked_light_grid[up][left];
-    //         else up_left = dark;
-    //         BakedLightColor up_right;
-    //         if (up > 0 && right < upper_bound_cols) up_right = baked_light_grid[up][right];
-    //         else up_right = dark;
-    //         BakedLightColor down_left;
-    //         if (down < upper_bound_rows && left > 0) down_left = baked_light_grid[down][left];
-    //         else down_left = dark;
-    //         BakedLightColor down_right;
-    //         if (down < upper_bound_rows && right < upper_bound_cols) down_right = baked_light_grid[down][right];
-    //         else down_right = dark;
-
-    //         BakedLightColor lerp1 = _lerp_baked_light_color(up_left, up_right, 0.5);
-    //         BakedLightColor lerp2 = _lerp_baked_light_color(down_left, down_right, 0.5);
-
-    //         BakedLightColor final = _lerp_baked_light_color(lerp1, lerp2, 0.5);
-
-    //         baked_light_grid[r][c] = final;
-    //     }
-    // }
-    update_loading_progress(0.75);
-
-    int box_size_x = 10;
+    int box_size_x = 10; // slightly affects performance unless you go completely nuts
     int box_size_y = 10;
 
     // box blur to make it nicer
+
     for (int r = 0; r < TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION; r++) {
+
+        BakedLightColor current_sum = {-1, -1, -1};
+
         for (int c = 0; c < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; c++) {
-            BakedLightColor color_avg = {0, 0, 0};
-            int color_count = 0;
+
+            if (r % 100 == 0 && c == 0) {
+                double max_progress = 0.5;
+                double progress = (double)r / (TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION);
+                update_loading_progress(0.5 + progress * max_progress);
+            }
+
             int top = max(r - box_size_y, 0);
             int bottom = min(r + box_size_y, TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION - 1);
             int left = max(c - box_size_x, 0);
             int right = min(c + box_size_x, TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION - 1);
+            int color_count = (bottom - top) * (right - left);
+            
+            if (current_sum.r == -1) {
 
-            for (int br = top; br < bottom; br++) {
-                for (int bc = left; bc < right; bc++) {
-                    color_avg.r += baked_light_grid[br][bc].r;
-                    color_avg.g += baked_light_grid[br][bc].g;
-                    color_avg.b += baked_light_grid[br][bc].b;
-                    color_count++;
+                current_sum.r = 0;
+                current_sum.g = 0;
+                current_sum.b = 0;
+
+                for (int br = top; br < bottom; br++) {
+                    for (int bc = left; bc < right; bc++) {
+                        current_sum.r += baked_light_grid[br][bc].r;
+                        current_sum.g += baked_light_grid[br][bc].g;
+                        current_sum.b += baked_light_grid[br][bc].b;
+                    }
+                }
+
+            } else {
+                for (int br = top; br < bottom; br++) {
+                    current_sum.r -= baked_light_grid[br][left].r;
+                    current_sum.g -= baked_light_grid[br][left].g;
+                    current_sum.b -= baked_light_grid[br][left].b;
+                    current_sum.r += baked_light_grid[br][right].r;
+                    current_sum.g += baked_light_grid[br][right].g;
+                    current_sum.b += baked_light_grid[br][right].b;
                 }
             }
 
-            color_avg = (BakedLightColor){color_avg.r / color_count, color_avg.g / color_count, color_avg.b / color_count};
-
-            baked_light_grid[r][c] = color_avg;
+            
+            baked_light_grid[r][c] = (BakedLightColor){current_sum.r / color_count, current_sum.g / color_count, current_sum.b / color_count};
         }
     }
     update_loading_progress(1);
