@@ -25,7 +25,7 @@ SDL_Window *window;
 #define NUM_FLOOR_THREADS 2
 
 #define BAKED_LIGHT_RESOLUTION 36
-#define BAKED_LIGHT_CALC_RESOLUTION 4
+#define BAKED_LIGHT_CALC_RESOLUTION 8
 
 #define PARTICLE_GRAVITY 1
 
@@ -1088,7 +1088,7 @@ void renderDebug() {  // #DEBUG
     
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
-    int resolution = 2;
+    int resolution = 8;
 
     for (int row = 0; row < TILEMAP_HEIGHT * resolution; row++) {
         for (int col = 0; col < TILEMAP_WIDTH * resolution; col++) {
@@ -1239,7 +1239,16 @@ int calcFloorAndCeiling_Threaded(void *data) {
                 in_range(tilemap_row, 0, TILEMAP_HEIGHT - 1)
                 && in_range(tilemap_col, 0, TILEMAP_WIDTH - 1)
                 && levelTileMap[tilemap_row][tilemap_col] == P_WALL
-            ) continue;
+            ) {
+                
+                int floor_pixel_idx = row * RESOLUTION_X + col;
+
+                int floor_pixel_i = 0x080808ff;
+
+                ((int *)*pixels)[floor_pixel_idx] = floor_pixel_i;
+
+                continue;
+            }
 
             if (is_ceiling) {
                 ((int *)*pixels)[row * RESOLUTION_X + col] = 0x00000000;
@@ -1304,7 +1313,6 @@ int calcFloorAndCeiling_Threaded(void *data) {
             floor_row = clamp(floor_row, 0, RESOLUTION_Y - 1);
             floor_col = clamp(floor_col, 0, WINDOW_WIDTH - 1);
 
-            int floor_pixel_idx = floor_row * RESOLUTION_X + floor_col;
 
             Pixel floor_pixel = TextureData_get_pixel(
                 textureData,
@@ -1331,6 +1339,7 @@ int calcFloorAndCeiling_Threaded(void *data) {
 			floor_pixel.g = rgb[1];
 			floor_pixel.b = rgb[2];
             
+            int floor_pixel_idx = floor_row * RESOLUTION_X + floor_col;
 
             int floor_pixel_i = floor_pixel.r << 24 | floor_pixel.g << 16 | floor_pixel.b << 8 | floor_pixel.a;
 
@@ -2842,23 +2851,19 @@ void bake_lights() {
 
     const int CALC_RES = BAKED_LIGHT_CALC_RESOLUTION; // directly affects performance!
 
+    
     for (int r = 0; r < TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION; r++) {
         for (int c = 0; c < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; c++) {
 
             if (r % 100 == 0 && c == 0) {
-                double max_progress = 0.5;
+                double max_progress = 0.33;
                 double progress = (double)r / (TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION);
                 update_loading_progress(progress * max_progress);
             }
 
             baked_light_grid[r][c] = (BakedLightColor){ambient_light, ambient_light, ambient_light};
 
-            const int calc_tile_size = BAKED_LIGHT_RESOLUTION / CALC_RES;
-
-            int calc_row = ((int)(r * CALC_RES / BAKED_LIGHT_RESOLUTION)) * BAKED_LIGHT_RESOLUTION / CALC_RES;
-            int calc_col = ((int)(c * CALC_RES / BAKED_LIGHT_RESOLUTION)) * BAKED_LIGHT_RESOLUTION / CALC_RES;
-
-            bool should_calculate = r == calc_row && c == calc_col;
+            
             int tilemap_row = r / BAKED_LIGHT_RESOLUTION;
             int tilemap_col = c / BAKED_LIGHT_RESOLUTION;
 
@@ -2868,10 +2873,19 @@ void bake_lights() {
 
             if (is_in_wall) continue;
 
+            int calc_row = ((int)(r * CALC_RES / BAKED_LIGHT_RESOLUTION)) * BAKED_LIGHT_RESOLUTION / CALC_RES;
+            int calc_col = ((int)(c * CALC_RES / BAKED_LIGHT_RESOLUTION)) * BAKED_LIGHT_RESOLUTION / CALC_RES;
+
+            bool should_calculate = r == calc_row && c == calc_col;
+
             if (!should_calculate) {
                 baked_light_grid[r][c] = baked_light_grid[calc_row][calc_col];
                 continue;
             }
+
+            const int calc_tile_size = BAKED_LIGHT_RESOLUTION / CALC_RES;
+
+            
 
             for (int i = 0; i < gameobjects->length; i++) {
                 obj *current = arraylist_get(gameobjects, i);
@@ -2918,60 +2932,95 @@ void bake_lights() {
             }
         }
     }  
-    update_loading_progress(0.5);
+    
 
-    int box_size_x = 10; // slightly affects performance unless you go completely nuts
-    int box_size_y = 10;
+    int box_size_x = 20; // doesn't affect performance anymore! go crazy
+    int box_size_y = 20;
 
-    // box blur to make it nicer
+    // first apply horizontal blur without filling calc pixels, then vertical blur with filling calc pixels and we're golden
+
+    // horizontal
 
     for (int r = 0; r < TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION; r++) {
-
+        
         BakedLightColor current_sum = {-1, -1, -1};
-
+        
         for (int c = 0; c < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; c++) {
 
-            if (r % 100 == 0 && c == 0) {
-                double max_progress = 0.5;
-                double progress = (double)r / (TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION);
-                update_loading_progress(0.5 + progress * max_progress);
-            }
+            int calc_row = ((int)(r * CALC_RES / BAKED_LIGHT_RESOLUTION)) * BAKED_LIGHT_RESOLUTION / CALC_RES;
+            int calc_col = ((int)(c * CALC_RES / BAKED_LIGHT_RESOLUTION)) * BAKED_LIGHT_RESOLUTION / CALC_RES;
 
-            int top = max(r - box_size_y, 0);
-            int bottom = min(r + box_size_y, TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION - 1);
-            int left = max(c - box_size_x, 0);
-            int right = min(c + box_size_x, TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION - 1);
-            int color_count = (bottom - top) * (right - left);
-            
+            if (c == calc_col && r == calc_row) continue;
+
+            int left = max(c - box_size_x / 2, 0);
+            int right = min(c + box_size_x / 2, TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION - 1);
+
+            int count = right - left;
+
             if (current_sum.r == -1) {
 
-                current_sum.r = 0;
-                current_sum.g = 0;
-                current_sum.b = 0;
+                current_sum = (BakedLightColor){0, 0, 0};
 
-                for (int br = top; br < bottom; br++) {
-                    for (int bc = left; bc < right; bc++) {
-                        current_sum.r += baked_light_grid[br][bc].r;
-                        current_sum.g += baked_light_grid[br][bc].g;
-                        current_sum.b += baked_light_grid[br][bc].b;
-                    }
-                }
+                for (int bc = left; bc < right; bc++) {
+                    current_sum = (BakedLightColor) {
+                        current_sum.r + baked_light_grid[r][bc].r,
+                        current_sum.g + baked_light_grid[r][bc].g,
+                        current_sum.b + baked_light_grid[r][bc].b
+                    };
+                }   
 
             } else {
-                for (int br = top; br < bottom; br++) {
-                    current_sum.r -= baked_light_grid[br][left].r;
-                    current_sum.g -= baked_light_grid[br][left].g;
-                    current_sum.b -= baked_light_grid[br][left].b;
-                    current_sum.r += baked_light_grid[br][right].r;
-                    current_sum.g += baked_light_grid[br][right].g;
-                    current_sum.b += baked_light_grid[br][right].b;
-                }
+                current_sum = (BakedLightColor) {
+                    current_sum.r - baked_light_grid[r][left - 1].r + baked_light_grid[r][right].r,
+                    current_sum.g - baked_light_grid[r][left - 1].g + baked_light_grid[r][right].g,
+                    current_sum.b - baked_light_grid[r][left - 1].b + baked_light_grid[r][right].b
+                };
             }
 
-            
-            baked_light_grid[r][c] = (BakedLightColor){current_sum.r / color_count, current_sum.g / color_count, current_sum.b / color_count};
+            baked_light_grid[r][c] = (BakedLightColor){current_sum.r / count, current_sum.g / count, current_sum.b / count};
+
         }
     }
+    update_loading_progress(0.66);
+
+
+    // vertical
+
+    for (int c = 0; c < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; c++) {
+        
+        BakedLightColor current_sum = {-1, -1, -1};
+        
+        for (int r = 0; r < TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION; r++) {
+
+            int top = max(0, r - box_size_y / 2);
+            int bottom = min(TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION - 1, r + box_size_y / 2);
+
+            int count = bottom - top;
+
+            if (current_sum.r == -1) {
+
+                current_sum = (BakedLightColor){0, 0, 0};
+
+                for (int br = top; br < bottom; br++) {
+                    current_sum = (BakedLightColor) {
+                        current_sum.r + baked_light_grid[br][c].r,
+                        current_sum.g + baked_light_grid[br][c].g,
+                        current_sum.b + baked_light_grid[br][c].b
+                    };
+                }
+            } else {
+                current_sum = (BakedLightColor) {
+                    current_sum.r - baked_light_grid[top][c].r + baked_light_grid[bottom][c].r,
+                    current_sum.g - baked_light_grid[top][c].g + baked_light_grid[bottom][c].g,
+                    current_sum.b - baked_light_grid[top][c].b + baked_light_grid[bottom][c].b
+                };
+            }
+
+            baked_light_grid[r][c] = (BakedLightColor) {current_sum.r / count, current_sum.g / count, current_sum.b / count};
+
+        }
+    }
+
     update_loading_progress(1);
 
     remove_loading_screen();
