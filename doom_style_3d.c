@@ -11,8 +11,8 @@ SDL_Window *window;
 #define TPS 120
 #define WINDOW_WIDTH 1024
 #define WINDOW_HEIGHT 580
-#define RESOLUTION_X 360
-#define RESOLUTION_Y 180
+#define RESOLUTION_X 720
+#define RESOLUTION_Y 360
 #define X_SENSITIVITY 0.1
 #define Y_SENSITIVITY 0.8
 #define COLOR_BLACK \
@@ -22,7 +22,7 @@ SDL_Window *window;
 #define RENDER_DISTANCE 350
 #define WALL_HEIGHT 30
 #define NUM_WALL_THREADS 1
-#define NUM_FLOOR_THREADS 2
+#define NUM_FLOOR_THREADS 8
 
 #define BAKED_LIGHT_RESOLUTION 36
 #define BAKED_LIGHT_CALC_RESOLUTION 8
@@ -825,7 +825,7 @@ void init() {  // #INIT
         load_level(levelToLoad);
 
     } else {
-        load_level("Levels/light_interpolation_test.hclevel");
+        load_level("Levels/default_level.hclevel");
     }
 
     skybox_texture = make_texture(renderer, "Textures/skybox.bmp");

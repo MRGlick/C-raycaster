@@ -14,6 +14,9 @@ typedef struct arraylist {
     size_t size, length;
 } arraylist;
 
+#define arraylist_get_val(a, i) arraylist_get(a, i)->val
+#define arraylist_get_type(a, i) arraylist_get(a, i)->type
+
 
 arraylist *create_arraylist(size_t size);
 
