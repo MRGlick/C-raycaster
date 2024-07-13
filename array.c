@@ -29,12 +29,14 @@ void * _create_array(int item_size, int size) {
 } 
 
 int array_length(void *array) {
+    if (array == NULL) return -1;
     ArrayHeader *header = array_header(array);
 
     return header->length;
 }
 
 int array_size(void *array) {
+    if (array == NULL) return -1;
     ArrayHeader *header = array_header(array);
 
     return header->size;

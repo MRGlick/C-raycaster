@@ -9,7 +9,7 @@ SDL_Window *window;
 
 // #DEFINITIONS
 
-#define TPS 120
+#define TPS 300
 #define WINDOW_WIDTH 1024
 #define WINDOW_HEIGHT 580
 #define RESOLUTION_X 360
@@ -974,7 +974,7 @@ void playerTick(double delta) {
         player->handOffset.y = lerp(player->handOffset.y, 0, 0.1);
     }
 
-    player->vel = v2_lerp(player->vel, v2_add(v2_mul(move_dir, to_vec(keyVec.x)), v2_mul(move_dir_rotated, to_vec(keyVec.y))), 0.15);
+    player->vel = v2_lerp(player->vel, v2_add(v2_mul(move_dir, to_vec(keyVec.x)), v2_mul(move_dir_rotated, to_vec(keyVec.y))), delta * 10);
 
     CollisionData player_coldata = getCircleTileMapCollision(*player->collider);
     if (player_coldata.didCollide) {
@@ -1383,124 +1383,6 @@ void calcFloorAndCeiling() {
     }
     
     SDL_UnlockTexture(floorAndCeiling);
-    // TextureData *textureData = floorTexture;
-    // v2 textureSize = (v2){textureData->w, textureData->h};
-
-    // for (int row = 0; row < RESOLUTION_Y; row++) {
-
-    //     int screenY = row * WINDOW_HEIGHT / RESOLUTION_Y;
-
-    //     bool is_ceiling = screenY + player->pitch < WINDOW_HEIGHT / 2;
-
-    //     v2 left = screenToFloor((v2){0, screenY + player->pitch});
-    //     v2 right = screenToFloor((v2){RESOLUTION_X - 1, screenY + player->pitch});
-
-    //     for (int col = 0; col < RESOLUTION_X; col++) {
-
-    //         v2 point = v2_lerp(left, right, (double)col / RESOLUTION_X);
-
-    //         int tilemap_row = point.y / tileSize;
-    //         int tilemap_col = point.x / tileSize;
-    //         if (
-    //             in_range(tilemap_row, 0, TILEMAP_HEIGHT - 1)
-    //             && in_range(tilemap_col, 0, TILEMAP_WIDTH - 1)
-    //             && levelTileMap[tilemap_row][tilemap_col] == P_WALL
-    //         ) continue;
-
-    //         if (is_ceiling) {
-    //             ((int *)pixels)[row * RESOLUTION_X + col] = 0x00000000;
-    //         } else {
-    //             ((int *)pixels)[row * RESOLUTION_X + col] = 0x000000ff;
-    //         }
-
-            
-
-    //         int screenX = col * WINDOW_WIDTH / RESOLUTION_X;
-
-
-
-
-            
-    //         double light = 0.8;
-
-    //         int offsetted_row = row + (player->pitch / WINDOW_HEIGHT * RESOLUTION_Y);
-
-    //         if (in_range(offsetted_row, RESOLUTION_Y/4, RESOLUTION_Y/2)) {
-    //             light = (1 - inverse_lerp(RESOLUTION_Y/4, RESOLUTION_Y/2, offsetted_row)) * 0.8;
-    //         } else if (in_range(offsetted_row, RESOLUTION_Y/2, RESOLUTION_Y * 3/4)) {
-    //             light = inverse_lerp(RESOLUTION_Y/2, RESOLUTION_Y * 3/4, offsetted_row) * 0.8;
-    //         }
-
-    //         int color = light * 255;
-
-    //         int tileRow = point.y / tileSize;
-    //         int tileCol = point.x / tileSize;
-
-    //         int floorTile = -1;
-    //         int ceilingTile = -1;
-
-    //         if (in_range(tileRow, 0, TILEMAP_HEIGHT - 1) && in_range(tileCol, 0, TILEMAP_WIDTH - 1)) {
-    //             floorTile = floorTileMap[tileRow][tileCol];
-    //             ceilingTile = ceilingTileMap[tileRow][tileCol];
-    //         }
-
-    //         bool has_ceiling = ceilingTile != -1;
-
-    //         if (is_ceiling && !has_ceiling) {
-    //             continue;
-    //         } else if (has_ceiling && is_ceiling) {
-    //             if (ceilingTile == P_CEILING) {
-    //                 textureData = ceilingTexture;
-    //             } else if (ceilingTile == P_CEILING_LIGHT) {
-    //                 textureData = ceilingLightTexture;
-    //             }
-    //         } else { // its a floor
-    //             if (floorTile == P_FLOOR) {
-    //                 textureData = floorTexture2;
-    //             } else if (floorTile == P_FLOOR_LIGHT) {
-    //                 textureData = floorLightTexture;
-    //             } else {
-    //                 textureData = floorTexture;
-    //             }
-    //         }
-
-    //         int floor_row = row;
-    //         int floor_col = col;
-
-    //         floor_row = clamp(floor_row, 0, RESOLUTION_Y - 1);
-    //         floor_col = clamp(floor_col, 0, WINDOW_WIDTH - 1);
-
-    //         int floor_pixel_idx = floor_row * RESOLUTION_X + floor_col;
-
-    //         Pixel floor_pixel = TextureData_get_pixel(
-    //             textureData,
-    //             loop_clamp(point.x / tileSize * 36, 0, 36), 
-    //             loop_clamp(point.y / tileSize * 36, 0, 36)
-    //         );
-
-    //         floor_pixel.r *= light;
-    //         floor_pixel.g *= light;
-    //         floor_pixel.b *= light;
-
-	// 		BakedLightColor baked_light_color = get_light_color_by_pos(point);
-
-    //         int rgb[3] = {
-    //             SDL_clamp(floor_pixel.r * baked_light_color.r, 0, 255),
-    //             SDL_clamp(floor_pixel.g * baked_light_color.g, 0, 255),
-    //             SDL_clamp(floor_pixel.b * baked_light_color.b, 0, 255)
-    //         };
-
-	// 		floor_pixel.r = rgb[0];
-	// 		floor_pixel.g = rgb[1];
-	// 		floor_pixel.b = rgb[2];
-            
-
-    //         int floor_pixel_i = floor_pixel.r << 24 | floor_pixel.g << 16 | floor_pixel.b << 8 | floor_pixel.a;
-
-    //         ((int *)pixels)[floor_pixel_idx] = floor_pixel_i;
-
-    //     }
-    // }
 
 }
 
@@ -2622,6 +2504,12 @@ void bulletTick(EnemyBullet *bullet, double delta) {
         enemy_bullet_destroy(bullet);
         player_take_dmg(1);
         return;
+    }
+
+    if (bullet->dirSprite != NULL) {
+        dSpriteTick(bullet->dirSprite, bullet->entity.pos, delta);
+    } else {
+        spriteTick(bullet->entity.sprite, delta);
     }
 }
 

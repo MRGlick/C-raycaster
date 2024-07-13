@@ -48,7 +48,12 @@ UIComponent UIComponent_new(v2 pos, v2 size) {
 }
 
 bool UIComponent_should_render(UIComponent *component) {
-    return component->visible;
+    
+    if (component->parent == NULL)
+        return component->visible;
+
+    return component->visible && UIComponent_should_render(component->parent);
+
 }
 
 void UILabel_update(SDL_Renderer *renderer, UIComponent *component) {
@@ -62,6 +67,12 @@ void UILabel_update(SDL_Renderer *renderer, UIComponent *component) {
     SDL_FreeSurface(surface);
 
     label->component.texture = texture;
+
+    if (component->children != NULL) {
+        for (int i = 0; i < array_length(component->children); i++) {
+            component->children[i]->update(renderer, component->children[i]);
+        }
+    }
 }
 
 void UIComponent_render(SDL_Renderer *renderer, UIComponent *component) {
