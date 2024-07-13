@@ -1,6 +1,7 @@
 
 #include "game_utils.c"
 #include "globals.h"
+#include "ui.c"
 
 
 SDL_Renderer *renderer;
@@ -11,8 +12,8 @@ SDL_Window *window;
 #define TPS 120
 #define WINDOW_WIDTH 1024
 #define WINDOW_HEIGHT 580
-#define RESOLUTION_X 720
-#define RESOLUTION_Y 360
+#define RESOLUTION_X 360
+#define RESOLUTION_Y 180
 #define X_SENSITIVITY 0.1
 #define Y_SENSITIVITY 0.8
 #define COLOR_BLACK \
@@ -22,7 +23,7 @@ SDL_Window *window;
 #define RENDER_DISTANCE 350
 #define WALL_HEIGHT 30
 #define NUM_WALL_THREADS 1
-#define NUM_FLOOR_THREADS 8
+#define NUM_FLOOR_THREADS 2
 
 #define BAKED_LIGHT_RESOLUTION 36
 #define BAKED_LIGHT_CALC_RESOLUTION 8
@@ -295,7 +296,7 @@ typedef struct EnemyBullet {
 } EnemyBullet;
 
 typedef struct BakedLightColor {
-    double r, g, b;
+    float r, g, b;
 } BakedLightColor;
 
 
@@ -715,6 +716,8 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
 }
 
 void init() {  // #INIT
+
+    init_ui();
 
     rapidfire_sound = create_sound("Sounds/shotgun_ability.wav");
 

@@ -1,3 +1,7 @@
+#ifndef VEC2
+#define VEC2
+
+
 #include <math.h>
 #include <stdio.h>
 
@@ -245,3 +249,5 @@ v2 v2_get_random_dir() {
 }
 
 // #END
+
+#endif // VEC2

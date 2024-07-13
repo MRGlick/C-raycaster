@@ -1,3 +1,8 @@
+
+#ifndef ARRAY_C
+#define ARRAY_C
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,9 +12,6 @@ typedef struct ArrayHeader {
     int length;
     int item_size;
 } ArrayHeader;
-
-
-
 
 ArrayHeader *array_header(void *array) {
     return ((ArrayHeader *)array - 1);
@@ -92,19 +94,5 @@ void _array_ensure_capacity(void **array) {
     array_header(array)->length++; \
 } while (0)
 
-int main() {
-    int *arr = array(int, 2);
-
-    array_append(arr, 3);
-    array_append(arr, 2);
-    array_append(arr, 1);
-    array_append(arr, 0);
-
-    array_remove(arr, 2);
-    array_remove(arr, 1);
-
-    for (int i = 0; i < array_length(arr); i++) {
-        printf("%d \n", arr[i]);
-    }
-    printf("Array size: %d \n", array_header(arr)->size);
-}
+// #END
+#endif // ARRAY_C

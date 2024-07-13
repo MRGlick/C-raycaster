@@ -14,7 +14,8 @@
                 "-ImyLibs/include/SDL2",
                 "-LmyLibs/lib",
                 "-lSDL2main",
-                "-lSDL2"
+                "-lSDL2",
+                "-lSDL2_ttf"
             ],
             "options": {
                 "cwd": "${fileDirname}",
