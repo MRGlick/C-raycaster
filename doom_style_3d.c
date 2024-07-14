@@ -365,8 +365,6 @@ void exploder_explode(ExploderEnemy *exploder);
 
 void dir_sprite_play_anim(DirectionalSprite *dir_sprite, int anim);
 
-void dir_sprite_play_anim(DirectionalSprite *dir_sprite, int anim);
-
 void exploder_tick(Enemy *enemy, double delta);
 
 bool is_entity_type(int type);
@@ -938,8 +936,6 @@ v2 get_key_vector(SDL_Keycode k1, SDL_Keycode k2, SDL_Keycode k3, SDL_Keycode k4
 
 void playerTick(double delta) {
 
-    // cd_print(true, "pos: %.2f, %.2f \n", player->pos.x, player->pos.y);
-
     double speed_multiplier = 1;
 
     player->collider->pos = player->pos;
@@ -1218,8 +1214,6 @@ int calcFloorAndCeiling_Threaded(void *data) {
     int start_row = data_struct->start_row;
     int end_row = data_struct->end_row;
 
-    printf("Start row: %d \n", start_row);
-
     TextureData *textureData = floorTexture;
     v2 textureSize = (v2){textureData->w, textureData->h};
 
@@ -1425,7 +1419,7 @@ void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height, bool af
     if (affected_by_light) {
         double light;
         if (dist_to_player > 150) {
-            light = distance_to_color(dist_to_player - 150, 0.01) * 0.8;
+            light = distance_to_color(dist_to_player - 150, 0.005) * 0.8;
         } else {
             light = 0.8;
         }
@@ -2312,9 +2306,6 @@ void enemyTick(Enemy *enemy, double delta) {
 
     if (enemy->dirSprite != NULL) enemy->dirSprite->dir = enemy->dir;
 
-
-    
-
     dSpriteTick(enemy->dirSprite, enemy->entity.pos, delta);
 }
 
@@ -2339,7 +2330,6 @@ void enemyTakeDmg(Enemy *enemy, int dmg) {
 
 
     if (enemy->on_take_dmg != NULL){
-        printf("f \n");
         enemy->on_take_dmg(enemy, (double)dmg);
     } // its at the end bc it could free
 }
@@ -2423,6 +2413,7 @@ void dSpriteTick(DirectionalSprite *dSprite, v2 spritePos, double delta) {
     if (dSprite == NULL) return;
 
     for (int i = 0; i < dSprite->dirCount; i++) {
+
         Animation *anim = &(dSprite->sprites[i]->animations[dSprite->current_anim]);
         if (anim == NULL) {
             continue;
@@ -3259,17 +3250,14 @@ void exploder_tick(Enemy *enemy, double delta) {
             return;
         }
     }
-    
 
-    if (!v2_equal(exploder->enemy.move_dir, V2_ZERO)) {
-        dir_sprite_play_anim(exploder->enemy.dirSprite, 0);
-    } else {
+    if (v2_equal(V2_ZERO, exploder->enemy.move_dir) || exploder->enemy.pause_timer > 0 || exploder->enemy.speed_multiplier == 0) {
         dir_sprite_play_anim(exploder->enemy.dirSprite, 1);
-        exploder->enemy.dirSprite->playing = false;
+    } else {
+        dir_sprite_play_anim(exploder->enemy.dirSprite, 0);
     }
 
     enemyTick(exploder, delta);
-
 }
 
 void dir_sprite_play_anim(DirectionalSprite *dir_sprite, int anim) {
@@ -3277,6 +3265,7 @@ void dir_sprite_play_anim(DirectionalSprite *dir_sprite, int anim) {
     
     for (int i = 0; i < dir_sprite->dirCount; i++) {
         dir_sprite->sprites[i]->animations[anim].frame = 0;
+        dir_sprite->sprites[i]->currentAnimationIdx = anim;
     }
 
     dir_sprite->current_anim = anim;
