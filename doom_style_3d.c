@@ -142,6 +142,9 @@ typedef struct Ability {
     double cooldown;
     double timer;
     AbilityType type;
+
+    SDL_Texture *texture;
+
 } Ability;
 
 typedef struct Rapidfire {
@@ -247,7 +250,10 @@ typedef struct Enemy {
     v2 vel;
     double speed, speed_multiplier;
     bool seeingPlayer;
-    v2 lastSeenPlayerPos;
+
+    v2 last_seen_player_pos;
+    float track_player_timer;
+    
     double maxHealth, health;
     double sound_max_radius;
     v2 move_dir;
@@ -275,14 +281,13 @@ typedef struct Enemy {
 
     bool collided_last_frame;
 
-
     void (*tick)(struct Enemy *, double);
 
     void (*on_take_dmg)(struct Enemy *, double);
 
 } Enemy;
 
-typedef struct EnemyBullet {
+typedef struct Bullet {
     Entity entity;
     DirectionalSprite *dirSprite;
     CircleCollider *collider;
@@ -291,9 +296,13 @@ typedef struct EnemyBullet {
     double speed;
     double lifeTime;
     double lifeTimer;
+    bool hit_enemies;
+    bool hit_player;
+
+    void (*on_hit)(struct Bullet *);
     
 
-} EnemyBullet;
+} Bullet;
 
 typedef struct BakedLightColor {
     float r, g, b;
@@ -336,6 +345,10 @@ typedef struct CollisionData {
 } CollisionData;
 
 // #FUNC
+
+void enemy_default_forget_behaviour(Enemy *enemy, double delta);
+
+void shooter_bullet_effect(Bullet *bullet);
 
 void place_entity(v2 pos, int type);
 
@@ -385,7 +398,7 @@ void enemy_move(Enemy *enemy, double delta);
 
 int charge_time_to_shots(double charge_time);
 
-void enemy_bullet_destroy(EnemyBullet *bullet);
+void enemy_bullet_destroy(Bullet *bullet);
 
 SDL_Color lerp_color(SDL_Color col1, SDL_Color col2, double w);
 
@@ -483,7 +496,7 @@ void animationTick(Animation *anim, double delta);
 
 void effectTick(Effect *effect, double delta);
 
-void bulletTick(EnemyBullet *bullet, double delta);
+void bulletTick(Bullet *bullet, double delta);
 
 void shooterTick(Enemy *enemy, double delta);
 
@@ -520,6 +533,7 @@ void getTextureFiles(char *fileName, int fileCount, SDL_Texture ***textures);
 
 
 // #TEXTURES
+SDL_Texture *shoot_icon;
 SDL_Texture *exploder_hit;
 SDL_Texture **exploder_explosion_texture;
 SDL_Texture **shooter_dirs_textures;
@@ -616,6 +630,8 @@ int main(int argc, char *argv[]) {
         levelToLoad = argv[1];
     }
 
+    init_ui();
+
     init();
 
     u64 tick_timer = 0, render_timer = 0;
@@ -665,12 +681,13 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
     enemy.current_wander_pos = pos;
     enemy.wander_pause_timer = 10;
 
-    enemy.time_to_forget = 1;
+    enemy.time_to_forget = 6;
     enemy.forget_timer = enemy.time_to_forget;
 
     enemy.noticed_player = false;
     enemy.time_to_pursue = 1;
     enemy.pursue_timer = enemy.time_to_pursue;
+
 
     enemy.pause_timer = 0;
 
@@ -708,14 +725,17 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
     enemy.collider->pos = enemy.entity.pos;
 
     enemy.seeingPlayer = false;
-    enemy.lastSeenPlayerPos = (v2){0, 0};
+    enemy.last_seen_player_pos = (v2){0, 0};
+    enemy.track_player_timer = 0.25;
 
     return enemy;
 }
 
 void init() {  // #INIT
 
-    init_ui();
+    
+
+    shoot_icon = make_texture(renderer, "Textures/Abilities/Icons/shoot_icon.bmp");
 
     rapidfire_sound = create_sound("Sounds/shotgun_ability.wav");
 
@@ -1713,6 +1733,39 @@ void render_health_bar() {
     SDL_RenderCopy(renderer, healthbar_texture, NULL, &outline_rect);
 }
 
+void render_ability_helper(v2 pos, Ability *ability) {
+    if (ability == NULL) return;
+
+    SDL_Rect rect = {pos.x, pos.y, 70, 70};
+
+
+    if (player->primary->texture != NULL) {
+        SDL_RenderCopy(renderer, player->primary->texture, NULL, &rect);
+    }
+    double primary_progress = (player->primary->cooldown - player->primary->timer) / player->primary->cooldown;
+
+    SDL_Rect primary_progress_rect = {
+        WINDOW_WIDTH * 3/4, 
+        WINDOW_HEIGHT * 4/5,
+        70,
+        70 * primary_progress
+    };
+
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 140);
+    
+    SDL_RenderFillRect(renderer, &primary_progress_rect);
+
+
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    SDL_RenderDrawRect(renderer, &rect);
+}
+
+void render_ability_hud() {
+    render_ability_helper((v2){WINDOW_WIDTH * 3/4, WINDOW_HEIGHT * 4/5}, player->primary);
+
+}
+
+
 void renderHUD() {
 
     SDL_SetTextureColorMod(vignette_texture, vignette_color.r, vignette_color.g, vignette_color.b);
@@ -1721,6 +1774,8 @@ void renderHUD() {
     render_hand();
 
     render_health_bar();
+
+    render_ability_hud();
 
     SDL_Rect crosshairRect = {WINDOW_WIDTH / 2 - 8, WINDOW_HEIGHT / 2 - 8, 16, 16};
 
@@ -1789,7 +1844,7 @@ void render(double delta) {  // #RENDER
                 break;
 
             case (int)BULLET:;
-                EnemyBullet *bullet = rObj->val;
+                Bullet *bullet = rObj->val;
                 if (bullet->dirSprite != NULL) {
                     renderDirSprite(bullet->dirSprite, bullet->entity.pos, bullet->entity.size, bullet->entity.height);
                 } else {
@@ -2011,7 +2066,7 @@ void freeObject(void *val, int type) {
         
 
         case (int)BULLET:;
-            EnemyBullet *bullet = val;
+            Bullet *bullet = val;
             free(bullet->collider);
             if (bullet->dirSprite != NULL) {
                 freeObject(bullet->dirSprite, DIR_SPRITE);
@@ -2300,6 +2355,14 @@ void enemyTick(Enemy *enemy, double delta) {
     } else {
         RayCollisionData rayData = castRayForAll(v2_add(enemy->entity.pos, v2_mul(dir, to_vec(enemy->collider->radius + 0.01))), dir);
         enemy->seeingPlayer = rayData.hit && (Player *)rayData.collider == player;
+
+        if (enemy->seeingPlayer) {
+            enemy->track_player_timer -= delta;
+            if (enemy->track_player_timer <= 0) {
+                enemy->track_player_timer = 0.25;
+                enemy->last_seen_player_pos = player->pos;
+            }
+        }
     }
 
     
@@ -2439,8 +2502,8 @@ double angleDist(double a1, double a2) {
     return min(d1, d2);
 }
 
-EnemyBullet *createDefaultBullet(v2 pos, v2 dir) {
-    EnemyBullet *bullet = malloc(sizeof(EnemyBullet));
+Bullet *createDefaultBullet(v2 pos, v2 dir) {
+    Bullet *bullet = malloc(sizeof(Bullet));
 
     bullet->entity.pos = pos;
     bullet->entity.size = to_vec(8000);
@@ -2458,6 +2521,11 @@ EnemyBullet *createDefaultBullet(v2 pos, v2 dir) {
     bullet->lifeTime = 5;
     bullet->lifeTimer = bullet->lifeTime;
 
+    bullet->on_hit = shooter_bullet_effect;
+    
+    bullet->hit_player = true;
+    bullet->hit_enemies = false;
+
     bullet->collider = malloc(sizeof(CircleCollider));
     bullet->collider->pos = bullet->entity.pos;
     bullet->collider->radius = 5;
@@ -2465,13 +2533,13 @@ EnemyBullet *createDefaultBullet(v2 pos, v2 dir) {
     return bullet;
 }
 
-EnemyBullet *createTestBullet(v2 pos) { return createDefaultBullet(pos, (v2){1, 0}); }
+Bullet *createTestBullet(v2 pos) { return createDefaultBullet(pos, (v2){1, 0}); }
 
 bool intersectCircles(CircleCollider c1, CircleCollider c2) {
     return v2_distance_squared(c1.pos, c2.pos) < (c1.radius + c2.radius) * (c1.radius + c2.radius);  // dist^2 < (r1 + r2)^2
 }
 
-void bulletTick(EnemyBullet *bullet, double delta) {
+void bulletTick(Bullet *bullet, double delta) {
 
     bullet->entity.pos = v2_add(bullet->entity.pos, v2_mul(bullet->dir, to_vec(bullet->speed * delta)));
     bullet->collider->pos = bullet->entity.pos;
@@ -2491,10 +2559,25 @@ void bulletTick(EnemyBullet *bullet, double delta) {
         return;
     }
 
-    if (intersectCircles(*bullet->collider, *(player->collider))) {
+    if (bullet->hit_player && intersectCircles(*bullet->collider, *(player->collider))) {
+        player_take_dmg(bullet->dmg);
         enemy_bullet_destroy(bullet);
-        player_take_dmg(1);
         return;
+    }
+
+    if (bullet->hit_enemies) {
+        for (int i = 0; i < gameobjects->length; i++) {
+            
+            obj *game_object = arraylist_get(gameobjects, i);
+
+            if (!is_enemy_type(game_object->type)) continue;
+
+            Enemy *enemy = game_object->val;
+
+            if (intersectCircles(*bullet->collider, *enemy->collider)) {
+                enemyTakeDmg(enemy, bullet->dmg);
+            }
+        }
     }
 
     if (bullet->dirSprite != NULL) {
@@ -2505,7 +2588,7 @@ void bulletTick(EnemyBullet *bullet, double delta) {
 }
 
 void enemy_shooter_shoot(ShooterEnemy *shooter) {
-    EnemyBullet *bullet = createDefaultBullet(shooter->enemy.entity.pos, v2_rotate(shooter->enemy.dir, randf_range(-0.05, 0.05)));
+    Bullet *bullet = createDefaultBullet(shooter->enemy.entity.pos, v2_rotate(shooter->enemy.dir, randf_range(-0.05, 0.05)));
     if (bullet == NULL) {
         printf("Bullet is null \n");
         return;
@@ -2541,6 +2624,9 @@ void shooterTick(Enemy *enemy, double delta) {
     if (shooter->enemy.state == STATE_IDLE) {
         enemy_idle_movement(shooter, delta);
     } else {
+
+        enemy_default_forget_behaviour(shooter, delta);
+
         shooter->mode_timer -= delta;
         if (shooter->mode_timer <= 0) {
             shooter->mode = shooter->mode == MODE_RESTING? MODE_SHOOTING : MODE_RESTING; // could make this simpler(1 - mode) but it will be less readable
@@ -2673,7 +2759,7 @@ void update_entity_collisions(void *val, int type) {
             
             break;
         case (int)BULLET: ;
-            EnemyBullet *b = val;
+            Bullet *b = val;
             
             break;
     }
@@ -3059,9 +3145,7 @@ SDL_Color lerp_color(SDL_Color col1, SDL_Color col2, double w) {
     return res;
 }
 
-void enemy_bullet_destroy(EnemyBullet *bullet) {
-   
-   
+void shooter_bullet_effect(Bullet *bullet) {
     Sprite *sprite = createSprite(true, 1);
     sprite->animations[0] = create_animation(4, 0, shooter_bullet_explode_frames);
     sprite->animations[0].playing = true;
@@ -3075,9 +3159,11 @@ void enemy_bullet_destroy(EnemyBullet *bullet) {
     effect->entity.affected_by_light = false;
 
     add_game_object(effect, EFFECT);
+}
 
-
-
+void enemy_bullet_destroy(Bullet *bullet) {
+   
+    bullet->on_hit(bullet);
 
     remove_game_object(bullet, ENEMY_SHOOTER); 
 }
@@ -3241,9 +3327,12 @@ void exploder_tick(Enemy *enemy, double delta) {
     if (exploder->enemy.state == STATE_IDLE) {
         enemy_idle_movement(exploder, delta);
     } else {
+        
         exploder->enemy.move_dir = exploder->enemy.dir_to_player;
         exploder->enemy.dir = exploder->enemy.dir_to_player;
         exploder->enemy.speed_multiplier = 1;
+
+        enemy_default_forget_behaviour(exploder, delta);
 
         if (exploder->enemy.dist_squared_to_player < 400) {
             exploder_explode(exploder);
@@ -3328,6 +3417,7 @@ Ability ability_primary_shoot_create() {
         .cooldown = 0.2,
         .timer = 0.2,
         .type = A_PRIMARY,
+        .texture = shoot_icon
     };
 }
 
@@ -3575,6 +3665,14 @@ void place_entity(v2 pos, int type) {
             add_game_object(exploder, ENEMY_EXPLODER);
     }
 }
+
+void enemy_default_forget_behaviour(Enemy *enemy, double delta) {
+    if (enemy->forget_timer > 0 && !enemy->seeingPlayer) { // speed multiplier could be whatever it was before
+        enemy->move_dir = v2_dir(enemy->entity.pos, enemy->last_seen_player_pos);
+        enemy->dir = enemy->move_dir;
+    }
+}
+
 
 
 // #END
