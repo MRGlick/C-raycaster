@@ -346,6 +346,10 @@ typedef struct CollisionData {
 
 // #FUNC
 
+void ability_dash_activate(Ability *ability);
+
+//void ability_dash_tick(Ability *ability, double delta);
+
 void enemy_default_forget_behaviour(Enemy *enemy, double delta);
 
 void shooter_bullet_effect(Bullet *bullet);
@@ -367,6 +371,8 @@ void draw_3d_line(v2 pos1, double h1, v2 pos2, double h2);
 void _shoot(double spread);
 
 void ability_secondary_shoot_activate(Ability *ability);
+
+Ability ability_dash_create();
 
 Rapidfire ability_secondary_shoot_create();
 
@@ -533,7 +539,10 @@ void getTextureFiles(char *fileName, int fileCount, SDL_Texture ***textures);
 
 
 // #TEXTURES
+SDL_Texture *dash_icon;
+SDL_Texture *ability_icon_frame;
 SDL_Texture *shoot_icon;
+SDL_Texture *shotgun_icon;
 SDL_Texture *exploder_hit;
 SDL_Texture **exploder_explosion_texture;
 SDL_Texture **shooter_dirs_textures;
@@ -733,7 +742,11 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
 
 void init() {  // #INIT
 
-    
+    dash_icon = make_texture(renderer, "Textures/Abilities/Icons/dash_icon.bmp");
+
+    ability_icon_frame = make_texture(renderer, "Textures/Abilities/Icons/icon_frame.bmp");
+
+    shotgun_icon = make_texture(renderer, "Textures/Abilities/Icons/shotgun_icon.bmp");
 
     shoot_icon = make_texture(renderer, "Textures/Abilities/Icons/shoot_icon.bmp");
 
@@ -920,7 +933,9 @@ void key_pressed(SDL_Keycode key) {
     }
 
     if (key == SDLK_LSHIFT) {
-        player->sprinting = true;
+        if (player->utility != NULL) {
+            player->utility->activate(player->utility);
+        }
     }
     if (key == SDLK_F11) {
         fullscreen = !fullscreen;
@@ -1004,8 +1019,27 @@ void playerTick(double delta) {
     }
 
     v2 finalVel = v2_mul(player->vel, to_vec(player->speed * speed_multiplier));
+
+    bool move_without_ray = true;
+
+    double movement = v2_length(finalVel) * delta;
+
+    if (movement > 2) {
+        RayCollisionData ray = castRay(player->pos, playerForward);
+        if (ray.hit) {
+            double dist = v2_distance(ray.startpos, ray.collpos);
+            if (dist < movement) {
+                move_without_ray = false;
+                player->pos = v2_add(player->pos, v2_mul(playerForward, to_vec(dist - 10)));
+                cd_print(true, "Hello world \n");
+            }
+        }
+    }
     
-    player->pos = v2_add(player->pos, v2_mul(finalVel, to_vec(delta == 0 ? 0.016 : delta)));
+    if (move_without_ray) 
+        player->pos = v2_add(player->pos, v2_mul(finalVel, to_vec(delta)));
+    
+    
     
 }
 
@@ -1740,6 +1774,12 @@ void render_ability_helper(v2 pos, Ability *ability) {
 
     SDL_Rect rect = {pos.x, pos.y, size.x, size.y};
 
+    SDL_Rect frame_rect = {
+        pos.x - 3,
+        pos.y - 3,
+        size.x + 6,
+        size.y + 6
+    };
 
     if (ability->texture != NULL) {
         SDL_RenderCopy(renderer, ability->texture, NULL, &rect);
@@ -1753,13 +1793,13 @@ void render_ability_helper(v2 pos, Ability *ability) {
         size.y * primary_progress
     };
 
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 140);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 170);
     
     SDL_RenderFillRect(renderer, &primary_progress_rect);
 
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    SDL_RenderDrawRect(renderer, &rect);
+    SDL_RenderCopy(renderer, ability_icon_frame, NULL, &frame_rect);
 }
 
 void render_ability_hud() {
@@ -1888,12 +1928,14 @@ void init_player(v2 pos) {
 
     Ability *default_primary = malloc(sizeof(Ability));
     Rapidfire *default_secondary = malloc(sizeof(Rapidfire));
+    Ability *default_utility = malloc(sizeof(Ability));
     *default_primary = ability_primary_shoot_create();
     *default_secondary = ability_secondary_shoot_create();
+    *default_utility = ability_dash_create();
 
     player->primary = default_primary;
     player->secondary = default_secondary;
-    player->utility = NULL;
+    player->utility = default_utility;
     player->special = NULL;
 }
 
@@ -2191,7 +2233,7 @@ void load_level(char *file) {
             if (ceilingTileMap[r][c] == (int)P_CEILING_LIGHT) {
                 LightPoint *test_point = malloc(sizeof(LightPoint));
                 test_point->color = (SDL_Color){255, 170, 70};//{255, 200, 100};
-                test_point->strength = 8;
+                test_point->strength = 5;
                 test_point->radius = 400;
                 test_point->pos = (v2){(c + 0.5) * tileSize, (r + 0.5) * tileSize};
                 add_game_object(test_point, LIGHT_POINT);
@@ -2649,7 +2691,7 @@ void shooterTick(Enemy *enemy, double delta) {
             v2 final = v2_rotate(shooter->resting_move_dir, v2_get_angle(shooter->enemy.dir_to_player));
             shooter->enemy.move_dir = v2_lerp(shooter->enemy.move_dir, final, delta);
             shooter->enemy.speed_multiplier = 0.8;
-            shooter->enemy.dir = shooter->enemy.dir_to_player;
+            shooter->enemy.dir = v2_lerp(shooter->enemy.dir, shooter->enemy.dir_to_player, delta * 5);
         } else {
             if (shooter->enemy.collided_last_frame || v2_equal(shooter->attacking_move_dir, V2_ZERO)) {
                 v2 random_dir = v2_get_random_dir();
@@ -2658,7 +2700,7 @@ void shooterTick(Enemy *enemy, double delta) {
             v2 final = v2_rotate(shooter->attacking_move_dir, v2_get_angle(shooter->enemy.dir_to_player));
             shooter->enemy.move_dir = v2_lerp(shooter->enemy.move_dir, final, delta);
             shooter->enemy.speed_multiplier = 1.2;
-            shooter->enemy.dir = shooter->enemy.dir_to_player;
+            shooter->enemy.dir = v2_lerp(shooter->enemy.dir, shooter->enemy.dir_to_player, delta * 5);
 
             shooter->attacking_shoot_timer -= delta;
             if (shooter->attacking_shoot_timer <= 0) {
@@ -3443,6 +3485,7 @@ Rapidfire ability_secondary_shoot_create() {
         .ability.cooldown = 10,
         .ability.timer = 0,
         .ability.type = A_SECONDARY,
+        .ability.texture = shotgun_icon,
         .shot_amount = 16,
         .shot_timer = 0.06,
         .shots_left = 0
@@ -3677,6 +3720,54 @@ void enemy_default_forget_behaviour(Enemy *enemy, double delta) {
     }
 }
 
+Ability ability_dash_create() {
+    return (Ability) {
+        .activate = ability_dash_activate,
+        .tick = default_ability_tick,
+        .can_use = true,
+        .cooldown = 3,
+        .timer = 3,
+        .type = A_UTILITY,
+        .texture = dash_icon
+    };
+}
+
+// void ability_dash_tick(Ability *ability, double delta) {
+
+// }
+
+void ability_dash_activate(Ability *ability) {
+
+   if (!ability->can_use) return;
+   ability->can_use = false;
+
+    const double MAX_DASH_STR = 15;
+
+    v2 pos = player->pos;
+    v2 dir = playerForward;
+    double dash_strength = MAX_DASH_STR;
+
+
+    player->vel = v2_mul(dir, to_vec(dash_strength));
+    shakeCamera(15, 40, true, 10);
+
+    vignette_color = (SDL_Color){50, 210, 255, 125};
+
+
+    // RayCollisionData ray = castRay(pos, dir);
+
+    
+
+    // if (ray.hit) {
+    //     double dist_sqr = v2_distance_squared(ray.startpos, ray.collpos);
+    //     if (dist_sqr < dash_distance * dash_distance) {
+    //         dash_distance = sqrt(dist_sqr) - 1;
+    //     }
+    // }
+
+    // player->pos = v2_add(player->pos, v2_mul(dir, to_vec(dash_distance)));
+
+}
 
 
 // #END
