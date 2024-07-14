@@ -1736,19 +1736,21 @@ void render_health_bar() {
 void render_ability_helper(v2 pos, Ability *ability) {
     if (ability == NULL) return;
 
-    SDL_Rect rect = {pos.x, pos.y, 70, 70};
+    v2 size = to_vec(72);
+
+    SDL_Rect rect = {pos.x, pos.y, size.x, size.y};
 
 
-    if (player->primary->texture != NULL) {
-        SDL_RenderCopy(renderer, player->primary->texture, NULL, &rect);
+    if (ability->texture != NULL) {
+        SDL_RenderCopy(renderer, ability->texture, NULL, &rect);
     }
-    double primary_progress = (player->primary->cooldown - player->primary->timer) / player->primary->cooldown;
+    double primary_progress = ability->timer == ability->cooldown? 0 : ability->timer / ability->cooldown;
 
     SDL_Rect primary_progress_rect = {
-        WINDOW_WIDTH * 3/4, 
-        WINDOW_HEIGHT * 4/5,
-        70,
-        70 * primary_progress
+        pos.x, 
+        pos.y,
+        size.x,
+        size.y * primary_progress
     };
 
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 140);
@@ -1761,8 +1763,10 @@ void render_ability_helper(v2 pos, Ability *ability) {
 }
 
 void render_ability_hud() {
-    render_ability_helper((v2){WINDOW_WIDTH * 3/4, WINDOW_HEIGHT * 4/5}, player->primary);
-
+    render_ability_helper((v2){WINDOW_WIDTH * 1/16      , WINDOW_HEIGHT * 5/6}, player->primary);
+    render_ability_helper((v2){WINDOW_WIDTH * 1/16 + 80 , WINDOW_HEIGHT * 5/6}, player->secondary);
+    render_ability_helper((v2){WINDOW_WIDTH * 1/16 + 160, WINDOW_HEIGHT * 5/6}, player->utility);
+    render_ability_helper((v2){WINDOW_WIDTH * 1/16 + 240, WINDOW_HEIGHT * 5/6}, player->special);
 }
 
 
