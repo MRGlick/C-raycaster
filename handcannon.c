@@ -563,7 +563,7 @@ SDL_Texture *shooter_hit_texture;
 SDL_Texture *healthbar_texture;
 SDL_Texture *vignette_texture;
 SDL_Texture *enemy_bullet_texture;
-SDL_Texture *floorAndCeiling;
+GPU_Image *floorAndCeiling;
 GPU_Image *wallTexture;
 SDL_Texture *entityTexture;
 SDL_Texture *crosshair;
@@ -836,8 +836,8 @@ void init() {  // #INIT
     fenceTexture = make_texture(renderer, "Textures/fence.bmp");
     SDL_SetTextureBlendMode(fenceTexture, SDL_BLENDMODE_BLEND);
 
-    floorAndCeiling = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, RESOLUTION_X, RESOLUTION_Y);
-    SDL_SetTextureBlendMode(floorAndCeiling, SDL_BLENDMODE_BLEND);
+    floorAndCeiling = GPU_CreateImage(RESOLUTION_X, RESOLUTION_Y, GPU_FORMAT_RGBA);
+    GPU_SetImageFilter(floorAndCeiling, GPU_FILTER_NEAREST);
 
     floorTexture = TextureData_from_bmp("Textures/floor.bmp");
     floorLightTexture = TextureData_from_bmp("Textures/floor_light.bmp");
@@ -1436,10 +1436,10 @@ void calcFloorAndCeiling() {
     // render by scanlines.
     // interpolate between left and right points and put the correct texture
 
-    void *pixels;
-    int pitch;
+    SDL_Surface *surface = SDL_CreateRGBSurface(0, RESOLUTION_X, RESOLUTION_Y, 32, 0xFF000000, 0xFF0000, 0xFF00, 0xFF);
 
-    SDL_LockTexture(floorAndCeiling, NULL, &pixels, &pitch);
+    void *pixels = surface->pixels;
+    int pitch;
 
     SDL_Thread *threads[NUM_FLOOR_THREADS];
     struct floor_and_ceiling_thread_data datas[NUM_FLOOR_THREADS];
@@ -1458,7 +1458,7 @@ void calcFloorAndCeiling() {
         threads[i] = NULL;
     }
     
-    SDL_UnlockTexture(floorAndCeiling);
+    GPU_UpdateImage(floorAndCeiling, NULL, surface, NULL);
 
 }
 
@@ -1467,9 +1467,9 @@ void drawFloorAndCeiling() {
 
     v2 offsets = (v2){cameraOffset.x, cameraOffset.y};
 
-    SDL_Rect rect = {offsets.x, offsets.y, WINDOW_WIDTH, WINDOW_HEIGHT};
+    GPU_Rect rect = {offsets.x, offsets.y, WINDOW_WIDTH, WINDOW_HEIGHT};
 
-    SDL_RenderCopy(renderer, floorAndCeiling, NULL, &rect);
+    GPU_BlitRect(floorAndCeiling, NULL, screen, &rect); 
 }
 
 void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height, bool affected_by_light) {
