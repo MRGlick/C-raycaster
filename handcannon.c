@@ -1490,9 +1490,7 @@ void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affe
     double fov_factor = tanHalfFOV / tanHalfStartFOV;
 
     v2 final_size = v2_div(size, to_vec(dist_to_player * fov_factor));
-
-    GPU_Init()
-
+    
     GPU_Rect dstRect = {
         screen_pos.x - final_size.x / 2,
         screen_pos.y - final_size.y / 2,
