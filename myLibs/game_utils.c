@@ -11,6 +11,8 @@
 #include "arraylist.c" // stdio, stdlib
 #include "color.c"
 #include "sounds.c"
+#include <SDL_gpu.h>
+
 
 #define RENDERER_FLAGS (SDL_RENDERER_ACCELERATED)
 #define EPSILON 0.001
@@ -150,21 +152,24 @@ double randf_range(double min, double max) {
     return min + randf() * (max - min);
 }
 
-SDL_Texture *make_texture(SDL_Renderer *renderer, char *bmp_file) {
-    SDL_Surface *surface = SDL_LoadBMP(bmp_file);
-    if (surface == NULL) {
-        printf("%s path: '%s'\n", SDL_GetError(), bmp_file);
-        return NULL;
+GPU_Image *load_texture(GPU_Target *screen, char *file) {
+
+    int file_len = strlen(file);
+
+    char *file_ext = file + (file_len - 4);
+
+    GPU_Image *image;
+
+    if (file_ext != ".bmp") {
+        image = GPU_LoadImage(file);
+    } else {
+        SDL_Renderer *renderer = SDL_GetRenderer(SDL_GetWindowFromID(screen->context->windowID));
+        SDL_Surface *surface = SDL_LoadBMP(file);
+        image = GPU_CopyImageFromSurface(surface);
+        SDL_FreeSurface(surface);
     }
-
-    SDL_Texture *texture = SDL_CreateTextureFromSurface(
-        renderer,
-        surface
-    );
-
-    SDL_FreeSurface(surface);
-
-    return texture;
+    GPU_SetImageFilter(image, GPU_FILTER_NEAREST);
+    return image;
 }
 
 void decimal_to_text(double decimal, char *buf) {

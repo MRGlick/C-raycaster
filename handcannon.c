@@ -5,7 +5,6 @@
 #include "game_utils.c"
 #include "globals.h"
 #include "ui.c"
-#include <SDL_gpu.h>
 
 // SDL_Renderer *renderer;
 // SDL_Window *window;
@@ -35,6 +34,9 @@
 
 #define OUT_OF_SCREEN_POS \
     (v2) { WINDOW_WIDTH * 100, WINDOW_HEIGHT * 100 }
+
+
+#define get_window() SDL_GetWindowFromID(screen->context->windowID)
 
 // #TYPES
 
@@ -654,6 +656,8 @@ int main(int argc, char *argv[]) {
 
 
     screen = GPU_Init(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_DEFAULT_INIT_FLAGS);
+    SDL_SetWindowTitle(SDL_GetWindowFromID(screen->context->windowID), "Goofy");
+
 
     // renderer = SDL_CreateRenderer(window, -1, RENDERER_FLAGS);
 
@@ -774,19 +778,19 @@ void init() {  // #INIT
     dash_anim_sprite->animations[0].frame = 5;
 
 
-    dash_icon = GPU_LoadImage("Textures/Abilities/Icons/dash_icon.png");
+    dash_icon = load_texture(screen, "Textures/Abilities/Icons/dash_icon.bmp");
 
-    ability_icon_frame = GPU_LoadImage("Textures/Abilities/Icons/icon_frame.png");
+    ability_icon_frame = load_texture(screen, "Textures/Abilities/Icons/icon_frame.bmp");
 
-    shotgun_icon = GPU_LoadImage("Textures/Abilities/Icons/shotgun_icon.png");
+    shotgun_icon = load_texture(screen, "Textures/Abilities/Icons/shotgun_icon.bmp");
 
-    shoot_icon = GPU_LoadImage("Textures/Abilities/Icons/shoot_icon.png");
+    shoot_icon = load_texture(screen, "Textures/Abilities/Icons/shoot_icon.bmp");
 
     rapidfire_sound = create_sound("Sounds/shotgun_ability.wav");
 
     exploder_explosion = create_sound("Sounds/exploder_explosion.wav");
 
-    exploder_hit = GPU_LoadImage("Textures/ExploderEnemyAnim/exploder_hit.png");
+    exploder_hit = load_texture(screen, "Textures/ExploderEnemyAnim/exploder_hit.bmp");
 
     exploder_explosion_texture = malloc(sizeof(GPU_Image *) * 12);
     getTextureFiles("Textures/ExploderEnemyAnim/Explosion/explosion", 12, &exploder_explosion_texture);
@@ -798,12 +802,12 @@ void init() {  // #INIT
         char num[get_num_digits(i + 1)];
         sprintf(num, "%d", i + 1);
         char *fileWithNum = concat(baseFileName, num);
-        char *fileWithExtension = concat(fileWithNum, ".png");
+        char *fileWithExtension = concat(fileWithNum, ".bmp");
 
-        shooter_dirs_textures[i] = GPU_LoadImage(fileWithExtension);
+        shooter_dirs_textures[i] = load_texture(screen, fileWithExtension);
     }
 
-    defualt_particle_texture = GPU_LoadImage("Textures/base_particle.png");
+    defualt_particle_texture = load_texture(screen, "Textures/base_particle.bmp");
 
     shooter_bullet_default_frames = malloc(sizeof(GPU_Image *) * 4);
     shooter_bullet_explode_frames = malloc(sizeof(GPU_Image *) * 4);
@@ -825,15 +829,15 @@ void init() {  // #INIT
 
     init_cd_print();
 
-    mimran_jumpscare = GPU_LoadImage("Textures/scary_monster2.png");
+    mimran_jumpscare = load_texture(screen, "Textures/scary_monster2.bmp");
 
-    shooter_hit_texture = GPU_LoadImage("Textures/ShooterEnemy/hit_frame1.png");
+    shooter_hit_texture = load_texture(screen, "Textures/ShooterEnemy/hit_frame1.bmp");
 
-    healthbar_texture = GPU_LoadImage("Textures/health_bar.png");
+    healthbar_texture = load_texture(screen, "Textures/health_bar.bmp");
 
-    vignette_texture = GPU_LoadImage("Textures/vignette.png");
+    vignette_texture = load_texture(screen, "Textures/vignette.bmp");
 
-    fenceTexture = GPU_LoadImage("Textures/fence.png");
+    fenceTexture = load_texture(screen, "Textures/fence.bmp");
     SDL_SetTextureBlendMode(fenceTexture, SDL_BLENDMODE_BLEND);
 
     floorAndCeiling = GPU_CreateImage(RESOLUTION_X, RESOLUTION_Y, GPU_FORMAT_RGBA);
@@ -854,14 +858,14 @@ void init() {  // #INIT
 
     gameobjects = create_arraylist(10);
 
-    wallTexture = GPU_LoadImage("Textures/wall.png");
+    wallTexture = load_texture(screen, "Textures/wall.bmp");
      GPU_SetImageFilter(wallTexture, GPU_FILTER_NEAREST);
 
 
     wallFrames = malloc(sizeof(GPU_Image *) * 17);
     getTextureFiles("Textures/WallAnim/wallAnim", 17, &wallFrames);
 
-    crosshair = GPU_LoadImage("Textures/crosshair.png");
+    crosshair = load_texture(screen, "Textures/crosshair.bmp");
 
     animatedWallSprite = createSprite(true, 1);
     animatedWallSprite->animations[0] = create_animation(17, 0, wallFrames);
@@ -870,7 +874,7 @@ void init() {  // #INIT
 
     leftHandSprite = createSprite(true, 2);
     GPU_Image **default_hand = malloc(sizeof(GPU_Image *)); 
-    default_hand[0] = GPU_LoadImage("Textures/rightHandAnim/rightHandAnim6.png");
+    default_hand[0] = load_texture(screen, "Textures/rightHandAnim/rightHandAnim6.bmp");
     leftHandSprite->animations[0] = create_animation(1, 0, default_hand);
 
 
@@ -887,7 +891,7 @@ void init() {  // #INIT
 
     for (int i = 0; i < 26; i++) keyPressArr[i] = false;
 
-    entityTexture = GPU_LoadImage("Textures/scary_monster.png");
+    entityTexture = load_texture(screen, "Textures/scary_monster.bmp");
 
     if (isValidLevel(levelToLoad)) {
         load_level(levelToLoad);
@@ -896,7 +900,7 @@ void init() {  // #INIT
         load_level("Levels/default_level.hclevel");
     }
 
-    skybox_texture = GPU_LoadImage("Textures/skybox.png");
+    skybox_texture = load_texture(screen, "Textures/skybox.bmp");
 
     // SDL_RenderSetLogicalSize(renderer, WINDOW_WIDTH, WINDOW_HEIGHT);
 
@@ -1126,7 +1130,7 @@ void tick(double delta) {
     tanHalfFOV = tan(deg_to_rad(fov / 2));
 
     if (lockMouse) {
-        //SDL_WarpMouseInWindow(window, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
+        SDL_WarpMouseInWindow(get_window(), WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
         
     }
 
@@ -1490,7 +1494,7 @@ void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affe
     double fov_factor = tanHalfFOV / tanHalfStartFOV;
 
     v2 final_size = v2_div(size, to_vec(dist_to_player * fov_factor));
-    
+
     GPU_Rect dstRect = {
         screen_pos.x - final_size.x / 2,
         screen_pos.y - final_size.y / 2,
@@ -1892,18 +1896,11 @@ void render(double delta) {  // #RENDER
 
     GPU_Clear(screen);
 
-    // GPU_Image *screen_texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, WINDOW_WIDTH, WINDOW_HEIGHT);
-
-    // SDL_SetRenderTarget(renderer, screen_texture);
-
-    // SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    // SDL_RenderClear(renderer);
-
     char *newTitle = "FPS: ";
     char *fps = malloc(4);
     decimal_to_text(realFps, fps);
 
-    // SDL_SetWindowTitle(window, concat(newTitle, fps));
+    SDL_SetWindowTitle(get_window(), concat(newTitle, fps));
 
     // SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
@@ -2885,9 +2882,9 @@ void getTextureFiles(char *fileName, int fileCount, GPU_Image ***textures) {
         char num[charCount + 10];
         sprintf(num, "%d", i + 1);
         char *fileWithNum = concat(fileName, num);
-        char *fileWithExtension = concat(fileWithNum, ".png");
+        char *fileWithExtension = concat(fileWithNum, ".bmp");
 
-        GPU_Image *tex = GPU_LoadImage(fileWithExtension);
+        GPU_Image *tex = fileWithExtension;
         (*textures)[i] = tex;
 
         free(fileWithNum);
