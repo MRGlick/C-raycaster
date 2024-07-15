@@ -1465,6 +1465,9 @@ void calcFloorAndCeiling() {
     
     GPU_UpdateImage(floorAndCeiling, NULL, surface, NULL);
 
+
+    SDL_FreeSurface(surface);
+
 }
 
 void drawFloorAndCeiling() {
@@ -1609,7 +1612,7 @@ arraylist *getRenderList() {
 
     SDL_Thread *threads[NUM_WALL_THREADS];
 
-    int indicies[NUM_WALL_THREADS];  // trash lang
+    int indicies[NUM_WALL_THREADS];
 
     for (int i = 0; i < NUM_WALL_THREADS; i++) {
         indicies[i] = i;
@@ -1874,10 +1877,6 @@ void renderHUD() {
 
     GPU_Rect playerPendingShotsRect = {WINDOW_WIDTH / 2 + -10 * shots, WINDOW_HEIGHT * 0.8, 20 * shots, WINDOW_HEIGHT * 0.05};
 
-    // SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-
-    // SDL_RenderFillRect(renderer, &playerPendingShotsRect);
-
 }
 
 void drawSkybox() {
@@ -1900,7 +1899,11 @@ void render(double delta) {  // #RENDER
     char *fps = malloc(4);
     decimal_to_text(realFps, fps);
 
-    SDL_SetWindowTitle(get_window(), concat(newTitle, fps));
+    char *final = concat(newTitle, fps);
+
+    SDL_SetWindowTitle(get_window(), final);
+
+    free(final);
 
     // SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
