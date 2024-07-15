@@ -17,8 +17,8 @@ SDL_Window *window;
 #define WINDOW_HEIGHT 580
 #define RESOLUTION_X 360
 #define RESOLUTION_Y 180
-#define X_SENSITIVITY 0.1
-#define Y_SENSITIVITY 0.8
+#define X_SENSITIVITY 1
+#define Y_SENSITIVITY 8
 #define COLOR_BLACK \
     (SDL_Color) { 0, 0, 0 }
 #define TRANSPARENT \
@@ -128,7 +128,7 @@ typedef struct RayCollisionData {
     v2 startpos, collpos, normal;
     void *collider;
     int colliderType;
-    SDL_Texture *colliderTexture;
+    GPU_Image *colliderTexture;
     bool hit;
     double collIdx, wallWidth;
 } RayCollisionData;
@@ -564,7 +564,7 @@ SDL_Texture *healthbar_texture;
 SDL_Texture *vignette_texture;
 SDL_Texture *enemy_bullet_texture;
 SDL_Texture *floorAndCeiling;
-SDL_Texture *wallTexture;
+GPU_Image *wallTexture;
 SDL_Texture *entityTexture;
 SDL_Texture *crosshair;
 SDL_Texture *fenceTexture;
@@ -651,6 +651,9 @@ int main(int argc, char *argv[]) {
     if (SDL_Init(SDL_INIT_EVERYTHING) < 0) printf("Shit. \n");
 
     window = SDL_CreateWindow("Doom style 3D!", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_WIDTH, WINDOW_HEIGHT, 0);
+
+
+    screen = GPU_Init(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_DEFAULT_INIT_FLAGS);
 
     renderer = SDL_CreateRenderer(window, -1, RENDERER_FLAGS);
 
@@ -851,7 +854,7 @@ void init() {  // #INIT
 
     gameobjects = create_arraylist(10);
 
-    wallTexture = make_texture(renderer, "Textures/wall.bmp");
+    wallTexture = GPU_LoadImage("Textures/wall.bmp");
 
     wallFrames = malloc(sizeof(SDL_Texture *) * 17);
     getTextureFiles("Textures/WallAnim/wallAnim", 17, &wallFrames);
@@ -1531,7 +1534,7 @@ void renderEntity(Entity entity) {  // RENDER ENTITY
 }
 
 typedef struct WallStripe {
-    SDL_Texture *texture;
+    GPU_Image *texture;
     double size;
     int i;
     double brightness;  // a bunch of rendering bullshit:
@@ -1679,12 +1682,12 @@ void renderWallStripe(WallStripe *stripe) {
 
     double angleLightModifier = sin(v2_get_angle(stripe->normal));
 
-    SDL_Texture *texture = stripe->texture;
-    v2 textureSize = get_texture_size(texture);
+    GPU_Image *texture = stripe->texture;
+    v2 textureSize = (v2){texture->w, texture->h};
 
-    SDL_Rect srcRect = {(int)loop_clamp(stripe->collIdx * stripe->wallWidth, 0, textureSize.x), 0, 1, textureSize.y};
+    GPU_Rect srcRect = {(int)loop_clamp(stripe->collIdx * stripe->wallWidth, 0, textureSize.x), 0, 1, textureSize.y};
 
-    SDL_Rect dstRect = {
+    GPU_Rect dstRect = {
         stripe->i * WINDOW_WIDTH / RESOLUTION_X + cameraOffset.x, 
         WINDOW_HEIGHT / 2 - stripe->size / 2 - player->pitch + cameraOffset.y,
         WINDOW_WIDTH / RESOLUTION_X + 1,
@@ -1704,9 +1707,19 @@ void renderWallStripe(WallStripe *stripe) {
     
     clampColors(rgb);
 
+    GPU_Image *image = GPU_LoadImage("Textures/wall.png");
 
-    SDL_SetTextureColorMod(texture, rgb[0], rgb[1], rgb[2]);
-    SDL_RenderCopy(renderer, texture, &srcRect, &dstRect);
+    GPU_SetImageFilter(image, GPU_FILTER_NEAREST);
+
+
+    GPU_BlitRect(image, &srcRect, screen, &dstRect);
+
+    GPU_FreeImage(image);
+
+    // GPU_Rectangle(screen, dstRect.x, dstRect.y, dstRect.x + dstRect.w, dstRect.y + dstRect.h, GPU_MakeColor(255, 0, 0, 255));
+
+    // SDL_SetTextureColorMod(texture, rgb[0], rgb[1], rgb[2]);
+    // SDL_RenderCopy(renderer, texture, &srcRect, &dstRect);
     free(stripe);
 }
 
@@ -1875,6 +1888,8 @@ void drawSkybox() {
 
 void render(double delta) {  // #RENDER
 
+    GPU_Clear(screen);
+
     SDL_Texture *screen_texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, WINDOW_WIDTH, WINDOW_HEIGHT);
 
     SDL_SetRenderTarget(renderer, screen_texture);
@@ -1942,7 +1957,9 @@ void render(double delta) {  // #RENDER
 
     SDL_RenderCopy(renderer, screen_texture, NULL, NULL);
 
-    SDL_RenderPresent(renderer);
+    SDL_RenderPresent(renderer); // finna get removed
+
+    GPU_Flip(screen);
 } // #RENDER END
 
 // #PLAYER INIT
