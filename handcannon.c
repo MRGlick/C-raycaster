@@ -854,7 +854,9 @@ void init() {  // #INIT
 
     gameobjects = create_arraylist(10);
 
-    wallTexture = GPU_LoadImage("Textures/wall.bmp");
+    wallTexture = GPU_LoadImage("Textures/wall.png");
+     GPU_SetImageFilter(wallTexture, GPU_FILTER_NEAREST);
+
 
     wallFrames = malloc(sizeof(SDL_Texture *) * 17);
     getTextureFiles("Textures/WallAnim/wallAnim", 17, &wallFrames);
@@ -1707,14 +1709,11 @@ void renderWallStripe(WallStripe *stripe) {
     
     clampColors(rgb);
 
-    GPU_Image *image = GPU_LoadImage("Textures/wall.png");
 
-    GPU_SetImageFilter(image, GPU_FILTER_NEAREST);
+    
 
-
-    GPU_BlitRect(image, &srcRect, screen, &dstRect);
-
-    GPU_FreeImage(image);
+    GPU_SetRGB(texture, rgb[0], rgb[1], rgb[2]);
+    GPU_BlitRect(texture, &srcRect, screen, &dstRect);
 
     // GPU_Rectangle(screen, dstRect.x, dstRect.y, dstRect.x + dstRect.w, dstRect.y + dstRect.h, GPU_MakeColor(255, 0, 0, 255));
 
