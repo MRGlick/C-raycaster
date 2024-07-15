@@ -15,7 +15,8 @@
                 "-LmyLibs/lib",
                 "-lSDL2main",
                 "-lSDL2",
-                "-lSDL2_ttf"
+                "-lSDL2_ttf",
+                "-lSDL2_gpu"
             ],
             "options": {
                 "cwd": "${fileDirname}",

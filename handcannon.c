@@ -1,8 +1,11 @@
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wincompatible-pointer-types"
+
 #include "game_utils.c"
 #include "globals.h"
 #include "ui.c"
-
+#include <SDL_gpu.h>
 
 SDL_Renderer *renderer;
 SDL_Window *window;
@@ -640,6 +643,8 @@ const double PLAYER_SHOOT_COOLDOWN = 0.5;
 // #VAR END
 
 // #DEBUG VAR
+
+GPU_Target *screen;
 
 // #MAIN
 int main(int argc, char *argv[]) {
@@ -1938,7 +1943,7 @@ void render(double delta) {  // #RENDER
     SDL_RenderCopy(renderer, screen_texture, NULL, NULL);
 
     SDL_RenderPresent(renderer);
-}
+} // #RENDER END
 
 // #PLAYER INIT
 void init_player(v2 pos) {
@@ -3835,3 +3840,6 @@ void ability_dash_before_activate(Ability *ability) {
 
 
 // #END
+
+
+#pragma GCC diagnostic pop
