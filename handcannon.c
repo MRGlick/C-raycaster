@@ -138,9 +138,12 @@ typedef struct CircleCollider {
 typedef struct Ability {
     void (*activate)(struct Ability *);
     void (*tick)(struct Ability *, double);
+    void (*before_activate)(struct Ability *);
     bool can_use;
     double cooldown;
     double timer;
+    double delay;
+    double delay_timer;
     AbilityType type;
 
     SDL_Texture *texture;
@@ -346,9 +349,13 @@ typedef struct CollisionData {
 
 // #FUNC
 
+void ability_dash_before_activate(Ability *ability);
+
+void activate_ability(Ability *ability);
+
 void ability_dash_activate(Ability *ability);
 
-//void ability_dash_tick(Ability *ability, double delta);
+void ability_dash_tick(Ability *ability, double delta);
 
 void enemy_default_forget_behaviour(Enemy *enemy, double delta);
 
@@ -539,6 +546,7 @@ void getTextureFiles(char *fileName, int fileCount, SDL_Texture ***textures);
 
 
 // #TEXTURES
+SDL_Texture **dash_screen_anim;
 SDL_Texture *dash_icon;
 SDL_Texture *ability_icon_frame;
 SDL_Texture *shoot_icon;
@@ -573,6 +581,7 @@ TextureData *ceilingTexture;
 TextureData *ceilingLightTexture;
 
 // #SPRITES
+Sprite *dash_anim_sprite;
 Sprite *animatedWallSprite;
 Sprite *leftHandSprite;
 
@@ -585,6 +594,11 @@ Sound *player_default_shoot;
 Sound *player_default_hurt;
 
 // #VAR
+
+double screen_modulate_r = 1;
+double screen_modulate_g = 1;
+double screen_modulate_b = 1;
+
 SDL_Color vignette_color = {0, 0, 0};
 bool is_loading = false;
 double loading_progress = 0;
@@ -741,6 +755,16 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
 }
 
 void init() {  // #INIT
+
+    dash_screen_anim = malloc(sizeof(SDL_Texture *) * 6);
+    getTextureFiles("Textures/Abilities/Dash/screen_anim", 6, &dash_screen_anim);
+
+    dash_anim_sprite = createSprite(true, 1);
+    dash_anim_sprite->animations[0] = create_animation(6, 10, dash_screen_anim);
+    dash_anim_sprite->animations[0].loop = false;
+    dash_anim_sprite->animations[0].fps = 10;
+    dash_anim_sprite->animations[0].frame = 5;
+
 
     dash_icon = make_texture(renderer, "Textures/Abilities/Icons/dash_icon.bmp");
 
@@ -933,9 +957,7 @@ void key_pressed(SDL_Keycode key) {
     }
 
     if (key == SDLK_LSHIFT) {
-        if (player->utility != NULL) {
-            player->utility->activate(player->utility);
-        }
+        activate_ability(player->utility);
     }
     if (key == SDLK_F11) {
         fullscreen = !fullscreen;
@@ -982,14 +1004,10 @@ void playerTick(double delta) {
     if (player->special != NULL) player->special->tick(player->special, delta);
 
     if (isLMouseDown) {
-        if (player->primary != NULL) {
-            player->primary->activate(player->primary);
-        }
+        activate_ability(player->primary);
     }
     if (isRMouseDown) {
-        if (player->secondary != NULL) {
-            player->secondary->activate(player->secondary);
-        }
+        activate_ability(player->secondary);
     }
 
     v2 right = {1, 0};
@@ -1812,6 +1830,9 @@ void render_ability_hud() {
 
 void renderHUD() {
 
+    SDL_RenderCopy(renderer, getSpriteCurrentTexture(dash_anim_sprite), NULL, NULL);
+    spriteTick(dash_anim_sprite, 0.016);
+
     SDL_SetTextureColorMod(vignette_texture, vignette_color.r, vignette_color.g, vignette_color.b);
     SDL_RenderCopy(renderer, vignette_texture, NULL, NULL);
 
@@ -1848,6 +1869,10 @@ void drawSkybox() {
 }
 
 void render(double delta) {  // #RENDER
+
+    SDL_Texture *screen_texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, WINDOW_WIDTH, WINDOW_HEIGHT);
+
+    SDL_SetRenderTarget(renderer, screen_texture);
 
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
@@ -1901,6 +1926,16 @@ void render(double delta) {  // #RENDER
     if (render_debug) renderDebug();
 
     renderHUD();
+
+    SDL_SetRenderTarget(renderer, NULL);
+
+    screen_modulate_r = lerp(screen_modulate_r, 1, delta / 2);
+    screen_modulate_g = lerp(screen_modulate_g, 1, delta / 2);
+    screen_modulate_b = lerp(screen_modulate_b, 1, delta / 2);
+    
+    SDL_SetTextureColorMod(screen_texture, screen_modulate_r * 255, screen_modulate_g * 255, screen_modulate_b * 255);
+
+    SDL_RenderCopy(renderer, screen_texture, NULL, NULL);
 
     SDL_RenderPresent(renderer);
 }
@@ -2356,11 +2391,6 @@ Effect *createEffect(v2 pos, v2 size, Sprite *sprite, double lifeTime) {
 
 // Todo: add shoot cooldown for base shooting
 void ability_shoot_activate(Ability *ability) {
-
-    if (!ability->can_use) return;
-
-    ability->can_use = false;
-
     _shoot(0.02);
 }
 
@@ -3459,11 +3489,14 @@ Ability ability_primary_shoot_create() {
     return (Ability) {
         .activate = ability_shoot_activate,
         .tick = default_ability_tick,
+        .before_activate = NULL,
         .can_use = false,
         .cooldown = 0.2,
         .timer = 0.2,
         .type = A_PRIMARY,
-        .texture = shoot_icon
+        .texture = shoot_icon,
+        .delay = 0,
+        .delay_timer = -1000
     };
 }
 
@@ -3475,14 +3508,26 @@ void default_ability_tick(Ability *ability, double delta) {
             ability->can_use = true;
         }
     }
+
+    bool waiting_delay = ability->delay_timer > -999;
+    if (waiting_delay) {
+        ability->delay_timer -= delta;
+        if (ability->delay_timer <= 0) {
+            ability->delay_timer = -1000;
+            ability->activate(ability);
+        }
+    }
 }
 
 Rapidfire ability_secondary_shoot_create() {
     return (Rapidfire) {
         .ability.activate = ability_secondary_shoot_activate,
         .ability.tick = default_ability_tick,
+        .ability.before_activate = NULL,
         .ability.can_use = false,
-        .ability.cooldown = 10,
+        .ability.cooldown = 8,
+        .ability.delay = 0,
+        .ability.delay_timer = -1000,
         .ability.timer = 0,
         .ability.type = A_SECONDARY,
         .ability.texture = shotgun_icon,
@@ -3493,11 +3538,9 @@ Rapidfire ability_secondary_shoot_create() {
 }
 
 void ability_secondary_shoot_activate(Ability *ability) {
-    if (!ability->can_use) return;
-    ability->can_use = false;
 
     shakeCamera(35, 15, true, 10);
-    play_sound(rapidfire_sound, 1);
+    play_sound(rapidfire_sound, 0.8);
 
     Rapidfire *rapid_fire = (Rapidfire *)ability;
     rapid_fire->shots_left = rapid_fire->shot_amount;
@@ -3724,11 +3767,14 @@ Ability ability_dash_create() {
     return (Ability) {
         .activate = ability_dash_activate,
         .tick = default_ability_tick,
+        .before_activate = ability_dash_before_activate,
         .can_use = true,
         .cooldown = 3,
         .timer = 3,
         .type = A_UTILITY,
-        .texture = dash_icon
+        .texture = dash_icon,
+        .delay = 0.1,
+        .delay_timer = -1000
     };
 }
 
@@ -3738,35 +3784,53 @@ Ability ability_dash_create() {
 
 void ability_dash_activate(Ability *ability) {
 
-   if (!ability->can_use) return;
-   ability->can_use = false;
-
-    const double MAX_DASH_STR = 15;
+    const double MAX_DASH_STR = 100;
 
     v2 pos = player->pos;
     v2 dir = playerForward;
-    double dash_strength = MAX_DASH_STR;
+    double dash_distance = MAX_DASH_STR;
 
 
-    player->vel = v2_mul(dir, to_vec(dash_strength));
-    shakeCamera(15, 40, true, 10);
-
-    vignette_color = (SDL_Color){50, 210, 255, 125};
+    // player->vel = v2_mul(dir, to_vec(dash_strength));
+    shakeCamera(15, 20, true, 10);
 
 
-    // RayCollisionData ray = castRay(pos, dir);
+    vignette_color = (SDL_Color){50, 150, 255, 165};
+    fov = startFov * 1.3;
+
+
+    RayCollisionData ray = castRay(pos, dir);
 
     
 
-    // if (ray.hit) {
-    //     double dist_sqr = v2_distance_squared(ray.startpos, ray.collpos);
-    //     if (dist_sqr < dash_distance * dash_distance) {
-    //         dash_distance = sqrt(dist_sqr) - 1;
-    //     }
-    // }
+    if (ray.hit) {
+        double dist_sqr = v2_distance_squared(ray.startpos, ray.collpos);
+        if (dist_sqr < dash_distance * dash_distance) {
+            dash_distance = sqrt(dist_sqr) - 1;
+        }
+    }
 
-    // player->pos = v2_add(player->pos, v2_mul(dir, to_vec(dash_distance)));
+    player->pos = v2_add(player->pos, v2_mul(dir, to_vec(dash_distance)));
 
+}
+
+void activate_ability(Ability *ability) {
+    
+    if (ability == NULL) return;
+
+    if (!ability->can_use) return;
+
+    ability->can_use = false;
+
+    if (ability->before_activate != NULL) {
+        ability->before_activate(ability);
+    }
+
+    ability->delay_timer = ability->delay;
+}
+
+void ability_dash_before_activate(Ability *ability) {
+    spritePlayAnim(dash_anim_sprite, 0);
 }
 
 
