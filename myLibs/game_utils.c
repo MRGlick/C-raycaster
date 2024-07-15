@@ -80,8 +80,11 @@ Pixel TextureData_get_pixel(TextureData *data, int x, int y) {
     return (Pixel){r, g, b, a};
 }
 
-TextureData *TextureData_from_bmp(char *bmp_file) {
-    SDL_Surface* surface = SDL_LoadBMP(bmp_file);
+TextureData *TextureData_from_png(char *file) {
+
+    
+
+    SDL_Surface* surface = GPU_LoadSurface(file);
     if (!surface) {
         fprintf(stderr, "SDL_LoadBMP Error: %s\n", SDL_GetError());
         SDL_Quit();
@@ -152,23 +155,12 @@ double randf_range(double min, double max) {
     return min + randf() * (max - min);
 }
 
-GPU_Image *load_texture(GPU_Target *screen, char *file) {
+GPU_Image *load_texture(char *file) {
 
-    int file_len = strlen(file);
+    GPU_Image *image = GPU_LoadImage(file);
 
-    char *file_ext = file + (file_len - 4);
-
-    GPU_Image *image;
-
-    if (file_ext != ".bmp") {
-        image = GPU_LoadImage(file);
-    } else {
-        SDL_Renderer *renderer = SDL_GetRenderer(SDL_GetWindowFromID(screen->context->windowID));
-        SDL_Surface *surface = SDL_LoadBMP(file);
-        image = GPU_CopyImageFromSurface(surface);
-        SDL_FreeSurface(surface);
-    }
     GPU_SetImageFilter(image, GPU_FILTER_NEAREST);
+
     return image;
 }
 
@@ -184,11 +176,8 @@ double loop_clamp(double num, double min, double max) {
     return result;
 }
 
-v2 get_texture_size(SDL_Texture *texture) {
-    int x, y;
-    SDL_QueryTexture(texture, NULL, NULL, &x, &y);
-
-    return (v2){x, y};
+v2 get_texture_size(GPU_Image *texture) {
+    return (v2){texture->w, texture->h};
 }
 
 void cd_print(bool activate_cooldown, const char *text, ...) {

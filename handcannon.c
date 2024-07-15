@@ -16,8 +16,8 @@
 #define WINDOW_HEIGHT 580
 #define RESOLUTION_X 360
 #define RESOLUTION_Y 180
-#define X_SENSITIVITY 1
-#define Y_SENSITIVITY 8
+#define X_SENSITIVITY .3
+#define Y_SENSITIVITY 2.4
 #define COLOR_BLACK \
     (SDL_Color) { 0, 0, 0 }
 #define TRANSPARENT \
@@ -778,19 +778,19 @@ void init() {  // #INIT
     dash_anim_sprite->animations[0].frame = 5;
 
 
-    dash_icon = load_texture(screen, "Textures/Abilities/Icons/dash_icon.bmp");
+    dash_icon = load_texture("Textures/Abilities/Icons/dash_icon.png");
 
-    ability_icon_frame = load_texture(screen, "Textures/Abilities/Icons/icon_frame.bmp");
+    ability_icon_frame = load_texture("Textures/Abilities/Icons/icon_frame.png");
 
-    shotgun_icon = load_texture(screen, "Textures/Abilities/Icons/shotgun_icon.bmp");
+    shotgun_icon = load_texture("Textures/Abilities/Icons/shotgun_icon.png");
 
-    shoot_icon = load_texture(screen, "Textures/Abilities/Icons/shoot_icon.bmp");
+    shoot_icon = load_texture("Textures/Abilities/Icons/shoot_icon.png");
 
     rapidfire_sound = create_sound("Sounds/shotgun_ability.wav");
 
     exploder_explosion = create_sound("Sounds/exploder_explosion.wav");
 
-    exploder_hit = load_texture(screen, "Textures/ExploderEnemyAnim/exploder_hit.bmp");
+    exploder_hit = load_texture("Textures/ExploderEnemyAnim/exploder_hit.png");
 
     exploder_explosion_texture = malloc(sizeof(GPU_Image *) * 12);
     getTextureFiles("Textures/ExploderEnemyAnim/Explosion/explosion", 12, &exploder_explosion_texture);
@@ -802,12 +802,12 @@ void init() {  // #INIT
         char num[get_num_digits(i + 1)];
         sprintf(num, "%d", i + 1);
         char *fileWithNum = concat(baseFileName, num);
-        char *fileWithExtension = concat(fileWithNum, ".bmp");
+        char *fileWithExtension = concat(fileWithNum, ".png");
 
-        shooter_dirs_textures[i] = load_texture(screen, fileWithExtension);
+        shooter_dirs_textures[i] = load_texture(fileWithExtension);
     }
 
-    defualt_particle_texture = load_texture(screen, "Textures/base_particle.bmp");
+    defualt_particle_texture = load_texture("Textures/base_particle.png");
 
     shooter_bullet_default_frames = malloc(sizeof(GPU_Image *) * 4);
     shooter_bullet_explode_frames = malloc(sizeof(GPU_Image *) * 4);
@@ -829,25 +829,25 @@ void init() {  // #INIT
 
     init_cd_print();
 
-    mimran_jumpscare = load_texture(screen, "Textures/scary_monster2.bmp");
+    mimran_jumpscare = load_texture("Textures/scary_monster2.png");
 
-    shooter_hit_texture = load_texture(screen, "Textures/ShooterEnemy/hit_frame1.bmp");
+    shooter_hit_texture = load_texture("Textures/ShooterEnemy/hit_frame1.png");
 
-    healthbar_texture = load_texture(screen, "Textures/health_bar.bmp");
+    healthbar_texture = load_texture("Textures/health_bar.png");
 
-    vignette_texture = load_texture(screen, "Textures/vignette.bmp");
+    vignette_texture = load_texture("Textures/vignette.png");
 
-    fenceTexture = load_texture(screen, "Textures/fence.bmp");
+    fenceTexture = load_texture("Textures/fence.png");
     SDL_SetTextureBlendMode(fenceTexture, SDL_BLENDMODE_BLEND);
 
     floorAndCeiling = GPU_CreateImage(RESOLUTION_X, RESOLUTION_Y, GPU_FORMAT_RGBA);
     GPU_SetImageFilter(floorAndCeiling, GPU_FILTER_NEAREST);
 
-    floorTexture = TextureData_from_bmp("Textures/floor.bmp");
-    floorLightTexture = TextureData_from_bmp("Textures/floor_light.bmp");
-    floorTexture2 = TextureData_from_bmp("Textures/floor2.bmp");
-    ceilingTexture = TextureData_from_bmp("Textures/ceiling.bmp");
-    ceilingLightTexture = TextureData_from_bmp("Textures/ceiling_light.bmp");
+    floorTexture = TextureData_from_png("Textures/floor.png");
+    floorLightTexture = TextureData_from_png("Textures/floor_light.png");
+    floorTexture2 = TextureData_from_png("Textures/floor2.png");
+    ceilingTexture = TextureData_from_png("Textures/ceiling.png");
+    ceilingLightTexture = TextureData_from_png("Textures/ceiling_light.png");
 
     init_tilemap(&levelTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
     init_tilemap(&floorTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
@@ -858,14 +858,14 @@ void init() {  // #INIT
 
     gameobjects = create_arraylist(10);
 
-    wallTexture = load_texture(screen, "Textures/wall.bmp");
+    wallTexture = load_texture("Textures/wall.png");
      GPU_SetImageFilter(wallTexture, GPU_FILTER_NEAREST);
 
 
     wallFrames = malloc(sizeof(GPU_Image *) * 17);
     getTextureFiles("Textures/WallAnim/wallAnim", 17, &wallFrames);
 
-    crosshair = load_texture(screen, "Textures/crosshair.bmp");
+    crosshair = load_texture("Textures/crosshair.png");
 
     animatedWallSprite = createSprite(true, 1);
     animatedWallSprite->animations[0] = create_animation(17, 0, wallFrames);
@@ -874,7 +874,7 @@ void init() {  // #INIT
 
     leftHandSprite = createSprite(true, 2);
     GPU_Image **default_hand = malloc(sizeof(GPU_Image *)); 
-    default_hand[0] = load_texture(screen, "Textures/rightHandAnim/rightHandAnim6.bmp");
+    default_hand[0] = load_texture("Textures/rightHandAnim/rightHandAnim6.png");
     leftHandSprite->animations[0] = create_animation(1, 0, default_hand);
 
 
@@ -891,7 +891,7 @@ void init() {  // #INIT
 
     for (int i = 0; i < 26; i++) keyPressArr[i] = false;
 
-    entityTexture = load_texture(screen, "Textures/scary_monster.bmp");
+    entityTexture = load_texture("Textures/scary_monster.png");
 
     if (isValidLevel(levelToLoad)) {
         load_level(levelToLoad);
@@ -900,7 +900,7 @@ void init() {  // #INIT
         load_level("Levels/default_level.hclevel");
     }
 
-    skybox_texture = load_texture(screen, "Textures/skybox.bmp");
+    skybox_texture = load_texture("Textures/skybox.png");
 
     // SDL_RenderSetLogicalSize(renderer, WINDOW_WIDTH, WINDOW_HEIGHT);
 
@@ -1804,7 +1804,7 @@ void render_health_bar() {
     };
 
     // SDL_SetRenderDrawColor(renderer, 200, 0, 0, 255);
-    // SDL_RenderFillRect(renderer, &health_rect);
+    GPU_RectangleFilled2(screen, health_rect, (SDL_Color){200, 0, 0, 255});
 
     GPU_BlitRect(healthbar_texture, NULL, screen, &outline_rect);
 }
@@ -1837,7 +1837,7 @@ void render_ability_helper(v2 pos, Ability *ability) {
 
     // SDL_SetRenderDrawColor(renderer, 0, 0, 0, 170);
     
-    // SDL_RenderFillRect(renderer, &primary_progress_rect);
+    GPU_RectangleFilled2(screen, primary_progress_rect, GPU_MakeColor(0, 0, 0, 170));
 
 
     // SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
@@ -2874,7 +2874,7 @@ bool isValidLevel(char *file) {
     return false;
 }
 
-// Takes a file name with no extension and assumes it's a bmp
+// Takes a file name with no extension and assumes it's a png
 void getTextureFiles(char *fileName, int fileCount, GPU_Image ***textures) {
     int charCount = get_num_digits(fileCount);
 
@@ -2882,9 +2882,9 @@ void getTextureFiles(char *fileName, int fileCount, GPU_Image ***textures) {
         char num[charCount + 10];
         sprintf(num, "%d", i + 1);
         char *fileWithNum = concat(fileName, num);
-        char *fileWithExtension = concat(fileWithNum, ".bmp");
+        char *fileWithExtension = concat(fileWithNum, ".png");
 
-        GPU_Image *tex = fileWithExtension;
+        GPU_Image *tex = load_texture(fileWithExtension);
         (*textures)[i] = tex;
 
         free(fileWithNum);
@@ -3138,8 +3138,7 @@ void init_loading_screen() {
     is_loading = true;
     loading_progress = 0;
 
-    // SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    // SDL_RenderClear(renderer);
+    GPU_Clear(screen);
 
     const v2 bar_container_size = {
         200,
@@ -3165,19 +3164,17 @@ void init_loading_screen() {
         bar_size.y
     };
 
-    // SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    // SDL_RenderFillRect(renderer, &bar_container);
+    GPU_RectangleFilled2(screen, bar_container, GPU_MakeColor(255, 255, 255, 255));
 
-    // SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    // SDL_RenderFillRect(renderer, &bar_background);
+    GPU_RectangleFilled2(screen, bar_background, GPU_MakeColor(0, 0, 0, 255));
 
-    // SDL_RenderPresent(renderer);
+    GPU_Flip(screen);
 
 }
 
 void update_loading_progress(double progress) {
-    // SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    // SDL_RenderClear(renderer);
+
+    GPU_Clear(screen);
 
     const v2 bar_container_size = {
         200,
@@ -3213,16 +3210,14 @@ void update_loading_progress(double progress) {
     };
     bar.w = bar_size.x * progress;
 
-    // SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    // SDL_RenderFillRect(renderer, &bar_container);
+    GPU_RectangleFilled2(screen, bar_container, GPU_MakeColor(255, 255, 255, 255));
 
-    // SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    // SDL_RenderFillRect(renderer, &bar_background);
+    GPU_RectangleFilled2(screen, bar_background, GPU_MakeColor(0, 0, 0, 255));
 
-    // SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    // SDL_RenderFillRect(renderer, &bar);
+    GPU_RectangleFilled2(screen, bar, GPU_MakeColor(255, 255, 255, 255));
 
-    // SDL_RenderPresent(renderer);
+    GPU_Flip(screen);
+
 }
 
 void remove_loading_screen() {
