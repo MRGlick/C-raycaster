@@ -7,8 +7,8 @@
 #include "ui.c"
 #include <SDL_gpu.h>
 
-SDL_Renderer *renderer;
-SDL_Window *window;
+// SDL_Renderer *renderer;
+// SDL_Window *window;
 
 // #DEFINITIONS
 
@@ -92,7 +92,7 @@ typedef enum {
 // #STRUCTS
 
 typedef struct Animation {
-    SDL_Texture **frames;
+    GPU_Image **frames;
     int frameCount;
     int frame;
     double fps;
@@ -103,7 +103,7 @@ typedef struct Animation {
 } Animation;
 
 typedef struct Sprite {
-    SDL_Texture *texture;  // not used if animated
+    GPU_Image *texture;  // not used if animated
     bool isAnimated;
     int currentAnimationIdx;
     Animation *animations;
@@ -149,7 +149,7 @@ typedef struct Ability {
     double delay_timer;
     AbilityType type;
 
-    SDL_Texture *texture;
+    GPU_Image *texture;
 
 } Ability;
 
@@ -251,7 +251,7 @@ typedef struct Enemy {
     Entity entity;
     DirectionalSprite *dirSprite;
     CircleCollider *collider;
-    SDL_Texture *hit_texture;
+    GPU_Image *hit_texture;
     v2 dir;
     v2 vel;
     double speed, speed_multiplier;
@@ -490,11 +490,11 @@ double mili_to_sec(u64 mili);
 
 v2 get_player_forward();
 
-Animation create_animation(int frameCount, int priority, SDL_Texture **frames);
+Animation create_animation(int frameCount, int priority, GPU_Image **frames);
 
 void freeAnimation(Animation *anim);
 
-SDL_Texture *getSpriteCurrentTexture(Sprite *sprite);
+GPU_Image *getSpriteCurrentTexture(Sprite *sprite);
 
 Sprite *dir_sprite_current_sprite(DirectionalSprite *dSprite, v2 spritePos);
 
@@ -528,7 +528,7 @@ void ability_shoot_activate(Ability *ability);
 
 void enemyTakeDmg(Enemy *enemy, int dmg);
 
-void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height, bool affected_by_light);
+void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affected_by_light);
 
 void renderDirSprite(DirectionalSprite *dSprite, v2 pos, v2 size, double height);
 
@@ -542,40 +542,40 @@ ShooterEnemy *enemy_shooter_create(v2 pos);
 
 bool isValidLevel(char *file);
 
-void getTextureFiles(char *fileName, int fileCount, SDL_Texture ***textures);
+void getTextureFiles(char *fileName, int fileCount, GPU_Image ***textures);
 
 // #FUNC END
 
 
 
 // #TEXTURES
-SDL_Texture **dash_screen_anim;
-SDL_Texture *dash_icon;
-SDL_Texture *ability_icon_frame;
-SDL_Texture *shoot_icon;
-SDL_Texture *shotgun_icon;
-SDL_Texture *exploder_hit;
-SDL_Texture **exploder_explosion_texture;
-SDL_Texture **shooter_dirs_textures;
-SDL_Texture *defualt_particle_texture;
-SDL_Texture *mimran_jumpscare;
-SDL_Texture *shooter_hit_texture;
-SDL_Texture *healthbar_texture;
-SDL_Texture *vignette_texture;
-SDL_Texture *enemy_bullet_texture;
+GPU_Image **dash_screen_anim;
+GPU_Image *dash_icon;
+GPU_Image *ability_icon_frame;
+GPU_Image *shoot_icon;
+GPU_Image *shotgun_icon;
+GPU_Image *exploder_hit;
+GPU_Image **exploder_explosion_texture;
+GPU_Image **shooter_dirs_textures;
+GPU_Image *defualt_particle_texture;
+GPU_Image *mimran_jumpscare;
+GPU_Image *shooter_hit_texture;
+GPU_Image *healthbar_texture;
+GPU_Image *vignette_texture;
+GPU_Image *enemy_bullet_texture;
 GPU_Image *floorAndCeiling;
 GPU_Image *wallTexture;
-SDL_Texture *entityTexture;
-SDL_Texture *crosshair;
-SDL_Texture *fenceTexture;
-SDL_Texture *skybox_texture;
-SDL_Texture **wallFrames;
-SDL_Texture **shootHitEffectFrames;
-SDL_Texture **enemy_bullet_destroy_anim;
-SDL_Texture **exclam_notice_anim;
-SDL_Texture **exploder_frames;
-SDL_Texture **shooter_bullet_default_frames;
-SDL_Texture **shooter_bullet_explode_frames;
+GPU_Image *entityTexture;
+GPU_Image *crosshair;
+GPU_Image *fenceTexture;
+GPU_Image *skybox_texture;
+GPU_Image **wallFrames;
+GPU_Image **shootHitEffectFrames;
+GPU_Image **enemy_bullet_destroy_anim;
+GPU_Image **exclam_notice_anim;
+GPU_Image **exploder_frames;
+GPU_Image **shooter_bullet_default_frames;
+GPU_Image **shooter_bullet_explode_frames;
 
 TextureData *floorTexture;
 TextureData *floorTexture2;
@@ -650,12 +650,12 @@ GPU_Target *screen;
 int main(int argc, char *argv[]) {
     if (SDL_Init(SDL_INIT_EVERYTHING) < 0) printf("Shit. \n");
 
-    window = SDL_CreateWindow("Doom style 3D!", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_WIDTH, WINDOW_HEIGHT, 0);
+    // window = SDL_CreateWindow("Doom style 3D!", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_WIDTH, WINDOW_HEIGHT, 0);
 
 
     screen = GPU_Init(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_DEFAULT_INIT_FLAGS);
 
-    renderer = SDL_CreateRenderer(window, -1, RENDERER_FLAGS);
+    // renderer = SDL_CreateRenderer(window, -1, RENDERER_FLAGS);
 
     if (argc >= 2) {
         levelToLoad = argv[1];
@@ -686,9 +686,9 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    SDL_DestroyRenderer(renderer);
+    // SDL_DestroyRenderer(renderer);
 
-    SDL_DestroyWindow(window);
+    // SDL_DestroyWindow(window);
 
     SDL_Quit();
 }
@@ -764,7 +764,7 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
 
 void init() {  // #INIT
 
-    dash_screen_anim = malloc(sizeof(SDL_Texture *) * 6);
+    dash_screen_anim = malloc(sizeof(GPU_Image *) * 6);
     getTextureFiles("Textures/Abilities/Dash/screen_anim", 6, &dash_screen_anim);
 
     dash_anim_sprite = createSprite(true, 1);
@@ -774,48 +774,48 @@ void init() {  // #INIT
     dash_anim_sprite->animations[0].frame = 5;
 
 
-    dash_icon = make_texture(renderer, "Textures/Abilities/Icons/dash_icon.bmp");
+    dash_icon = GPU_LoadImage("Textures/Abilities/Icons/dash_icon.png");
 
-    ability_icon_frame = make_texture(renderer, "Textures/Abilities/Icons/icon_frame.bmp");
+    ability_icon_frame = GPU_LoadImage("Textures/Abilities/Icons/icon_frame.png");
 
-    shotgun_icon = make_texture(renderer, "Textures/Abilities/Icons/shotgun_icon.bmp");
+    shotgun_icon = GPU_LoadImage("Textures/Abilities/Icons/shotgun_icon.png");
 
-    shoot_icon = make_texture(renderer, "Textures/Abilities/Icons/shoot_icon.bmp");
+    shoot_icon = GPU_LoadImage("Textures/Abilities/Icons/shoot_icon.png");
 
     rapidfire_sound = create_sound("Sounds/shotgun_ability.wav");
 
     exploder_explosion = create_sound("Sounds/exploder_explosion.wav");
 
-    exploder_hit = make_texture(renderer, "Textures/ExploderEnemyAnim/exploder_hit.bmp");
+    exploder_hit = GPU_LoadImage("Textures/ExploderEnemyAnim/exploder_hit.png");
 
-    exploder_explosion_texture = malloc(sizeof(SDL_Texture *) * 12);
+    exploder_explosion_texture = malloc(sizeof(GPU_Image *) * 12);
     getTextureFiles("Textures/ExploderEnemyAnim/Explosion/explosion", 12, &exploder_explosion_texture);
 
-    shooter_dirs_textures = malloc(sizeof(SDL_Texture *) * 16);
+    shooter_dirs_textures = malloc(sizeof(GPU_Image *) * 16);
 
     for (int i = 0; i < 16; i++) {
         char *baseFileName = "Textures/ShooterEnemy/frame";
         char num[get_num_digits(i + 1)];
         sprintf(num, "%d", i + 1);
         char *fileWithNum = concat(baseFileName, num);
-        char *fileWithExtension = concat(fileWithNum, ".bmp");
+        char *fileWithExtension = concat(fileWithNum, ".png");
 
-        shooter_dirs_textures[i] = make_texture(renderer, fileWithExtension);
+        shooter_dirs_textures[i] = GPU_LoadImage(fileWithExtension);
     }
 
-    defualt_particle_texture = make_texture(renderer, "Textures/base_particle.bmp");
+    defualt_particle_texture = GPU_LoadImage("Textures/base_particle.png");
 
-    shooter_bullet_default_frames = malloc(sizeof(SDL_Texture *) * 4);
-    shooter_bullet_explode_frames = malloc(sizeof(SDL_Texture *) * 4);
+    shooter_bullet_default_frames = malloc(sizeof(GPU_Image *) * 4);
+    shooter_bullet_explode_frames = malloc(sizeof(GPU_Image *) * 4);
 
     getTextureFiles("Textures/ShooterEnemy/Bullet/Default/Bullet", 4, &shooter_bullet_default_frames);
     getTextureFiles("Textures/ShooterEnemy/Bullet/Explode/Bullet", 4, &shooter_bullet_explode_frames);
 
-    exploder_frames = malloc(sizeof(SDL_Texture *) * 80);
+    exploder_frames = malloc(sizeof(GPU_Image *) * 80);
     getTextureFiles("Textures/ExploderEnemyAnim/exploderEnemyAnim", 80, &exploder_frames);
 
 
-    exclam_notice_anim = malloc(sizeof(SDL_Texture *) * 6);
+    exclam_notice_anim = malloc(sizeof(GPU_Image *) * 6);
     getTextureFiles("Textures/ExclamNoticeAnim/noticeAnim", 6, &exclam_notice_anim);
 
     player_default_hurt = create_sound("Sounds/player_default_hurt.wav");
@@ -825,15 +825,15 @@ void init() {  // #INIT
 
     init_cd_print();
 
-    mimran_jumpscare = make_texture(renderer, "Textures/scary_monster2.bmp");
+    mimran_jumpscare = GPU_LoadImage("Textures/scary_monster2.png");
 
-    shooter_hit_texture = make_texture(renderer, "Textures/ShooterEnemy/hit_frame1.bmp");
+    shooter_hit_texture = GPU_LoadImage("Textures/ShooterEnemy/hit_frame1.png");
 
-    healthbar_texture = make_texture(renderer, "Textures/health_bar.bmp");
+    healthbar_texture = GPU_LoadImage("Textures/health_bar.png");
 
-    vignette_texture = make_texture(renderer, "Textures/vignette.bmp");
+    vignette_texture = GPU_LoadImage("Textures/vignette.png");
 
-    fenceTexture = make_texture(renderer, "Textures/fence.bmp");
+    fenceTexture = GPU_LoadImage("Textures/fence.png");
     SDL_SetTextureBlendMode(fenceTexture, SDL_BLENDMODE_BLEND);
 
     floorAndCeiling = GPU_CreateImage(RESOLUTION_X, RESOLUTION_Y, GPU_FORMAT_RGBA);
@@ -858,10 +858,10 @@ void init() {  // #INIT
      GPU_SetImageFilter(wallTexture, GPU_FILTER_NEAREST);
 
 
-    wallFrames = malloc(sizeof(SDL_Texture *) * 17);
+    wallFrames = malloc(sizeof(GPU_Image *) * 17);
     getTextureFiles("Textures/WallAnim/wallAnim", 17, &wallFrames);
 
-    crosshair = make_texture(renderer, "Textures/crosshair.bmp");
+    crosshair = GPU_LoadImage("Textures/crosshair.png");
 
     animatedWallSprite = createSprite(true, 1);
     animatedWallSprite->animations[0] = create_animation(17, 0, wallFrames);
@@ -869,8 +869,8 @@ void init() {  // #INIT
     spritePlayAnim(animatedWallSprite, 0);
 
     leftHandSprite = createSprite(true, 2);
-    SDL_Texture **default_hand = malloc(sizeof(SDL_Texture *)); 
-    default_hand[0] = make_texture(renderer, "Textures/rightHandAnim/rightHandAnim6.bmp");
+    GPU_Image **default_hand = malloc(sizeof(GPU_Image *)); 
+    default_hand[0] = GPU_LoadImage("Textures/rightHandAnim/rightHandAnim6.png");
     leftHandSprite->animations[0] = create_animation(1, 0, default_hand);
 
 
@@ -881,13 +881,13 @@ void init() {  // #INIT
     leftHandSprite->animations[1].loop = false;
     spritePlayAnim(leftHandSprite, 0);
 
-    shootHitEffectFrames = malloc(sizeof(SDL_Texture *) * 5);
+    shootHitEffectFrames = malloc(sizeof(GPU_Image *) * 5);
 
     getTextureFiles("Textures/ShootEffectAnim/shootHitEffect", 5, &shootHitEffectFrames);
 
     for (int i = 0; i < 26; i++) keyPressArr[i] = false;
 
-    entityTexture = make_texture(renderer, "Textures/scary_monster.bmp");
+    entityTexture = GPU_LoadImage("Textures/scary_monster.png");
 
     if (isValidLevel(levelToLoad)) {
         load_level(levelToLoad);
@@ -896,9 +896,9 @@ void init() {  // #INIT
         load_level("Levels/default_level.hclevel");
     }
 
-    skybox_texture = make_texture(renderer, "Textures/skybox.bmp");
+    skybox_texture = GPU_LoadImage("Textures/skybox.png");
 
-    SDL_RenderSetLogicalSize(renderer, WINDOW_WIDTH, WINDOW_HEIGHT);
+    // SDL_RenderSetLogicalSize(renderer, WINDOW_WIDTH, WINDOW_HEIGHT);
 
 
 }  // #INIT END
@@ -1126,7 +1126,8 @@ void tick(double delta) {
     tanHalfFOV = tan(deg_to_rad(fov / 2));
 
     if (lockMouse) {
-        SDL_WarpMouseInWindow(window, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
+        //SDL_WarpMouseInWindow(window, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
+        
     }
 
     
@@ -1167,37 +1168,37 @@ double distance_to_color(double distance, double a) {
 void renderDebug() {  // #DEBUG
 
     
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    // SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
     int resolution = 8;
 
     for (int row = 0; row < TILEMAP_HEIGHT * resolution; row++) {
         for (int col = 0; col < TILEMAP_WIDTH * resolution; col++) {
             BakedLightColor color = baked_light_grid[row  * BAKED_LIGHT_RESOLUTION/ resolution][col * BAKED_LIGHT_RESOLUTION / resolution];
-            SDL_SetRenderDrawColor(renderer, clamp(125 * color.r, 0, 255), clamp(125 * color.g, 0, 255), clamp(125 * color.b, 0, 255), 255);
+            // SDL_SetRenderDrawColor(renderer, clamp(125 * color.r, 0, 255), clamp(125 * color.g, 0, 255), clamp(125 * color.b, 0, 255), 255);
             double y = (double)row * tileSize / resolution;
             double x = (double)col * tileSize / resolution;
             v2 px_size = v2_div((v2){WINDOW_WIDTH, WINDOW_HEIGHT}, to_vec(tileSize * BAKED_LIGHT_RESOLUTION)); 
-            SDL_Rect rect = {
+            GPU_Rect rect = {
                 x,
                 y,
                 tileSize / resolution,
                 tileSize / resolution
             };
 
-            SDL_RenderFillRect(renderer, &rect);
+            // SDL_RenderFillRect(renderer, &rect);
         }
     }
 
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    // SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
 
-    SDL_Rect player_rect = {
+    GPU_Rect player_rect = {
         player->pos.x,
         player->pos.y,
         10,
         10
     };
-    SDL_RenderFillRect(renderer, &player_rect);
+    // SDL_RenderFillRect(renderer, &player_rect);
 }
 
 v2 getRayDirByIdx(int i) {
@@ -1472,7 +1473,7 @@ void drawFloorAndCeiling() {
     GPU_BlitRect(floorAndCeiling, NULL, screen, &rect); 
 }
 
-void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height, bool affected_by_light) {
+void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affected_by_light) {
     
 
     v2 screen_pos = worldToScreen(pos, height, false);
@@ -1490,7 +1491,9 @@ void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height, bool af
 
     v2 final_size = v2_div(size, to_vec(dist_to_player * fov_factor));
 
-    SDL_Rect dstRect = {
+    GPU_Init()
+
+    GPU_Rect dstRect = {
         screen_pos.x - final_size.x / 2,
         screen_pos.y - final_size.y / 2,
         final_size.x,
@@ -1510,6 +1513,8 @@ void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height, bool af
     
         BakedLightColor baked_color = get_light_color_by_pos(pos, 0, 0);
 
+        
+
         rgb[0] = color * baked_color.r;
         rgb[1] = color * baked_color.g;
         rgb[2] = color * baked_color.b;
@@ -1518,19 +1523,19 @@ void renderTexture(SDL_Texture *texture, v2 pos, v2 size, double height, bool af
     }
     
 
-    SDL_SetTextureColorMod(texture, rgb[0], rgb[1], rgb[2]);
-    SDL_RenderCopy(renderer, texture, NULL, &dstRect);
-    SDL_SetTextureColorMod(texture, 255, 255, 255);
+    GPU_SetRGB(texture, rgb[0], rgb[1], rgb[2]);
+    GPU_BlitRect(texture, NULL, screen, &dstRect);
+    GPU_SetRGB(texture, 255, 255, 255);
 }
 
 void renderDirSprite(DirectionalSprite *dSprite, v2 pos, v2 size, double height) {
-    SDL_Texture *texture = getSpriteCurrentTexture(dir_sprite_current_sprite(dSprite, pos));
+    GPU_Image *texture = getSpriteCurrentTexture(dir_sprite_current_sprite(dSprite, pos));
 
     renderTexture(texture, pos, size, height, true);
 }
 
 void renderEntity(Entity entity) {  // RENDER ENTITY
-    SDL_Texture *texture = getSpriteCurrentTexture(entity.sprite);
+    GPU_Image *texture = getSpriteCurrentTexture(entity.sprite);
 
     renderTexture(texture, entity.pos, entity.size, entity.height, entity.affected_by_light);
 }
@@ -1718,7 +1723,7 @@ void renderWallStripe(WallStripe *stripe) {
     // GPU_Rectangle(screen, dstRect.x, dstRect.y, dstRect.x + dstRect.w, dstRect.y + dstRect.h, GPU_MakeColor(255, 0, 0, 255));
 
     // SDL_SetTextureColorMod(texture, rgb[0], rgb[1], rgb[2]);
-    // SDL_RenderCopy(renderer, texture, &srcRect, &dstRect);
+    // GPU_BlitRect(texture, &srcRect, &dstRect);
     free(stripe);
 }
 
@@ -1738,7 +1743,7 @@ BakedLightColor get_light_color_by_pos(v2 pos, int row_offset, int col_offset) {
 
 void render_hand() {
 
-    SDL_Rect leftHandRect = {player->handOffset.x + cameraOffset.x, player->handOffset.y + cameraOffset.y, WINDOW_WIDTH, WINDOW_HEIGHT};
+    GPU_Rect leftHandRect = {player->handOffset.x + cameraOffset.x, player->handOffset.y + cameraOffset.y, WINDOW_WIDTH, WINDOW_HEIGHT};
 
     BakedLightColor baked_light_color;
 
@@ -1759,7 +1764,7 @@ void render_hand() {
     }
 
 
-    SDL_Texture *texture = getSpriteCurrentTexture(leftHandSprite);
+    GPU_Image *texture = getSpriteCurrentTexture(leftHandSprite);
     
 
     if (texture != NULL) {
@@ -1771,8 +1776,8 @@ void render_hand() {
 
         clampColors(rgb);
 
-        SDL_SetTextureColorMod(texture, rgb[0], rgb[1], rgb[2]);
-        SDL_RenderCopy(renderer, texture, NULL, &leftHandRect);
+        GPU_SetRGB(texture, rgb[0], rgb[1], rgb[2]);
+        GPU_BlitRect(texture, NULL, screen, &leftHandRect);
     }
 }
 
@@ -1782,24 +1787,24 @@ void render_health_bar() {
 
     v2 scale = {3, 3};
 
-    SDL_Rect outline_rect = {
+    GPU_Rect outline_rect = {
         0,
         0,
         tex_size.x * scale.x,
         tex_size.y * scale.y 
     };
 
-    SDL_Rect health_rect = {
+    GPU_Rect health_rect = {
         16 * scale.x,
         18 * scale.y,
         78 * scale.x * ((double)player->health / player->maxHealth),
         11 * scale.y
     };
 
-    SDL_SetRenderDrawColor(renderer, 200, 0, 0, 255);
-    SDL_RenderFillRect(renderer, &health_rect);
+    // SDL_SetRenderDrawColor(renderer, 200, 0, 0, 255);
+    // SDL_RenderFillRect(renderer, &health_rect);
 
-    SDL_RenderCopy(renderer, healthbar_texture, NULL, &outline_rect);
+    GPU_BlitRect(healthbar_texture, NULL, screen, &outline_rect);
 }
 
 void render_ability_helper(v2 pos, Ability *ability) {
@@ -1807,9 +1812,9 @@ void render_ability_helper(v2 pos, Ability *ability) {
 
     v2 size = to_vec(72);
 
-    SDL_Rect rect = {pos.x, pos.y, size.x, size.y};
+    GPU_Rect rect = {pos.x, pos.y, size.x, size.y};
 
-    SDL_Rect frame_rect = {
+    GPU_Rect frame_rect = {
         pos.x - 3,
         pos.y - 3,
         size.x + 6,
@@ -1817,24 +1822,24 @@ void render_ability_helper(v2 pos, Ability *ability) {
     };
 
     if (ability->texture != NULL) {
-        SDL_RenderCopy(renderer, ability->texture, NULL, &rect);
+        GPU_BlitRect(ability->texture, NULL, screen, &rect);
     }
     double primary_progress = ability->timer == ability->cooldown? 0 : ability->timer / ability->cooldown;
 
-    SDL_Rect primary_progress_rect = {
+    GPU_Rect primary_progress_rect = {
         pos.x, 
         pos.y,
         size.x,
         size.y * primary_progress
     };
 
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 170);
+    // SDL_SetRenderDrawColor(renderer, 0, 0, 0, 170);
     
-    SDL_RenderFillRect(renderer, &primary_progress_rect);
+    // SDL_RenderFillRect(renderer, &primary_progress_rect);
 
 
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    SDL_RenderCopy(renderer, ability_icon_frame, NULL, &frame_rect);
+    // SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    GPU_BlitRect(ability_icon_frame, NULL, screen, &frame_rect);
 }
 
 void render_ability_hud() {
@@ -1847,11 +1852,11 @@ void render_ability_hud() {
 
 void renderHUD() {
 
-    SDL_RenderCopy(renderer, getSpriteCurrentTexture(dash_anim_sprite), NULL, NULL);
+    GPU_BlitRect(getSpriteCurrentTexture(dash_anim_sprite), NULL, screen, NULL);
     spriteTick(dash_anim_sprite, 0.016);
 
-    SDL_SetTextureColorMod(vignette_texture, vignette_color.r, vignette_color.g, vignette_color.b);
-    SDL_RenderCopy(renderer, vignette_texture, NULL, NULL);
+    GPU_SetRGB(vignette_texture, vignette_color.r, vignette_color.g, vignette_color.b);
+    GPU_BlitRect(vignette_texture, NULL, screen, NULL);
 
     render_hand();
 
@@ -1859,50 +1864,50 @@ void renderHUD() {
 
     render_ability_hud();
 
-    SDL_Rect crosshairRect = {WINDOW_WIDTH / 2 - 8, WINDOW_HEIGHT / 2 - 8, 16, 16};
+    GPU_Rect crosshairRect = {WINDOW_WIDTH / 2 - 8, WINDOW_HEIGHT / 2 - 8, 16, 16};
 
-    SDL_RenderCopy(renderer, crosshair, NULL, &crosshairRect);
+    GPU_BlitRect(crosshair, NULL, screen, &crosshairRect);
 
     int shots = max(player->pendingShots, (int)(player->shootChargeTimer * 3));
 
-    SDL_Rect playerPendingShotsRect = {WINDOW_WIDTH / 2 + -10 * shots, WINDOW_HEIGHT * 0.8, 20 * shots, WINDOW_HEIGHT * 0.05};
+    GPU_Rect playerPendingShotsRect = {WINDOW_WIDTH / 2 + -10 * shots, WINDOW_HEIGHT * 0.8, 20 * shots, WINDOW_HEIGHT * 0.05};
 
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    // SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
 
-    SDL_RenderFillRect(renderer, &playerPendingShotsRect);
+    // SDL_RenderFillRect(renderer, &playerPendingShotsRect);
 
 }
 
 void drawSkybox() {
-    SDL_Texture *tex = skybox_texture;
+    GPU_Image *tex = skybox_texture;
 
     double x = loop_clamp(player->angle / startFov * WINDOW_WIDTH, 0, WINDOW_WIDTH);
 
     double yOffsets = -player->pitch;
 
-    SDL_Rect skybox_rect = {-x, yOffsets, WINDOW_WIDTH * 2, WINDOW_HEIGHT / 2};
+    GPU_Rect skybox_rect = {-x, yOffsets, WINDOW_WIDTH * 2, WINDOW_HEIGHT / 2};
 
-    SDL_RenderCopy(renderer, tex, NULL, &skybox_rect);
+    GPU_BlitRect(tex, NULL, screen, &skybox_rect);
 }
 
 void render(double delta) {  // #RENDER
 
     GPU_Clear(screen);
 
-    SDL_Texture *screen_texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, WINDOW_WIDTH, WINDOW_HEIGHT);
+    // GPU_Image *screen_texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, WINDOW_WIDTH, WINDOW_HEIGHT);
 
-    SDL_SetRenderTarget(renderer, screen_texture);
+    // SDL_SetRenderTarget(renderer, screen_texture);
 
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    SDL_RenderClear(renderer);
+    // SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    // SDL_RenderClear(renderer);
 
     char *newTitle = "FPS: ";
     char *fps = malloc(4);
     decimal_to_text(realFps, fps);
 
-    SDL_SetWindowTitle(window, concat(newTitle, fps));
+    // SDL_SetWindowTitle(window, concat(newTitle, fps));
 
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    // SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
     arraylist *renderList = getRenderList();
 
@@ -1946,17 +1951,15 @@ void render(double delta) {  // #RENDER
 
     renderHUD();
 
-    SDL_SetRenderTarget(renderer, NULL);
+    // SDL_SetRenderTarget(renderer, NULL);
 
     screen_modulate_r = lerp(screen_modulate_r, 1, delta / 2);
     screen_modulate_g = lerp(screen_modulate_g, 1, delta / 2);
     screen_modulate_b = lerp(screen_modulate_b, 1, delta / 2);
     
-    SDL_SetTextureColorMod(screen_texture, screen_modulate_r * 255, screen_modulate_g * 255, screen_modulate_b * 255);
+    // SDL_SetTextureColorMod(screen_texture, screen_modulate_r * 255, screen_modulate_g * 255, screen_modulate_b * 255);
 
-    SDL_RenderCopy(renderer, screen_texture, NULL, NULL);
-
-    SDL_RenderPresent(renderer); // finna get removed
+    // SDL_RenderPresent(renderer); // finna get removed
 
     GPU_Flip(screen);
 } // #RENDER END
@@ -2320,12 +2323,12 @@ void freeAnimation(Animation *anim) {
     free(anim);
 }
 
-Animation create_animation(int frameCount, int priority, SDL_Texture **frames) {
+Animation create_animation(int frameCount, int priority, GPU_Image **frames) {
     Animation anim;
     anim.playing = false;
     anim.frameCount = frameCount;
     if (frames == NULL) {
-        anim.frames = malloc(sizeof(SDL_Texture *) * frameCount);
+        anim.frames = malloc(sizeof(GPU_Image *) * frameCount);
     } else {
         anim.frames = frames;
     }
@@ -2384,7 +2387,7 @@ void spritePlayAnim(Sprite *sprite, int idx) {
     sprite->animations[idx].playing = true;
 }
 
-SDL_Texture *getSpriteCurrentTexture(Sprite *sprite) {
+GPU_Image *getSpriteCurrentTexture(Sprite *sprite) {
     if (!(sprite->isAnimated)) {
         return sprite->texture;
     } else {
@@ -2877,16 +2880,16 @@ bool isValidLevel(char *file) {
 }
 
 // Takes a file name with no extension and assumes it's a bmp
-void getTextureFiles(char *fileName, int fileCount, SDL_Texture ***textures) {
+void getTextureFiles(char *fileName, int fileCount, GPU_Image ***textures) {
     int charCount = get_num_digits(fileCount);
 
     for (int i = 0; i < fileCount; i++) {
         char num[charCount + 10];
         sprintf(num, "%d", i + 1);
         char *fileWithNum = concat(fileName, num);
-        char *fileWithExtension = concat(fileWithNum, ".bmp");
+        char *fileWithExtension = concat(fileWithNum, ".png");
 
-        SDL_Texture *tex = make_texture(renderer, fileWithExtension);
+        GPU_Image *tex = GPU_LoadImage(fileWithExtension);
         (*textures)[i] = tex;
 
         free(fileWithNum);
@@ -2896,9 +2899,9 @@ void getTextureFiles(char *fileName, int fileCount, SDL_Texture ***textures) {
 
 void update_fullscreen() {
     if (fullscreen) {
-        SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+        // SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
     } else {
-        SDL_SetWindowFullscreen(window, 0);
+        // SDL_SetWindowFullscreen(window, 0);
     }
 }
 
@@ -3140,15 +3143,15 @@ void init_loading_screen() {
     is_loading = true;
     loading_progress = 0;
 
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    SDL_RenderClear(renderer);
+    // SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    // SDL_RenderClear(renderer);
 
     const v2 bar_container_size = {
         200,
         50
     };
 
-    SDL_Rect bar_container = {
+    GPU_Rect bar_container = {
         WINDOW_WIDTH / 2 - bar_container_size.x / 2,
         WINDOW_HEIGHT / 2 - bar_container_size.y / 2,
         bar_container_size.x,
@@ -3160,33 +3163,33 @@ void init_loading_screen() {
         40
     };
 
-    SDL_Rect bar_background = {
+    GPU_Rect bar_background = {
         WINDOW_WIDTH / 2 - bar_size.x / 2,
         WINDOW_HEIGHT / 2 - bar_size.y / 2,
         bar_size.x,
         bar_size.y
     };
 
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    SDL_RenderFillRect(renderer, &bar_container);
+    // SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    // SDL_RenderFillRect(renderer, &bar_container);
 
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    SDL_RenderFillRect(renderer, &bar_background);
+    // SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    // SDL_RenderFillRect(renderer, &bar_background);
 
-    SDL_RenderPresent(renderer);
+    // SDL_RenderPresent(renderer);
 
 }
 
 void update_loading_progress(double progress) {
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    SDL_RenderClear(renderer);
+    // SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    // SDL_RenderClear(renderer);
 
     const v2 bar_container_size = {
         200,
         50
     };
 
-    SDL_Rect bar_container = {
+    GPU_Rect bar_container = {
         WINDOW_WIDTH / 2 - bar_container_size.x / 2,
         WINDOW_HEIGHT / 2 - bar_container_size.y / 2,
         bar_container_size.x,
@@ -3198,7 +3201,7 @@ void update_loading_progress(double progress) {
         40
     };
 
-    SDL_Rect bar_background = {
+    GPU_Rect bar_background = {
         WINDOW_WIDTH / 2 - bar_bg_size.x / 2,
         WINDOW_HEIGHT / 2 - bar_bg_size.y / 2,
         bar_bg_size.x,
@@ -3207,7 +3210,7 @@ void update_loading_progress(double progress) {
 
     v2 bar_size = v2_sub(bar_bg_size, to_vec(10));
 
-    SDL_Rect bar = {
+    GPU_Rect bar = {
         WINDOW_WIDTH / 2 - bar_size.x / 2,
         WINDOW_HEIGHT / 2 - bar_size.y / 2,
         bar_size.x * progress,
@@ -3215,16 +3218,16 @@ void update_loading_progress(double progress) {
     };
     bar.w = bar_size.x * progress;
 
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    SDL_RenderFillRect(renderer, &bar_container);
+    // SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    // SDL_RenderFillRect(renderer, &bar_container);
 
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    SDL_RenderFillRect(renderer, &bar_background);
+    // SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    // SDL_RenderFillRect(renderer, &bar_background);
 
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    SDL_RenderFillRect(renderer, &bar);
+    // SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    // SDL_RenderFillRect(renderer, &bar);
 
-    SDL_RenderPresent(renderer);
+    // SDL_RenderPresent(renderer);
 }
 
 void remove_loading_screen() {
@@ -3260,7 +3263,9 @@ void shooter_bullet_effect(Bullet *bullet) {
 
 void enemy_bullet_destroy(Bullet *bullet) {
    
-    bullet->on_hit(bullet);
+   if (bullet->on_hit != NULL) {
+        bullet->on_hit(bullet);
+   }
 
     remove_game_object(bullet, ENEMY_SHOOTER); 
 }
@@ -3656,7 +3661,7 @@ void draw_3d_line(v2 pos1, double h1, v2 pos2, double h2) {
     v2 screen_pos_1 = worldToScreen(pos1, h1, true);
     v2 screen_pos_2 = worldToScreen(pos2, h2, true);
 
-    SDL_RenderDrawLine(renderer, screen_pos_1.x, screen_pos_1.y, screen_pos_2.x, screen_pos_2.y);
+    // SDL_RenderDrawLine(renderer, screen_pos_1.x, screen_pos_1.y, screen_pos_2.x, screen_pos_2.y);
 }
 
 ParticleSpawner create_particle_spawner(v2 pos, double height) {
