@@ -768,6 +768,21 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
 
 void init() {  // #INIT
 
+    int frag = GPU_LoadShader(GPU_FRAGMENT_SHADER, "Shaders/frag_test.glsl");
+    int vert = GPU_LoadShader(GPU_VERTEX_SHADER, "Shaders/vert_test.glsl");
+
+    int shader_program = GPU_LinkShaders(frag, vert);
+
+    GPU_ShaderBlock block = GPU_LoadShaderBlock(shader_program, "gpu_Vertex", "gpu_TexCoord", "gpu_Color", "gpu_ModelViewProjectionMatrix");
+
+    GPU_SetUniformf(GPU_GetUniformLocation(shader_program, "alpha"), -100);
+
+    // Set shader uniforms, e.g., passing texture to shader
+    int texture_uniform_location = GPU_GetUniformLocation(shader_program, "texture");
+    GPU_SetUniformi(texture_uniform_location, 0); // Texture unit 0
+
+    GPU_ActivateShaderProgram(shader_program, &block);
+
     dash_screen_anim = malloc(sizeof(GPU_Image *) * 6);
     getTextureFiles("Textures/Abilities/Dash/screen_anim", 6, &dash_screen_anim);
 
