@@ -1,17 +1,21 @@
+#version 330 core
+
 in vec4 color;
 in vec2 texCoord;
 out vec4 fragColor;
 
 uniform sampler2D tex;
-uniform float alpha;
-
+uniform vec2 texResolution;
 
 void main(void)
 {
+    // Sample the texture at the given texture coordinates
+    vec4 texColor = texture(tex, texCoord);
 
-    vec4 tex_col = texture2D(tex, texCoord);
+    if (texColor.r + texColor.g + texColor.b > 1.5) {
+        fragColor = texColor;
+    } else {
+        fragColor = vec4(texColor.rgb * 0.15, 1.0);
+    }
 
-	fragColor.rgb = tex_col.rgb;
-    fragColor.r = alpha;
-    fragColor.a = tex_col.a;
 }

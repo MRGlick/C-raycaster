@@ -16,8 +16,8 @@
 #define WINDOW_HEIGHT 580
 #define RESOLUTION_X 360
 #define RESOLUTION_Y 180
-#define X_SENSITIVITY .3
-#define Y_SENSITIVITY 2.4
+#define X_SENSITIVITY .1
+#define Y_SENSITIVITY 0.8
 #define COLOR_BLACK \
     (SDL_Color) { 0, 0, 0 }
 #define TRANSPARENT \
@@ -36,7 +36,7 @@
     (v2) { WINDOW_WIDTH * 100, WINDOW_HEIGHT * 100 }
 
 
-#define get_window() SDL_GetWindowFromID(screen->context->windowID)
+#define get_window() SDL_GetWindowFromID(actual_screen->context->windowID)
 
 // #TYPES
 
@@ -548,10 +548,15 @@ void getTextureFiles(char *fileName, int fileCount, GPU_Image ***textures);
 
 // #FUNC END
 
-
+GPU_Target *screen;
+GPU_Image *screen_image;
+GPU_Target *actual_screen;
 
 // #TEXTURES
 GPU_Image **dash_screen_anim;
+GPU_Image *lightmap_image;
+GPU_Image *tilemap_image;
+
 GPU_Image *dash_icon;
 GPU_Image *ability_icon_frame;
 GPU_Image *shoot_icon;
@@ -646,7 +651,6 @@ const double PLAYER_SHOOT_COOLDOWN = 0.5;
 
 // #DEBUG VAR
 
-GPU_Target *screen;
 
 // #MAIN
 int main(int argc, char *argv[]) {
@@ -655,8 +659,11 @@ int main(int argc, char *argv[]) {
     // window = SDL_CreateWindow("Doom style 3D!", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_WIDTH, WINDOW_HEIGHT, 0);
 
 
-    screen = GPU_Init(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_DEFAULT_INIT_FLAGS);
-    SDL_SetWindowTitle(SDL_GetWindowFromID(screen->context->windowID), "Goofy");
+    actual_screen = GPU_Init(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_DEFAULT_INIT_FLAGS);
+    SDL_SetWindowTitle(SDL_GetWindowFromID(actual_screen->context->windowID), "Goofy");
+
+    screen_image = GPU_CreateImage(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_FORMAT_RGBA);
+    screen = GPU_LoadTarget(screen_image);
 
 
     // renderer = SDL_CreateRenderer(window, -1, RENDERER_FLAGS);
@@ -693,6 +700,10 @@ int main(int argc, char *argv[]) {
     // SDL_DestroyRenderer(renderer);
 
     // SDL_DestroyWindow(window);
+
+    GPU_FreeImage(screen_image);
+
+    GPU_Quit();
 
     SDL_Quit();
 }
@@ -768,20 +779,7 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
 
 void init() {  // #INIT
 
-    int frag = GPU_LoadShader(GPU_FRAGMENT_SHADER, "Shaders/frag_test.glsl");
-    int vert = GPU_LoadShader(GPU_VERTEX_SHADER, "Shaders/vert_test.glsl");
-
-    int shader_program = GPU_LinkShaders(frag, vert);
-
-    GPU_ShaderBlock block = GPU_LoadShaderBlock(shader_program, "gpu_Vertex", "gpu_TexCoord", "gpu_Color", "gpu_ModelViewProjectionMatrix");
-
-    GPU_SetUniformf(GPU_GetUniformLocation(shader_program, "alpha"), -100);
-
-    // Set shader uniforms, e.g., passing texture to shader
-    int texture_uniform_location = GPU_GetUniformLocation(shader_program, "texture");
-    GPU_SetUniformi(texture_uniform_location, 0); // Texture unit 0
-
-    GPU_ActivateShaderProgram(shader_program, &block);
+    
 
     dash_screen_anim = malloc(sizeof(GPU_Image *) * 6);
     getTextureFiles("Textures/Abilities/Dash/screen_anim", 6, &dash_screen_anim);
@@ -1969,12 +1967,28 @@ void render(double delta) {  // #RENDER
     screen_modulate_r = lerp(screen_modulate_r, 1, delta / 2);
     screen_modulate_g = lerp(screen_modulate_g, 1, delta / 2);
     screen_modulate_b = lerp(screen_modulate_b, 1, delta / 2);
+
+    // int frag = GPU_LoadShader(GPU_FRAGMENT_SHADER, "Shaders/frag_test.glsl");
+    // int vert = GPU_LoadShader(GPU_VERTEX_SHADER, "Shaders/vert_test.glsl");
+
+    // int shader_program = GPU_LinkShaders(frag, vert);
+
+    // GPU_ShaderBlock block = GPU_LoadShaderBlock(shader_program, "gpu_Vertex", "gpu_TexCoord", "gpu_Color", "gpu_ModelViewProjectionMatrix");
+
+    // // Set shader uniforms, e.g., passing texture to shader
+    // int texture_uniform_location = GPU_GetUniformLocation(shader_program, "texture");
+    // GPU_SetUniformi(texture_uniform_location, 0); // Texture unit 0
     
-    // SDL_SetTextureColorMod(screen_texture, screen_modulate_r * 255, screen_modulate_g * 255, screen_modulate_b * 255);
+    // float res[2] = {WINDOW_WIDTH, WINDOW_HEIGHT};
 
-    // SDL_RenderPresent(renderer); // finna get removed
+    // GPU_ActivateShaderProgram(shader_program, &block);
 
-    GPU_Flip(screen);
+    GPU_BlitRect(screen_image, NULL, actual_screen, NULL);
+
+    // GPU_DeactivateShaderProgram();
+
+
+    GPU_Flip(actual_screen);
 } // #RENDER END
 
 // #PLAYER INIT
@@ -2326,6 +2340,22 @@ void load_level(char *file) {
 
     fclose(fh);
 
+
+
+    // create tilemap image for floor shader
+
+    tilemap_image = GPU_CreateImage(TILEMAP_WIDTH, TILEMAP_HEIGHT, GPU_FORMAT_RGBA);
+
+    GPU_Target *image_target = GPU_LoadTarget(tilemap_image);
+
+    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
+        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+            SDL_Color color = {ceilingTileMap[r][c], levelTileMap[r][c], floorTileMap[r][c], 1};
+            GPU_Pixel(image_target, c, r, color);
+        }
+    }
+
+    GPU_FreeTarget(image_target);
 
     bake_lights();
 
@@ -3101,6 +3131,18 @@ void bake_lights() {
 
         }
     }
+
+    lightmap_image = GPU_CreateImage(BAKED_LIGHT_RESOLUTION * TILEMAP_WIDTH, BAKED_LIGHT_RESOLUTION * TILEMAP_HEIGHT, GPU_FORMAT_RGBA);
+    GPU_Target *image_target = GPU_LoadTarget(lightmap_image);
+
+    for (int r = 0; r < TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION; r++) {
+        for (int c = 0; c < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; c++) {
+            BakedLightColor color = baked_light_grid[r][c];
+            GPU_Pixel(image_target, c, r, (SDL_Color){color.r, color.g, color.b, 1});
+        }
+    }
+
+    GPU_FreeTarget(image_target);
 
     update_loading_progress(1);
 
