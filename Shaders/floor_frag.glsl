@@ -5,11 +5,11 @@ in vec2 texCoord;
 out vec4 fragColor;
 
 uniform sampler2D floorTex;
-uniform sampler2D tilemapTex;
 uniform sampler2D lightmapTex;
+// uniform sampler2D tilemapTex;
 
 uniform vec2 windowSize;
-// uniform vec2 tilemapRes;
+uniform vec2 tilemapRes;
 uniform vec2 lightmapSize;
 uniform float pitch;
 
@@ -50,6 +50,7 @@ void main(void)
         vec2(loop_clamp(currentPixelPos.x / TILESIZE * FLOOR_TEX_SIZE, 0.0, 36.0), loop_clamp(currentPixelPos.y / TILESIZE * FLOOR_TEX_SIZE, 0.0, 36.0)) / 36.0
     );
 
+    fragColor.a = 1.0; // wtf?
     fragColor.rgb = texColor.rgb;
 
     vec2 light_idx = (currentPixelPos / TILESIZE * BAKED_LIGHT_RESOLUTION) / lightmapSize;
@@ -58,6 +59,6 @@ void main(void)
     fragColor.rgb *= light_color.rgb;
 
     float thing = min(1, abs(texCoord.y + pitch / windowSize.y - 0.5) * 2 + 0.1);
+    
     fragColor.rgb *= thing;
-
 }

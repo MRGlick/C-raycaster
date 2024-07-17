@@ -158,6 +158,9 @@ double randf_range(double min, double max) {
 GPU_Image *load_texture(char *file) {
 
     GPU_Image *image = GPU_LoadImage(file);
+    if (image == NULL) {
+        fprintf(stderr, "Failed to load image! File: '%s' \n", file);
+    }
 
     GPU_SetImageFilter(image, GPU_FILTER_NEAREST);
 

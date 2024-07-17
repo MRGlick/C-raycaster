@@ -1,4 +1,4 @@
-#version 330 core
+#version 120
 
 in vec4 color;
 in vec2 texCoord;
