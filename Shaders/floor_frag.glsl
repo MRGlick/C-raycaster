@@ -36,7 +36,7 @@ float loop_clamp(float val, float _min, float _max) {
 void main(void)
 {
 
-    int yIdx = int(texCoord.y / 2.0 * RES_Y);
+    int yIdx = int(texCoord.y * RES_Y / 2.0);
 
     if (yIdx == RES_Y) {
         fragColor = vec4(1.0, 1.0, 0.0, 1.0);
