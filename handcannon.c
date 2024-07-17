@@ -14,8 +14,8 @@
 #define TPS 300
 #define WINDOW_WIDTH 1024
 #define WINDOW_HEIGHT 580
-#define RESOLUTION_X 360
-#define RESOLUTION_Y 180
+#define RESOLUTION_X 720
+#define RESOLUTION_Y 360
 #define X_SENSITIVITY .1
 #define Y_SENSITIVITY 0.8
 #define COLOR_BLACK \
@@ -584,11 +584,11 @@ GPU_Image **exploder_frames;
 GPU_Image **shooter_bullet_default_frames;
 GPU_Image **shooter_bullet_explode_frames;
 
-TextureData *floorTexture;
-TextureData *floorTexture2;
-TextureData *floorLightTexture;
-TextureData *ceilingTexture;
-TextureData *ceilingLightTexture;
+GPU_Image *floorTexture;
+GPU_Image *floorTexture2;
+GPU_Image *floorLightTexture;
+GPU_Image *ceilingTexture;
+GPU_Image *ceilingLightTexture;
 
 // #SPRITES
 Sprite *dash_anim_sprite;
@@ -602,6 +602,10 @@ Sound *enemy_default_hit;
 Sound *enemy_default_kill;
 Sound *player_default_shoot;
 Sound *player_default_hurt;
+
+// #SHADERS
+int floor_shader;
+GPU_ShaderBlock floor_shader_block;
 
 // #VAR
 
@@ -779,7 +783,15 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
 
 void init() {  // #INIT
 
-    
+    int frag = GPU_LoadShader(GPU_FRAGMENT_SHADER, "Shaders/floor_frag.glsl");
+    int vert = GPU_LoadShader(GPU_VERTEX_SHADER, "Shaders/floor_vert.glsl");
+
+    floor_shader = GPU_LinkShaders(frag, vert);
+
+    floor_shader_block = GPU_LoadShaderBlock(floor_shader, "gpu_Vertex", "gpu_TexCoord", "gpu_Color", "gpu_ModelViewProjectionMatrix");
+
+    GPU_FreeShader(frag);
+    GPU_FreeShader(vert);
 
     dash_screen_anim = malloc(sizeof(GPU_Image *) * 6);
     getTextureFiles("Textures/Abilities/Dash/screen_anim", 6, &dash_screen_anim);
@@ -856,11 +868,11 @@ void init() {  // #INIT
     floorAndCeiling = GPU_CreateImage(RESOLUTION_X, RESOLUTION_Y, GPU_FORMAT_RGBA);
     GPU_SetImageFilter(floorAndCeiling, GPU_FILTER_NEAREST);
 
-    floorTexture = TextureData_from_png("Textures/floor.png");
-    floorLightTexture = TextureData_from_png("Textures/floor_light.png");
-    floorTexture2 = TextureData_from_png("Textures/floor2.png");
-    ceilingTexture = TextureData_from_png("Textures/ceiling.png");
-    ceilingLightTexture = TextureData_from_png("Textures/ceiling_light.png");
+    floorTexture = load_texture("Textures/floor.png");
+    floorLightTexture = load_texture("Textures/floor_light.png");
+    floorTexture2 = load_texture("Textures/floor2.png");
+    ceilingTexture = load_texture("Textures/ceiling.png");
+    ceilingLightTexture = load_texture("Textures/ceiling_light.png");
 
     init_tilemap(&levelTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
     init_tilemap(&floorTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
@@ -1451,40 +1463,74 @@ int calcFloorAndCeiling_Threaded(void *data) {
 
 
 void calcFloorAndCeiling() {
+    // preferrably load the shader at the start. this is for testing.
+
+    float l_positions[RESOLUTION_Y];
+    float r_positions[RESOLUTION_Y];
+
+    for (int i = 0; i < RESOLUTION_Y / 2; i++) {
+        double screenY = i * WINDOW_HEIGHT / (RESOLUTION_Y / 2);
+
+        v2 left = screenToFloor((v2){0, screenY + player->pitch});
+        v2 right = screenToFloor((v2){RESOLUTION_X - 1, screenY + player->pitch});
+
+        l_positions[i * 2] = left.x;
+        l_positions[i * 2 + 1] = left.y;
+        r_positions[i * 2] = right.x;
+        r_positions[i * 2 + 1] = right.y;
+    }
+
+
+    drawSkybox();
+
+    GPU_ActivateShaderProgram(floor_shader, &floor_shader_block);
+
+    GPU_SetUniformfv(GPU_GetUniformLocation(floor_shader, "lValues"), 2, RESOLUTION_Y / 2, l_positions);
+    GPU_SetUniformfv(GPU_GetUniformLocation(floor_shader, "rValues"), 2, RESOLUTION_Y / 2, r_positions);
+    
+
+    GPU_BlitRect(floorAndCeiling, NULL, screen, NULL);
+
+    GPU_DeactivateShaderProgram();
+
+
+
     // render by scanlines.
     // interpolate between left and right points and put the correct texture
 
-    SDL_Surface *surface = SDL_CreateRGBSurface(0, RESOLUTION_X, RESOLUTION_Y, 32, 0xFF000000, 0xFF0000, 0xFF00, 0xFF);
+    // SDL_Surface *surface = SDL_CreateRGBSurface(0, RESOLUTION_X, RESOLUTION_Y, 32, 0xFF000000, 0xFF0000, 0xFF00, 0xFF);
 
-    void *pixels = surface->pixels;
-    int pitch;
+    // void *pixels = surface->pixels;
+    // int pitch;
 
-    SDL_Thread *threads[NUM_FLOOR_THREADS];
-    struct floor_and_ceiling_thread_data datas[NUM_FLOOR_THREADS];
+    // SDL_Thread *threads[NUM_FLOOR_THREADS];
+    // struct floor_and_ceiling_thread_data datas[NUM_FLOOR_THREADS];
 
-    for (int i = 0; i < NUM_FLOOR_THREADS; i++) {
-        datas[i].start_row = i * RESOLUTION_Y / NUM_FLOOR_THREADS;
-        datas[i].end_row = (i + 1) * RESOLUTION_Y / NUM_FLOOR_THREADS;
-        datas[i].pixels = &pixels;
+    // for (int i = 0; i < NUM_FLOOR_THREADS; i++) {
+    //     datas[i].start_row = i * RESOLUTION_Y / NUM_FLOOR_THREADS;
+    //     datas[i].end_row = (i + 1) * RESOLUTION_Y / NUM_FLOOR_THREADS;
+    //     datas[i].pixels = &pixels;
 
-        threads[i] = SDL_CreateThread(calcFloorAndCeiling_Threaded, "floor thread", &datas[i]);
-    }
+    //     threads[i] = SDL_CreateThread(calcFloorAndCeiling_Threaded, "floor thread", &datas[i]);
+    // }
 
 
-    for (int i = 0; i < NUM_FLOOR_THREADS; i++) {
-        SDL_WaitThread(threads[i], NULL);
-        threads[i] = NULL;
-    }
+    // for (int i = 0; i < NUM_FLOOR_THREADS; i++) {
+    //     SDL_WaitThread(threads[i], NULL);
+    //     threads[i] = NULL;
+    // }
     
-    GPU_UpdateImage(floorAndCeiling, NULL, surface, NULL);
+    // GPU_UpdateImage(floorAndCeiling, NULL, surface, NULL);
 
 
-    SDL_FreeSurface(surface);
+    // SDL_FreeSurface(surface);
+
+
+
 
 }
 
 void drawFloorAndCeiling() {
-    drawSkybox();
 
     v2 offsets = (v2){cameraOffset.x, cameraOffset.y};
 
