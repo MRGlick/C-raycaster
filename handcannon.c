@@ -571,6 +571,7 @@ GPU_Image *healthbar_texture;
 GPU_Image *vignette_texture;
 GPU_Image *enemy_bullet_texture;
 GPU_Image *floorAndCeiling;
+GPU_Image *floor_and_ceiling_target_image;
 GPU_Image *wallTexture;
 GPU_Image *entityTexture;
 GPU_Image *crosshair;
@@ -663,7 +664,7 @@ int main(int argc, char *argv[]) {
     // window = SDL_CreateWindow("Doom style 3D!", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_WIDTH, WINDOW_HEIGHT, 0);
 
 
-    actual_screen = GPU_Init(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_DEFAULT_INIT_FLAGS);
+    actual_screen = GPU_Init(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_INIT_DISABLE_VSYNC);
     SDL_SetWindowTitle(SDL_GetWindowFromID(actual_screen->context->windowID), "Goofy");
 
     screen_image = GPU_CreateImage(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_FORMAT_RGBA);
@@ -867,6 +868,9 @@ void init() {  // #INIT
 
     floorAndCeiling = GPU_CreateImage(RESOLUTION_X, RESOLUTION_Y, GPU_FORMAT_RGBA);
     GPU_SetImageFilter(floorAndCeiling, GPU_FILTER_NEAREST);
+
+    floor_and_ceiling_target_image = GPU_CreateImage(RESOLUTION_X, RESOLUTION_Y, GPU_FORMAT_RGBA);
+    GPU_SetImageFilter(floor_and_ceiling_target_image, GPU_FILTER_NEAREST);
 
     floorTexture = load_texture("Textures/floor.png");
     floorLightTexture = load_texture("Textures/floor_light.png");
@@ -1196,38 +1200,8 @@ double distance_to_color(double distance, double a) {
 
 void renderDebug() {  // #DEBUG
 
+    GPU_Blit(lightmap_image, NULL, screen, 0, 0);    
     
-    // SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-
-    int resolution = 8;
-
-    for (int row = 0; row < TILEMAP_HEIGHT * resolution; row++) {
-        for (int col = 0; col < TILEMAP_WIDTH * resolution; col++) {
-            BakedLightColor color = baked_light_grid[row  * BAKED_LIGHT_RESOLUTION/ resolution][col * BAKED_LIGHT_RESOLUTION / resolution];
-            // SDL_SetRenderDrawColor(renderer, clamp(125 * color.r, 0, 255), clamp(125 * color.g, 0, 255), clamp(125 * color.b, 0, 255), 255);
-            double y = (double)row * tileSize / resolution;
-            double x = (double)col * tileSize / resolution;
-            v2 px_size = v2_div((v2){WINDOW_WIDTH, WINDOW_HEIGHT}, to_vec(tileSize * BAKED_LIGHT_RESOLUTION)); 
-            GPU_Rect rect = {
-                x,
-                y,
-                tileSize / resolution,
-                tileSize / resolution
-            };
-
-            // SDL_RenderFillRect(renderer, &rect);
-        }
-    }
-
-    // SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-
-    GPU_Rect player_rect = {
-        player->pos.x,
-        player->pos.y,
-        10,
-        10
-    };
-    // SDL_RenderFillRect(renderer, &player_rect);
 }
 
 v2 getRayDirByIdx(int i) {
@@ -1463,7 +1437,7 @@ int calcFloorAndCeiling_Threaded(void *data) {
 
 
 void calcFloorAndCeiling() {
-    // preferrably load the shader at the start. this is for testing.
+    // Use the shader for the annoying slow stuff. add the lighting in the CPU.
 
     float l_positions[RESOLUTION_Y];
     float r_positions[RESOLUTION_Y];
@@ -1487,12 +1461,28 @@ void calcFloorAndCeiling() {
 
     GPU_SetUniformfv(GPU_GetUniformLocation(floor_shader, "lValues"), 2, RESOLUTION_Y / 2, l_positions);
     GPU_SetUniformfv(GPU_GetUniformLocation(floor_shader, "rValues"), 2, RESOLUTION_Y / 2, r_positions);
+
+    float window_size[2] = {WINDOW_WIDTH, WINDOW_HEIGHT};
+    float lightmap_size[2] = {TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION, TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION};
+
+    GPU_SetUniformfv(GPU_GetUniformLocation(floor_shader, "windowSize"), 2, 1, window_size);
+    GPU_SetUniformfv(GPU_GetUniformLocation(floor_shader, "lightmapSize"), 2, 1, lightmap_size);
+    GPU_SetUniformf(GPU_GetUniformLocation(floor_shader, "pitch"), player->pitch);
     
 
-    GPU_BlitRect(floorAndCeiling, NULL, screen, NULL);
+    GPU_SetShaderImage(floorTexture, GPU_GetUniformLocation(floor_shader, "floorTex"), 1);
+    GPU_SetShaderImage(lightmap_image, GPU_GetUniformLocation(floor_shader, "lightmapTex"), 2);
+    
+    
+    GPU_Target *image_target = GPU_LoadTarget(floor_and_ceiling_target_image);
 
+    GPU_Blit(floorAndCeiling, NULL, image_target, cameraOffset.x, cameraOffset.y);
+
+    GPU_FreeTarget(image_target);
+
+    GPU_BlitRect(floor_and_ceiling_target_image, NULL, screen, NULL);
+    
     GPU_DeactivateShaderProgram();
-
 
 
     // render by scanlines.
@@ -1532,11 +1522,11 @@ void calcFloorAndCeiling() {
 
 void drawFloorAndCeiling() {
 
-    v2 offsets = (v2){cameraOffset.x, cameraOffset.y};
+    // v2 offsets = (v2){cameraOffset.x, cameraOffset.y};
 
-    GPU_Rect rect = {offsets.x, offsets.y, WINDOW_WIDTH, WINDOW_HEIGHT};
+    // GPU_Rect rect = {offsets.x, offsets.y, WINDOW_WIDTH, WINDOW_HEIGHT};
 
-    GPU_BlitRect(floorAndCeiling, NULL, screen, &rect); 
+    // GPU_BlitRect(floorAndCeiling, NULL, screen, &rect); 
 }
 
 void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affected_by_light) {
@@ -3184,7 +3174,14 @@ void bake_lights() {
     for (int r = 0; r < TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION; r++) {
         for (int c = 0; c < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; c++) {
             BakedLightColor color = baked_light_grid[r][c];
-            GPU_Pixel(image_target, c, r, (SDL_Color){color.r, color.g, color.b, 1});
+
+            SDL_Color tex_color = {
+                SDL_clamp(color.r * 50, 0, 255),
+                SDL_clamp(color.g * 50, 0, 255),
+                SDL_clamp(color.b * 50, 0, 255),
+                255
+            };
+            GPU_Pixel(image_target, c, r, tex_color);
         }
     }
 
