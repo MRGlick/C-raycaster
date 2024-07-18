@@ -175,7 +175,7 @@ typedef struct Player {
     int max_pending_shots;
     double ShootTickTimer;
     v2 handOffset;
-    int health, maxHealth;
+    double health, maxHealth;
     CircleCollider *collider;
 
     Ability *primary, *secondary, *utility, *special;
@@ -354,6 +354,8 @@ typedef struct CollisionData {
 
 // #FUNC
 
+void _player_die();
+
 void ability_dash_before_activate(Ability *ability);
 
 void activate_ability(Ability *ability);
@@ -428,7 +430,7 @@ void init_loading_screen();
 
 void player_die();
 
-void player_take_dmg(int dmg);
+void player_take_dmg(double dmg);
 
 void reset_level();
 
@@ -609,6 +611,8 @@ int floor_shader;
 GPU_ShaderBlock floor_shader_block;
 
 // #VAR
+
+bool queued_player_death = false;
 
 double screen_modulate_r = 1;
 double screen_modulate_g = 1;
@@ -1014,6 +1018,7 @@ void key_pressed(SDL_Keycode key) {
     }
 
     if (key == SDLK_r) {
+
         reset_level();
     }
 
@@ -1208,6 +1213,12 @@ void tick(double delta) {
     for (int i = 0; i < gameobjects->length; i++) {
         obj *object = arraylist_get(gameobjects, i);
         objectTick(object->val, object->type, delta);
+    }
+
+
+    if (queued_player_death) {
+        queued_player_death = false;
+        _player_die();
     }
 }
 
@@ -3044,6 +3055,8 @@ bool is_enemy_type(int type) {
 
 void reset_level() {
 
+    printf("player health: %d \n", player->health);
+
     if (isValidLevel(levelToLoad)) {
         load_level(levelToLoad);
     } else {
@@ -3051,7 +3064,10 @@ void reset_level() {
     }
 }
 
-void player_take_dmg(int dmg) {
+void player_take_dmg(double dmg) {
+
+    printf("Damage: %.2f Health: %.2f \n", dmg, player->health);
+
     player->health -= dmg;
 
     // play some effect or animation
@@ -3067,12 +3083,14 @@ void player_take_dmg(int dmg) {
 }
 
 void player_die() {
-
     // play some dramatic ahh animation
-
-    reset_level();
+    queued_player_death = true;
 }
 
+void _player_die() {
+    
+    reset_level();
+}
 
 void init_loading_screen() {
     
