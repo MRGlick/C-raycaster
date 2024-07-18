@@ -488,8 +488,6 @@ void add_game_object(void *val, int type);
 
 void remove_game_object(void *val, int type);
 
-void init_player();
-
 double mili_to_sec(u64 mili);
 
 v2 get_player_forward();
@@ -525,8 +523,6 @@ Sprite *createSprite(bool isAnimated, int animCount);
 DirectionalSprite *createDirSprite(int dirCount);
 
 void spritePlayAnim(Sprite *sprite, int idx);
-
-Sprite *getRandomWallSprite();
 
 void ability_shoot_activate(Ability *ability);
 
@@ -1805,7 +1801,7 @@ void render(double delta) {  // #RENDER
     GPU_Clear(screen);
 
     char *newTitle = "FPS: ";
-    char *fps = malloc(4);
+    char fps[4];
     decimal_to_text(realFps, fps);
 
     char *final = concat(newTitle, fps);
@@ -1852,6 +1848,11 @@ void render(double delta) {  // #RENDER
                 break;
         }
     }
+
+    for (int i = 0; i < renderList->length; i++) {
+        free(arraylist_get(renderList, i)->val);
+    }
+    // cd_print(true, "");
 
     arraylist_free(renderList);
 
@@ -3218,7 +3219,7 @@ void enemy_bullet_destroy(Bullet *bullet) {
         bullet->on_hit(bullet);
    }
 
-    remove_game_object(bullet, ENEMY_SHOOTER); 
+    remove_game_object(bullet, BULLET); 
 }
 
 int charge_time_to_shots(double charge_time) {
