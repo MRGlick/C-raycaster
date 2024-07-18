@@ -1853,6 +1853,8 @@ void render(double delta) {  // #RENDER
         }
     }
 
+    arraylist_free(renderList);
+
     if (render_debug) renderDebug();
 
     renderHUD();
