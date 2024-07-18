@@ -556,7 +556,7 @@ GPU_Target *actual_screen;
 GPU_Image **dash_screen_anim;
 GPU_Image *lightmap_image;
 GPU_Image *tilemap_image;
-
+GPU_Image *floor_and_ceiling_spritesheet;
 GPU_Image *dash_icon;
 GPU_Image *ability_icon_frame;
 GPU_Image *shoot_icon;
@@ -668,6 +668,7 @@ int main(int argc, char *argv[]) {
     SDL_SetWindowTitle(SDL_GetWindowFromID(actual_screen->context->windowID), "Goofy");
 
     screen_image = GPU_CreateImage(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_FORMAT_RGBA);
+    GPU_SetImageFilter(screen_image, GPU_FILTER_NEAREST);
     screen = GPU_LoadTarget(screen_image);
 
 
@@ -783,6 +784,23 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
 }
 
 void init() {  // #INIT
+
+    tilemap_image = GPU_CreateImage(TILEMAP_WIDTH, TILEMAP_HEIGHT, GPU_FORMAT_RGBA);
+
+    GPU_Target *image_target = GPU_LoadTarget(tilemap_image);
+
+    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
+        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+            SDL_Color color = (SDL_Color){255, 255, 255, 255};
+            GPU_RectangleFilled2(image_target, (GPU_Rect){c, r, 1000, 1000}, color);
+        }
+    }
+
+    GPU_FreeTarget(image_target);
+
+    GPU_SaveImage(tilemap_image, "test.png", GPU_FILE_PNG);
+
+    floor_and_ceiling_spritesheet = load_texture("Textures/floor_and_ceiling_spritesheet.png");
 
     int frag = GPU_LoadShader(GPU_FRAGMENT_SHADER, "Shaders/floor_frag.glsl");
     int vert = GPU_LoadShader(GPU_VERTEX_SHADER, "Shaders/floor_vert.glsl");
@@ -931,7 +949,7 @@ void init() {  // #INIT
 
     skybox_texture = load_texture("Textures/skybox.png");
 
-    // SDL_RenderSetLogicalSize(renderer, WINDOW_WIDTH, WINDOW_HEIGHT);
+    //SDL_RenderSetLogicalSize(SDL_GetRenderer(get_window()), WINDOW_WIDTH, WINDOW_HEIGHT);
 
 
 }  // #INIT END
@@ -1200,7 +1218,7 @@ double distance_to_color(double distance, double a) {
 
 void renderDebug() {  // #DEBUG
 
-    GPU_Blit(lightmap_image, NULL, screen, 0, 0);    
+    GPU_BlitRect(tilemap_image, NULL, screen, NULL);
     
 }
 
@@ -1303,8 +1321,8 @@ void render_floor_and_ceiling() {
     for (int i = 0; i < RESOLUTION_Y / 2; i++) {
         double screenY = i * WINDOW_HEIGHT / (RESOLUTION_Y / 2);
 
-        v2 left = screenToFloor((v2){0, screenY + player->pitch});
-        v2 right = screenToFloor((v2){RESOLUTION_X - 1, screenY + player->pitch});
+        v2 left = screenToFloor((v2){SDL_clamp(-cameraOffset.x, 0, RESOLUTION_X - 1), screenY + player->pitch - cameraOffset.y});
+        v2 right = screenToFloor((v2){SDL_clamp(-cameraOffset.x + RESOLUTION_X - 1, 0, RESOLUTION_X - 1), screenY + player->pitch - cameraOffset.y});
 
         l_positions[i * 2] = left.x;
         l_positions[i * 2 + 1] = left.y;
@@ -1324,14 +1342,20 @@ void render_floor_and_ceiling() {
 
     float window_size[2] = {WINDOW_WIDTH, WINDOW_HEIGHT};
     float lightmap_size[2] = {TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION, TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION};
+    float tilemap_size[2] = {TILEMAP_WIDTH,  TILEMAP_HEIGHT};
 
     GPU_SetUniformfv(GPU_GetUniformLocation(floor_shader, "windowSize"), 2, 1, window_size);
     GPU_SetUniformfv(GPU_GetUniformLocation(floor_shader, "lightmapSize"), 2, 1, lightmap_size);
-    GPU_SetUniformf(GPU_GetUniformLocation(floor_shader, "pitch"), player->pitch);
+    GPU_SetUniformfv(GPU_GetUniformLocation(floor_shader, "tilemapSize"), 2, 1, tilemap_size);
+    GPU_SetUniformf(GPU_GetUniformLocation(floor_shader, "pitch"), player->pitch + cameraOffset.y);
     
 
     GPU_SetShaderImage(floorTexture, GPU_GetUniformLocation(floor_shader, "floorTex"), 1);
     GPU_SetShaderImage(lightmap_image, GPU_GetUniformLocation(floor_shader, "lightmapTex"), 2);
+    GPU_SetShaderImage(floor_and_ceiling_spritesheet, GPU_GetUniformLocation(floor_shader, "spritesheet"), 3);
+
+    GPU_SetImageFilter(tilemap_image, GPU_FILTER_NEAREST);
+    GPU_SetShaderImage(tilemap_image, GPU_GetUniformLocation(floor_shader, "tilemapTex"), 4);
     
     
     GPU_Target *image_target = GPU_LoadTarget(floor_and_ceiling_target_image);
@@ -1411,13 +1435,13 @@ void renderEntity(Entity entity) {  // RENDER ENTITY
 }
 
 typedef struct WallStripe {
-    GPU_Image *texture;
-    double size;
-    int i;
-    double brightness;  // a bunch of rendering bullshit:
-    v2 pos, normal;
-    double collIdx;
-    double wallWidth;
+    v2 pos, normal; // 16, 16
+    double size; // 8
+    double brightness; // 8  // a bunch of rendering bullshit:
+    double collIdx; // 8
+    double wallWidth; // 8
+    GPU_Image *texture; // 8
+    int i; // 4
 } WallStripe;
 
 RenderObject *getWallStripe(int i) {
@@ -1475,17 +1499,24 @@ int addWallStripes_Threaded(void *data) {
 arraylist *getRenderList() {
     arraylist *renderList = create_arraylist(RESOLUTION_X + 5);
 
-    SDL_Thread *threads[NUM_WALL_THREADS];
+    if (NUM_WALL_THREADS == 1) {
+        int i = 0;
+        addWallStripes_Threaded(&i); // hehe its not threaded
+    } else {
+        SDL_Thread *threads[NUM_WALL_THREADS];
 
-    int indicies[NUM_WALL_THREADS];
+        int indicies[NUM_WALL_THREADS];
 
-    for (int i = 0; i < NUM_WALL_THREADS; i++) {
-        indicies[i] = i;
-        threads[i] = SDL_CreateThread(addWallStripes_Threaded, "thread wall", &indicies[i]);
+        for (int i = 0; i < NUM_WALL_THREADS; i++) {
+            indicies[i] = i;
+            threads[i] = SDL_CreateThread(addWallStripes_Threaded, "thread wall", &indicies[i]);
+        }
+        for (int i = 0; i < NUM_WALL_THREADS; i++) {
+            SDL_WaitThread(threads[i], NULL);
+        }
     }
-    for (int i = 0; i < NUM_WALL_THREADS; i++) {
-        SDL_WaitThread(threads[i], NULL);
-    }
+
+    
 
     // convert everything to sort objects, sort, get back our sorted goods, put
     // into main list
@@ -1555,7 +1586,6 @@ void clampColors(int rgb[3]) {
 }
 
 void renderWallStripe(WallStripe *stripe) {
-    double brightness = stripe->brightness;
 
     double angleLightModifier = sin(v2_get_angle(stripe->normal));
 
@@ -1574,6 +1604,9 @@ void renderWallStripe(WallStripe *stripe) {
 
     BakedLightColor baked_light_color = get_light_color_by_pos(v2_add(stripe->pos, v2_mul(stripe->normal, to_vec(0.5))), 0, 0);
 
+    double baked_light_brightness = (baked_light_color.r + baked_light_color.g + baked_light_color.b) / 3;
+
+    double brightness = SDL_clamp(stripe->brightness + baked_light_brightness / 2, 0, 1);
     // baked lights
     
     int rgb[3] = {
@@ -1817,8 +1850,7 @@ void render(double delta) {  // #RENDER
     screen_modulate_g = lerp(screen_modulate_g, 1, delta / 2);
     screen_modulate_b = lerp(screen_modulate_b, 1, delta / 2);
 
-    GPU_BlitRect(screen_image, NULL, actual_screen, NULL);
-
+    GPU_Blit(screen_image, NULL, actual_screen, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
 
     GPU_Flip(actual_screen);
 } // #RENDER END
@@ -1918,7 +1950,7 @@ RayCollisionData castRay(v2 pos, v2 dir) {
 
     bool found = false;
     int tile;
-    double maxDist = 20;
+    double maxDist = 100;
     double dist = 0;
     while (!found && dist < maxDist) {
         if (currentRayLengths.x < currentRayLengths.y) {
@@ -2178,16 +2210,30 @@ void load_level(char *file) {
 
     tilemap_image = GPU_CreateImage(TILEMAP_WIDTH, TILEMAP_HEIGHT, GPU_FORMAT_RGBA);
 
-    GPU_Target *image_target = GPU_LoadTarget(tilemap_image);
+    SDL_Surface *surface = GPU_CopySurfaceFromImage(tilemap_image);
 
-    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
-        for (int c = 0; c < TILEMAP_WIDTH; c++) {
-            SDL_Color color = {ceilingTileMap[r][c], levelTileMap[r][c], floorTileMap[r][c], 1};
-            GPU_Pixel(image_target, c, r, color);
+    
+
+    for (int row = 0; row < TILEMAP_HEIGHT; row++) {
+        for (int col = 0; col < TILEMAP_WIDTH; col++) {
+
+            int floorTile = floorTileMap[row][col] == -1? 0 : floorTileMap[row][col];
+            int ceilingTile = ceilingTileMap[row][col] == -1? 0 : ceilingTileMap[row][col];
+
+            SDL_Color color = {
+                SDL_clamp(ceilingTile * 10, 0, 255),
+                SDL_clamp(0, 0, 255),
+                SDL_clamp(floorTile * 10, 0, 255),
+                SDL_clamp(255, 0, 255)
+            };
+
+            ((int *)surface->pixels)[row * TILEMAP_WIDTH + col] = color.a << 24 | color.b << 16 | color.g << 8 | color.r;
         }
     }
 
-    GPU_FreeTarget(image_target);
+    GPU_UpdateImage(tilemap_image, NULL, surface, NULL);
+
+    SDL_FreeSurface(surface);
 
     bake_lights();
 
@@ -2772,12 +2818,8 @@ void getTextureFiles(char *fileName, int fileCount, GPU_Image ***textures) {
     }
 }
 
-void update_fullscreen() {
-    if (fullscreen) {
-        // SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
-    } else {
-        // SDL_SetWindowFullscreen(window, 0);
-    }
+void update_fullscreen() { // iffy solution but whatever
+    GPU_SetFullscreen(fullscreen, true);
 }
 
 BakedLightColor _lerp_baked_light_color(BakedLightColor a, BakedLightColor b, double w) {

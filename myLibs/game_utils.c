@@ -62,6 +62,11 @@ double last_print_time;
 const double DEG_TO_RAD = PI / 180;
 const double RAD_TO_DEG = 180 / PI;
 
+v2 get_screen_size() {
+    SDL_DisplayMode mode;
+    SDL_GetDesktopDisplayMode(0, &mode);
+    return (v2){mode.w, mode.h};
+}
 
 void init_cd_print() {
     last_print_time = SDL_GetTicks64();
