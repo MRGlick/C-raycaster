@@ -53,7 +53,10 @@ int main(int argc, char* argv[])
     UIButton *button = UI_alloc(UIButton);
     button->label.component.size = to_vec(100);
     button->on_click = test_click_event;
+    button->label.alignment_x = ALIGNMENT_CENTER;
+    button->label.alignment_y = ALIGNMENT_CENTER;
     button->label.component.update(button);
+    
     UI_add_component(button);
 
     // Main loop flag
@@ -89,7 +92,7 @@ void render() {
     // Clear screen
     GPU_Clear(screen);
 
-    GPU_RectangleFilled2(screen, GPU_MakeRect(0, 0, 100, 100), (SDL_Color){60, 120, 255, 255});
+    GPU_RectangleFilled2(screen, GPU_MakeRect(0, 0, 1000, 1000), (SDL_Color){60, 120, 255, 255});
 
     arraylist *ui_comps = UI_get_components();
 
