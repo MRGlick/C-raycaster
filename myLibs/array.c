@@ -8,7 +8,7 @@
 #include <string.h>
 
 typedef struct ArrayHeader {
-    int size;
+    int size; 
     int length;
     int item_size;
 } ArrayHeader;

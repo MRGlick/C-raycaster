@@ -93,11 +93,12 @@ void main(void) {
     fragColor.rgb = texColor.rgb;
 
     vec2 light_idx = (currentPixelPos / TILESIZE * BAKED_LIGHT_RESOLUTION) / lightmapSize;
-    vec3 light_color = texture(lightmapTex, light_idx).rgb * 5;
-
-    fragColor.rgb *= light_color.rgb;
+    vec3 light_color = texture(lightmapTex, light_idx).rgb * 5.0;
 
     float thing = min(1, abs(texCoord.y + pitch / windowSize.y - 0.5) * 2 + 0.1);
     
     fragColor.rgb *= thing;
+
+    fragColor.rgb = fragColor.rgb * light_color.rgb;
+
 }

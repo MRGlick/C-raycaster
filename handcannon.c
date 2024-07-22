@@ -26,7 +26,7 @@
 #define WALL_HEIGHT 30
 #define NUM_WALL_THREADS 1
 #define NUM_FLOOR_THREADS 2
-
+#define MAX_LIGHT 9
 #define BAKED_LIGHT_RESOLUTION 36
 #define BAKED_LIGHT_CALC_RESOLUTION 8
 
@@ -1225,7 +1225,9 @@ double distance_to_color(double distance, double a) {
 
 void renderDebug() {  // #DEBUG
 
-    GPU_BlitRect(tilemap_image, NULL, screen, NULL);
+    GPU_SetImageFilter(lightmap_image, GPU_FILTER_NEAREST);
+    GPU_BlitRect(lightmap_image, NULL, screen, NULL);
+    GPU_SetImageFilter(lightmap_image, GPU_FILTER_LINEAR);
     
 }
 
@@ -2176,7 +2178,7 @@ void load_level(char *file) {
             floorTileMap[r][c] = data[idx++];
             if (floorTileMap[r][c] == (int)P_FLOOR_LIGHT) {
                 LightPoint *test_point = malloc(sizeof(LightPoint));
-                test_point->color = (SDL_Color){255, 100, 10};//{255, 200, 100};
+                test_point->color = (SDL_Color){255, 50, 50};//{255, 200, 100};
                 test_point->strength = 4;
                 test_point->radius = 140;
                 test_point->pos = (v2){(c + 0.5) * tileSize, (r + 0.5) * tileSize};
@@ -2925,9 +2927,10 @@ void bake_lights() {
 					col.b += helper * (double)point->color.b / 255;
                 }
 
-                baked_light_grid[r][c].r += col.r;
-                baked_light_grid[r][c].g += col.g;
-                baked_light_grid[r][c].b += col.b;
+                baked_light_grid[r][c].r = SDL_clamp(baked_light_grid[r][c].r + col.r, 0, MAX_LIGHT);
+                baked_light_grid[r][c].g = SDL_clamp(baked_light_grid[r][c].g + col.g, 0, MAX_LIGHT);
+                baked_light_grid[r][c].b = SDL_clamp(baked_light_grid[r][c].b + col.b, 0, MAX_LIGHT);
+
             }
         }
     }  
@@ -3027,10 +3030,12 @@ void bake_lights() {
         for (int c = 0; c < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; c++) {
             BakedLightColor color = baked_light_grid[r][c];
 
+            double multiplier = 255.0 / 5;
+
             SDL_Color tex_color = {
-                SDL_clamp(color.r * 50, 0, 255),
-                SDL_clamp(color.g * 50, 0, 255),
-                SDL_clamp(color.b * 50, 0, 255),
+                SDL_clamp(color.r * multiplier, 0, 255),
+                SDL_clamp(color.g * multiplier, 0, 255),
+                SDL_clamp(color.b * multiplier, 0, 255),
                 255
             };
             GPU_Pixel(image_target, c, r, tex_color);
