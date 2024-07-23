@@ -31,7 +31,7 @@
 #define BAKED_LIGHT_RESOLUTION 36
 #define BAKED_LIGHT_CALC_RESOLUTION 8
 
-#define PARTICLE_GRAVITY 1
+#define PARTICLE_GRAVITY -50000
 
 #define OUT_OF_SCREEN_POS \
     (v2) { WINDOW_WIDTH * 100, WINDOW_HEIGHT * 100 }
@@ -241,6 +241,8 @@ typedef struct ParticleSpawner {
 
     bool active;
 
+    Entity *target;
+
 } ParticleSpawner;
 
 
@@ -300,6 +302,7 @@ typedef struct Bullet {
     Entity entity;
     DirectionalSprite *dirSprite;
     CircleCollider *collider;
+    ParticleSpawner *particle_spawner;
     v2 dir;
     double dmg;
     double speed;
@@ -354,6 +357,10 @@ typedef struct CollisionData {
 } CollisionData;
 
 // #FUNC
+
+void enemy_die(Enemy *enemy);
+
+void particle_spawner_explode(ParticleSpawner *spawner);
 
 void toggle_pause();
 
@@ -619,6 +626,9 @@ GPU_ShaderBlock floor_shader_block;
 int bloom_shader;
 GPU_ShaderBlock bloom_shader_block;
 
+// #PARTICLES (the global ones)
+ParticleSpawner *enemy_death_explosion_particles;
+
 // #VAR
 
 double game_speed = 1;
@@ -698,6 +708,8 @@ int main(int argc, char *argv[]) {
     UI_init(get_window(), (v2){WINDOW_WIDTH, WINDOW_HEIGHT});
 
     make_ui();
+
+    gameobjects = create_arraylist(10);
 
     init();
 
@@ -804,6 +816,16 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
 }
 
 void init() {  // #INIT
+
+    enemy_death_explosion_particles = malloc(sizeof(ParticleSpawner));
+    *enemy_death_explosion_particles = create_particle_spawner(V2_ZERO, 0);
+
+    enemy_death_explosion_particles->spread = 2;
+    enemy_death_explosion_particles->height_dir = 1;
+    enemy_death_explosion_particles->min_speed = 40;
+    enemy_death_explosion_particles->max_speed = 60;
+    enemy_death_explosion_particles->particle_lifetime = 2.5;
+    enemy_death_explosion_particles->height_accel = PARTICLE_GRAVITY * 2;
 
     int bloom_frag = GPU_LoadShader(GPU_FRAGMENT_SHADER, "Shaders/bloom_frag.glsl");
     int bloom_vert = GPU_LoadShader(GPU_VERTEX_SHADER, "Shaders/bloom_vert.glsl");
@@ -934,7 +956,7 @@ void init() {  // #INIT
     tanHalfFOV = tan(deg_to_rad(fov / 2));
     tanHalfStartFOV = tan(deg_to_rad(startFov / 2));
 
-    gameobjects = create_arraylist(10);
+    
 
     wallTexture = load_texture("Textures/wall.png");
      GPU_SetImageFilter(wallTexture, GPU_FILTER_NEAREST);
@@ -2134,6 +2156,9 @@ void freeObject(void *val, int type) {
             if (bullet->entity.sprite != NULL) {
                 freeObject(bullet->entity.sprite, SPRITE);
             }
+            if (bullet->particle_spawner != NULL) {
+                remove_game_object(bullet->particle_spawner, PARTICLE_SPAWNER);
+            }
 
             free(bullet);
             break;
@@ -2468,18 +2493,19 @@ void enemyTakeDmg(Enemy *enemy, int dmg) {
     add_game_object(hit_effect, EFFECT);
     
     play_spatial_sound(enemy_default_hit, 1, player->pos, enemy->entity.pos, enemy->sound_max_radius);
+    
+    
+    if (enemy->on_take_dmg != NULL) {
+        enemy->on_take_dmg(enemy, (double)dmg);
+    } // I hereby decree that this function is not allowed to free the enemy
 
     if (enemy->health <= 0) {
         // play death anim
-        play_spatial_sound(enemy_default_kill, 1, player->pos, enemy->entity.pos, enemy->sound_max_radius);
-        remove_game_object(enemy, ENEMY);
+        enemy_die(enemy);
         return;
     }
 
 
-    if (enemy->on_take_dmg != NULL){
-        enemy->on_take_dmg(enemy, (double)dmg);
-    } // its at the end bc it could free
 }
 
 RayCollisionData castRayForEntities(v2 pos, v2 dir) {
@@ -2597,7 +2623,7 @@ Bullet *createDefaultBullet(v2 pos, v2 dir) {
     bullet->entity.sprite->animations[0].fps = 12;
     bullet->entity.sprite->animations[0].loop = true;
     spritePlayAnim(bullet->entity.sprite, 0);
-    bullet->entity.height = WINDOW_HEIGHT / 6;
+    bullet->entity.height = get_max_height() / 8;
     bullet->entity.affected_by_light = false;
     bullet->dirSprite = NULL;
     bullet->dmg = 1;
@@ -2614,6 +2640,24 @@ Bullet *createDefaultBullet(v2 pos, v2 dir) {
     bullet->collider = malloc(sizeof(CircleCollider));
     bullet->collider->pos = bullet->entity.pos;
     bullet->collider->radius = 5;
+
+
+
+    bullet->particle_spawner = malloc(sizeof(ParticleSpawner));
+    *bullet->particle_spawner = create_particle_spawner(V2_ZERO, 0);
+
+    bullet->particle_spawner->height_dir = 0;
+    bullet->particle_spawner->dir = V2_ZERO;
+    
+    bullet->particle_spawner->height_accel = -PARTICLE_GRAVITY / 5;
+    
+
+    bullet->particle_spawner->target = bullet;
+    bullet->particle_spawner->active = true;
+
+    add_game_object(bullet->particle_spawner, PARTICLE_SPAWNER);
+
+    particle_spawner_explode(bullet->particle_spawner);
 
     return bullet;
 }
@@ -3513,7 +3557,7 @@ void exploder_explode(ExploderEnemy *exploder) {
 
 
 
-    remove_game_object(exploder, ENEMY_EXPLODER);
+    enemy_die(exploder);
 }
 
 
@@ -3678,17 +3722,22 @@ ParticleSpawner create_particle_spawner(v2 pos, double height) {
         .height_accel = PARTICLE_GRAVITY,
         .pos = pos,
         .height = height,
-        .spawn_rate = 8,
+        .spawn_rate = 20,
         .spread = 0.1,
         .min_speed = 10,
         .max_speed = 10,
-        .min_size = to_vec(5),
-        .max_size = to_vec(15),
+        .min_size = to_vec(500),
+        .max_size = to_vec(1500),
         .floor_drag = 0.01,
         .bounciness = 0.5,
         .particle_lifetime = 1,
-        .active = true
+        .active = true,
+        .target = NULL,
+        .sprite.isAnimated = false,
+        .sprite.texture = defualt_particle_texture
     };
+
+    spawner.target = NULL;
 
     spawner.spawn_timer = 1.0 / spawner.spawn_rate;
 
@@ -3709,12 +3758,19 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
 
     Particle particle;
     
+    v2 pos = spawner->pos;
+    double height = spawner->height;
+    if (spawner->target != NULL) {
+        pos = v2_add(pos, spawner->target->pos);
+        height += spawner->target->height;
+    }
+
     double speed = randf_range(spawner->min_speed, spawner->max_speed);
     v2 dir = v2_rotate(spawner->dir, randf_range(-PI * spawner->spread, PI * spawner->spread));
     
     double vel_x = dir.x * speed;
     double vel_y = dir.y * speed;
-    double vel_z = spawner->height_dir * speed;
+    double vel_z = spawner->height_dir * speed * 1000; // bc height is different like that
 
     particle.vel = (v2){vel_x, vel_y};
     particle.h_vel = vel_z;
@@ -3727,7 +3783,7 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
     particle.bounciness = spawner->bounciness;
     particle.floor_drag = spawner->floor_drag;
 
-    particle.effect.entity.pos = spawner->pos; // change later
+    particle.effect.entity.pos = pos; // change later with emission
     particle.effect.entity.height = spawner->height;
     particle.effect.entity.affected_by_light = true;
     
@@ -3742,6 +3798,12 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
 
     Particle *particle_object = malloc(sizeof(Particle));
     *particle_object = particle;
+
+    if (particle.effect.entity.sprite->texture == NULL) {
+        particle.effect.entity.sprite->texture = defualt_particle_texture;
+        particle.effect.entity.sprite->isAnimated = false;
+        printf("Error! switching to default texture! \n");
+    }
 
     add_game_object(particle_object, PARTICLE);
 
@@ -3767,7 +3829,7 @@ void particle_tick(Particle *particle, double delta) {
 
 void exploder_on_take_dmg(Enemy *enemy, double dmg) {
     
-    if (enemy->health < 2) {
+    if (enemy->health <= 1) {
         exploder_explode(enemy);
     }
 }
@@ -3899,9 +3961,10 @@ void make_ui() {
 
     continue_button->on_click = _continue_button_pressed;
 
-    UIStyle style = (UIStyle){.bg_color = Color(0, 0, 0, 125), .fg_color = Color(255, 255, 255, 255)};
+    UIStyle default_style = (UIStyle){.bg_color = Color(0, 0, 0, 175), .fg_color = Color(255, 255, 255, 255)};
 
-    UI_set(UIComponent, continue_button, default_style, style);
+    UI_set(UIComponent, continue_button, default_style, default_style);
+
 
 
 
@@ -3915,6 +3978,23 @@ void toggle_pause() {
     paused = !paused;
     lock_and_hide_mouse = !paused;
     pause_menu->visible = paused;
+}
+
+void particle_spawner_explode(ParticleSpawner *spawner) {
+    printf("explode \n");
+    for (int i = 0; i < 20; i++) {
+        particle_spawner_spawn(spawner);
+    }
+}
+
+void enemy_die(Enemy *enemy) {
+    play_spatial_sound(enemy_default_kill, 1, player->pos, enemy->entity.pos, enemy->sound_max_radius);
+
+    enemy_death_explosion_particles->pos = enemy->entity.pos;
+    enemy_death_explosion_particles->height = enemy->entity.height;
+    particle_spawner_explode(enemy_death_explosion_particles);
+
+    remove_game_object(enemy, ENEMY);
 }
 
 

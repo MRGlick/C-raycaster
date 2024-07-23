@@ -44,5 +44,5 @@ void main()
     fragColor = Color;
 
     // Combine the original color with the blurred color for the bloom effect
-    fragColor = texture(tex, texCoord) + Color * 1.0;
+    fragColor = texture(tex, texCoord) + Color * 0.8;
 }
