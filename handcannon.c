@@ -553,6 +553,8 @@ void getTextureFiles(char *fileName, int fileCount, GPU_Image ***textures);
 
 GPU_Target *screen;
 GPU_Image *screen_image;
+GPU_Target *hud;
+GPU_Image *hud_image;
 GPU_Target *actual_screen;
 
 // #UI
@@ -613,6 +615,9 @@ Sound *player_default_hurt;
 // #SHADERS
 int floor_shader;
 GPU_ShaderBlock floor_shader_block;
+
+int bloom_shader;
+GPU_ShaderBlock bloom_shader_block;
 
 // #VAR
 
@@ -680,6 +685,9 @@ int main(int argc, char *argv[]) {
     GPU_SetImageFilter(screen_image, GPU_FILTER_NEAREST);
     screen = GPU_LoadTarget(screen_image);
 
+    hud_image = GPU_CreateImage(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_FORMAT_RGBA);
+    GPU_SetImageFilter(hud_image, GPU_FILTER_NEAREST);
+    hud = GPU_LoadTarget(hud_image);
 
     // renderer = SDL_CreateRenderer(window, -1, RENDERER_FLAGS);
 
@@ -687,7 +695,7 @@ int main(int argc, char *argv[]) {
         levelToLoad = argv[1];
     }
 
-    UI_init();
+    UI_init(get_window(), (v2){WINDOW_WIDTH, WINDOW_HEIGHT});
 
     make_ui();
 
@@ -796,6 +804,17 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
 }
 
 void init() {  // #INIT
+
+    int bloom_frag = GPU_LoadShader(GPU_FRAGMENT_SHADER, "Shaders/bloom_frag.glsl");
+    int bloom_vert = GPU_LoadShader(GPU_VERTEX_SHADER, "Shaders/bloom_vert.glsl");
+    
+    bloom_shader = GPU_LinkShaders(bloom_frag, bloom_vert);
+
+    bloom_shader_block = GPU_LoadShaderBlock(bloom_shader, "gpu_Vertex", "gpu_TexCoord", "gpu_Color", "gpu_ModelViewProjectionMatrix");
+
+    GPU_FreeShader(bloom_frag);
+    GPU_FreeShader(bloom_vert);
+
 
     tilemap_image = GPU_CreateImage(TILEMAP_WIDTH, TILEMAP_HEIGHT, GPU_FORMAT_RGBA);
 
@@ -1703,7 +1722,7 @@ void render_hand() {
         clampColors(rgb);
 
         GPU_SetRGB(texture, rgb[0], rgb[1], rgb[2]);
-        GPU_BlitRect(texture, NULL, screen, &leftHandRect);
+        GPU_BlitRect(texture, NULL, hud, &leftHandRect);
     }
 }
 
@@ -1730,7 +1749,7 @@ void render_health_bar() {
     // SDL_SetRenderDrawColor(renderer, 200, 0, 0, 255);
     GPU_RectangleFilled2(screen, health_rect, (SDL_Color){200, 0, 0, 255});
 
-    GPU_BlitRect(healthbar_texture, NULL, screen, &outline_rect);
+    GPU_BlitRect(healthbar_texture, NULL, hud, &outline_rect);
 }
 
 void render_ability_helper(v2 pos, Ability *ability) {
@@ -1748,7 +1767,7 @@ void render_ability_helper(v2 pos, Ability *ability) {
     };
 
     if (ability->texture != NULL) {
-        GPU_BlitRect(ability->texture, NULL, screen, &rect);
+        GPU_BlitRect(ability->texture, NULL, hud, &rect);
     }
     double primary_progress = ability->timer == ability->cooldown? 0 : ability->timer / ability->cooldown;
 
@@ -1761,11 +1780,11 @@ void render_ability_helper(v2 pos, Ability *ability) {
 
     // SDL_SetRenderDrawColor(renderer, 0, 0, 0, 170);
     
-    GPU_RectangleFilled2(screen, primary_progress_rect, GPU_MakeColor(0, 0, 0, 170));
+    GPU_RectangleFilled2(hud, primary_progress_rect, GPU_MakeColor(0, 0, 0, 170));
 
 
     // SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    GPU_BlitRect(ability_icon_frame, NULL, screen, &frame_rect);
+    GPU_BlitRect(ability_icon_frame, NULL, hud, &frame_rect);
 }
 
 void render_ability_hud() {
@@ -1778,11 +1797,11 @@ void render_ability_hud() {
 
 void renderHUD(double delta) {
 
-    GPU_BlitRect(getSpriteCurrentTexture(dash_anim_sprite), NULL, screen, NULL);
+    GPU_BlitRect(getSpriteCurrentTexture(dash_anim_sprite), NULL, hud, NULL);
     spriteTick(dash_anim_sprite, delta);
 
     GPU_SetRGB(vignette_texture, vignette_color.r, vignette_color.g, vignette_color.b);
-    GPU_BlitRect(vignette_texture, NULL, screen, NULL);
+    GPU_BlitRect(vignette_texture, NULL, hud, NULL);
 
     render_hand();
 
@@ -1792,13 +1811,13 @@ void renderHUD(double delta) {
 
     GPU_Rect crosshairRect = {WINDOW_WIDTH / 2 - 8, WINDOW_HEIGHT / 2 - 8, 16, 16};
 
-    GPU_BlitRect(crosshair, NULL, screen, &crosshairRect);
+    GPU_BlitRect(crosshair, NULL, hud, &crosshairRect);
 
     int shots = max(player->pendingShots, (int)(player->shootChargeTimer * 3));
 
     GPU_Rect playerPendingShotsRect = {WINDOW_WIDTH / 2 + -10 * shots, WINDOW_HEIGHT * 0.8, 20 * shots, WINDOW_HEIGHT * 0.05};
 
-    UI_render(screen, UI_get_root());
+    UI_render(hud, UI_get_root());
 
 }
 
@@ -1817,6 +1836,7 @@ void drawSkybox() {
 void render(double delta) {  // #RENDER
 
     GPU_Clear(screen);
+    GPU_Clear(hud);
 
     char *newTitle = "FPS: ";
     char fps[4];
@@ -1882,7 +1902,19 @@ void render(double delta) {  // #RENDER
     screen_modulate_g = lerp(screen_modulate_g, 1, delta / 2);
     screen_modulate_b = lerp(screen_modulate_b, 1, delta / 2);
 
+    GPU_ActivateShaderProgram(bloom_shader, &bloom_shader_block);
+
+    GPU_SetShaderImage(screen_image, GPU_GetUniformLocation(bloom_shader, "tex"), 1);
+    
+    float res[2] = {WINDOW_WIDTH, WINDOW_HEIGHT};
+
+    GPU_SetUniformfv(GPU_GetUniformLocation(bloom_shader, "texResolution"), 2, 1, res);
+
     GPU_Blit(screen_image, NULL, actual_screen, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
+
+    GPU_DeactivateShaderProgram();
+
+    GPU_Blit(hud_image, NULL, actual_screen, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
 
     GPU_Flip(actual_screen);
 } // #RENDER END
@@ -2852,6 +2884,7 @@ void getTextureFiles(char *fileName, int fileCount, GPU_Image ***textures) {
 
 void update_fullscreen() { // iffy solution but whatever
     GPU_SetFullscreen(fullscreen, true);
+    // UI_set_fullscreen(fullscreen);
 }
 
 BakedLightColor _lerp_baked_light_color(BakedLightColor a, BakedLightColor b, double w) {

@@ -87,8 +87,13 @@ TTF_Font *default_font;
 bool _ui_initialized = false;
 bool _is_mouse_down = false;
 UIComponent *root;
+bool _fullscreen = false; // for functionality rather than visibility
+SDL_Window *_window;
+v2 _window_size;
 
 // #FUNC
+
+void UI_set_fullscreen(bool f);
 
 void UI_set_global_pos(UIComponent *comp, v2 pos);
 
@@ -157,9 +162,30 @@ UIStyle UIComponent_get_current_style(UIComponent *component) {
 }
 
 v2 _get_mouse_pos() {
-    int x, y;
-    SDL_GetMouseState(&x, &y);
-    return (v2){x, y};
+    
+
+    SDL_DisplayMode mode;
+    int gw, gh;
+    SDL_GetDesktopDisplayMode(0, &mode);
+    gw = mode.w;
+    gh = mode.h;
+
+
+    if (GPU_GetFullscreen()) {
+        int x, y;
+    
+        SDL_GetGlobalMouseState(&x, &y);
+
+        return v2_mul(v2_div((v2){x, y}, (v2){gw, gh}), _window_size);
+
+    } else {
+        int x, y;
+    
+        SDL_GetMouseState(&x, &y);
+
+        return (v2){x, y};
+    }
+    
 }
 #ifndef IS_POINT_IN_RECT_FUNC
 #define IS_POINT_IN_RECT_FUNC
@@ -223,7 +249,7 @@ void _UI_mouse_motion(SDL_MouseMotionEvent event) {
     }
 }
 
-void UI_init() {
+void UI_init(SDL_Window *w, v2 window_size) {
     if (_ui_initialized) {
         printf("UI already initialized! \n");
         return;
@@ -235,6 +261,9 @@ void UI_init() {
 
     root = UI_alloc(UIComponent);
     root->is_root = true;
+
+    _window = w;
+    _window_size = window_size;
 }   
 
 UIStyle UIStyle_new() {
@@ -439,7 +468,7 @@ void _UI_mouse_click(SDL_MouseButtonEvent event, bool pressed) {
 
     _is_mouse_down = pressed;
 
-    v2 mouse_pos = (v2){event.x, event.y};
+    v2 mouse_pos = _get_mouse_pos();
 
     UIComponent *component_stack[MAX_COMPONENT_STACK_SIZE];
     int stack_ptr = 0;
@@ -603,6 +632,10 @@ void UI_set_global_pos(UIComponent *comp, v2 pos) {
     v2 parent_pos = UI_get_global_pos(comp->parent);
 
     UI_set_pos(comp, v2_sub(pos, parent_pos));
+}
+
+void UI_set_fullscreen(bool f) {
+    _fullscreen = f;
 }
 
 
