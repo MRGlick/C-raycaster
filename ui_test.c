@@ -56,7 +56,7 @@ void test_click_event(UIComponent *component, bool pressed) {
 }
 
 void paused_click_event(UIComponent *comp, bool pressed) {
-    comp->parent->visible = false;
+    UI_set_visible(comp->parent, false);
 }
 
 void make_menu() {
@@ -68,6 +68,7 @@ void make_menu() {
 
     UILabel *paused_label = UI_alloc(UILabel);
     UILabel_set_text(paused_label, String("Paused!"));
+    paused_label->font_size = 30;
     paused_label->component.size = (v2){400, 100};
     paused_label->component.pos.y = 40;
     paused_label->alignment_x = ALIGNMENT_CENTER;
@@ -77,9 +78,12 @@ void make_menu() {
 
     UIButton *button = UI_alloc(UIButton);
     UILabel_set_text(button, String("Continue"));
+    UILabel_set_alignment(button, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
 
-    UI_set_size(button, (v2){400, 100});
-    UI_set_pos(button, (v2){0, 160});
+    UI_set(UILabel, button, font_size, 24);
+
+    UI_set_size(button, (v2){200, 100});
+    UI_set_pos(button, (v2){100, 160});
 
     button->on_click = paused_click_event;
 
@@ -151,7 +155,7 @@ int main(int argc, char* argv[])
 
 
             if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) {
-                menu->visible = true;
+                UI_set_visible(menu, true);
             } 
         }
 

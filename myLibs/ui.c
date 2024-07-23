@@ -13,6 +13,7 @@
 
 
 #define MAX_COMPONENT_STACK_SIZE 1000
+#define DEFAULT_FONT_SIZE 30
 
 typedef enum TextAlignment {
     ALIGNMENT_CENTER,
@@ -59,6 +60,7 @@ typedef struct UILabel {
     UIComponent component;
     String text;
     TTF_Font *font;
+    int font_size;
     TextAlignment alignment_x;
     TextAlignment alignment_y;
 } UILabel;
@@ -74,6 +76,7 @@ typedef struct UIButton {
 
 #define UI_alloc(type) ({type *ptr; ptr = malloc(sizeof(type)); (*ptr) = type##_new(); ptr;})
 
+#define UI_set(type, comp, property, value) ((type *)comp)->property = value 
 
 
 
@@ -85,6 +88,10 @@ bool _is_mouse_down = false;
 UIComponent *root;
 
 // #FUNC
+
+void UILabel_set_alignment(UILabel *label, TextAlignment x, TextAlignment y);
+
+void UI_set_visible(UIComponent *comp, bool visibility);
 
 v2 UI_get_size(UIComponent *comp);
 v2 UI_get_pos(UIComponent *comp);
@@ -272,7 +279,12 @@ void UILabel_update(UIComponent *component) {
     
     UIStyle current_style = UIComponent_get_current_style(label);
 
+    TTF_SetFontSize(label->font, label->font_size);
+
     SDL_Surface *text_surface = TTF_RenderText_Blended(label->font, label->text.data, current_style.fg_color);
+
+    // TTF_SetFontSize(label->font, DEFAULT_FONT_SIZE); // other stuff might use this font so ill be a good label and reset it
+    // nvm.
 
     SDL_Surface *main_surface = SDL_CreateRGBSurface(
         0, 
@@ -367,6 +379,7 @@ UILabel UILabel_new() {
     label.component.update = UILabel_update;
     label.text = String("Text here");
     label.font = default_font;
+    label.font_size = DEFAULT_FONT_SIZE;
     label.alignment_x = ALIGNMENT_LEFT;
     label.alignment_y = ALIGNMENT_TOP;
 
@@ -543,6 +556,21 @@ v2 UI_get_size(UIComponent *comp) {
 v2 UI_get_pos(UIComponent *comp) {
     return comp->size;
 }
+
+
+void UI_set_visible(UIComponent *comp, bool visibility) {
+    comp->visible = visibility;
+    if (visibility) {
+        UI_update(comp);
+    }
+}
+
+
+void UILabel_set_alignment(UILabel *label, TextAlignment x, TextAlignment y) {
+    label->alignment_x = x;
+    label->alignment_y = y;
+}
+
 
 
 // #END
