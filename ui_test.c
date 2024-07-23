@@ -8,27 +8,49 @@ void tick();
 
 GPU_Target *screen;
 TTF_Font *font;
+int points = 0;
+UILabel *score_label;
+
+void update_scoreboard() {
+    String a = String("Score: ");
+    String b = String_from_int(points);
+    String final = String_concat(a, b);
+
+    printf("final: %s \n", final.data);
+
+    UILabel_set_text(score_label, final);
+    score_label->component.update(score_label);
+
+    String_delete(&a);
+    String_delete(&b);
+}
 
 void test_click_event(UIComponent *component, bool pressed) {
     component->pos = to_vec((double)rand() / RAND_MAX * 400);
     UILabel *label = component;
     int num = rand() % 5;
+
+    points += atoi(label->text.data);
+    update_scoreboard();
+
     if (num == 0) {
-        label->text = "1";
+        label->text = String("1");
     } else if (num == 1) {
-        label->text = "2";
+        label->text = String("2");
     }
     else if (num == 2) {
-        label->text = "3";
+        label->text = String("3");
     }
     else if (num == 3) {
-        label->text = "4";
+        label->text = String("4");
     }
     else if (num == 4) {
-        label->text = "5";
+        label->text = String("5");
     }
     component->update(component);
 }
+
+
 
 int main(int argc, char* argv[])
 {
@@ -55,9 +77,20 @@ int main(int argc, char* argv[])
     button->on_click = test_click_event;
     button->label.alignment_x = ALIGNMENT_CENTER;
     button->label.alignment_y = ALIGNMENT_CENTER;
+    UILabel_set_text(button, String("10000"));
     button->label.component.update(button);
-    
     UI_add_component(button);
+
+
+    score_label = UI_alloc(UILabel);
+    score_label->component.pos = (v2){200, 0};
+    score_label->component.size = (v2){400, 100};
+    score_label->alignment_x = ALIGNMENT_CENTER;
+    score_label->alignment_y = ALIGNMENT_CENTER;
+    score_label->component.default_style.bg_color = (SDL_Color){0, 0, 0, 0};
+    UILabel_set_text(score_label, String("Score: "));
+    score_label->component.update(score_label);
+    UI_add_component(score_label);
 
     // Main loop flag
     bool quit = false;

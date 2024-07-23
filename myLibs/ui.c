@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include "array.c"
 #include "arraylist.c"
+#include "mystring.c"
+
 
 
 typedef enum TextAlignment {
@@ -19,6 +21,12 @@ typedef enum TextAlignment {
 typedef struct UIStyle {
     SDL_Color bg_color, fg_color;
 } UIStyle;
+
+typedef enum StyleType {
+    STYLE_DEFAULT,
+    STYLE_HOVER,
+    STYLE_PRESSED
+} StyleType;
 
 typedef struct UIComponent {
     v2 pos, size;
@@ -35,13 +43,15 @@ typedef struct UIComponent {
 
     GPU_Image *texture;
 
-    UIStyle current_style, default_style;
+    UIStyle default_style;
+
+    StyleType current_style_type;
 
 } UIComponent;
 
 typedef struct UILabel {
     UIComponent component;
-    char *text;
+    String text;
     TTF_Font *font;
     TextAlignment alignment_x;
     TextAlignment alignment_y;
@@ -74,6 +84,20 @@ void UIComponent_render(GPU_Target *target, UIComponent *component);
 
 // #START
 
+UIStyle UIComponent_get_current_style(UIComponent *component) {
+    if (component->isbutton && component->contains_mouse) {
+        UIButton *button = component;
+        if (_is_mouse_down) {
+            return button->pressed_style;
+        } else {
+            return button->hover_style;
+        }
+    }
+
+
+    return component->default_style;
+}
+
 v2 _get_mouse_pos() {
     int x, y;
     SDL_GetMouseState(&x, &y);
@@ -87,20 +111,16 @@ bool is_point_in_rect(v2 point, v2 rect_pos, v2 rect_size) {
 void UIButton_update(UIComponent *comp) {
     UIButton *button = comp;
 
-    UIStyle style;
-
     if (comp->contains_mouse) {
 
         if (_is_mouse_down) {
-            style = button->pressed_style;
+            comp->current_style_type = STYLE_PRESSED;
         } else {
-            style = button->hover_style;
+            comp->current_style_type = STYLE_HOVER;
         }
     } else {
-        style = comp->default_style;
+        comp->current_style_type = STYLE_DEFAULT;
     }
-
-    comp->current_style = style;
 
     UILabel_update(comp);
 }
@@ -157,14 +177,14 @@ UIComponent UIComponent_new() {
     component.texture = NULL;
     component.isbutton = false;
     component.default_style = UIStyle_new();
-    component.current_style = component.default_style;
+    component.current_style_type = STYLE_DEFAULT;
 
     component.contains_mouse = false;
 
     return component;
 }
 
-bool UIComponent_should_render(UIComponent *component) {
+bool UIComponent_is_visible(UIComponent *component) {
     
     if (!_ui_initialized) {
         printf("Error! UI not initialized! \n");
@@ -175,7 +195,7 @@ bool UIComponent_should_render(UIComponent *component) {
     if (component->parent == NULL)
         return component->visible;
 
-    return component->visible && UIComponent_should_render(component->parent);
+    return component->visible && UIComponent_is_visible(component->parent);
 
 }
 
@@ -185,8 +205,15 @@ void UILabel_update(UIComponent *component) {
 
     UILabel *label = component;
     
+    UIStyle current_style = UIComponent_get_current_style(label);
 
-    SDL_Surface *text_surface = TTF_RenderText_Blended(label->font, label->text, component->current_style.fg_color);
+    if (label->text.data == NULL) {
+        printf("data: NULL \n");
+    } else {
+        printf("data: %s \n", label->text.data);
+    }
+
+    SDL_Surface *text_surface = TTF_RenderText_Blended(label->font, label->text.data, current_style.fg_color);
 
     SDL_Surface *main_surface = SDL_CreateRGBSurface(
         0, 
@@ -199,7 +226,7 @@ void UILabel_update(UIComponent *component) {
         0xFF
     );
 
-    SDL_Color col = component->current_style.bg_color;
+    SDL_Color col = current_style.bg_color;
 
     SDL_FillRect(main_surface, NULL, SDL_MapRGBA(main_surface->format, col.r, col.g, col.b, col.a));
 
@@ -256,7 +283,7 @@ void UILabel_update(UIComponent *component) {
 }
 
 void UIComponent_render(GPU_Target *target, UIComponent *component) {
-    if (!UIComponent_should_render(component)) return;
+    if (!UIComponent_is_visible(component)) return;
 
     GPU_Rect rect = {
         component->pos.x,
@@ -272,7 +299,7 @@ UILabel UILabel_new() {
     UILabel label;
     label.component = UIComponent_new();
     label.component.update = UILabel_update;
-    label.text = "Text here";
+    label.text = String("Text here");
     label.font = default_font;
     label.alignment_x = ALIGNMENT_LEFT;
     label.alignment_y = ALIGNMENT_TOP;
@@ -329,14 +356,14 @@ void _UI_mouse_click(SDL_MouseButtonEvent event, bool pressed) {
         UIButton *button = component;
         bool should_activate = button->activate_on_release == !pressed;
         if (is_point_in_rect(mouse_pos, button->label.component.pos, button->label.component.size)) {
-            button->label.component.update(button);
             
             if (button->on_click != NULL && should_activate) {
                 button->on_click(button, pressed);
             }
             
             // button might move inside on_click, but im not dealing with that right now bc its unlikely
-            // button->label.component.contains_mouse = is_point_in_rect(mouse_pos, button->label.component.pos, button->label.component.size);
+            button->label.component.contains_mouse = is_point_in_rect(mouse_pos, button->label.component.pos, button->label.component.size);
+            button->label.component.update(button);
         }
 
     }
@@ -355,12 +382,17 @@ void UI_handle_event(SDL_Event event) {
     }
 }
 
+void UILabel_set_text(UILabel *label, String text) {
+    if (label->text.data != NULL) String_delete(&label->text);
 
+    label->text = text;
+}
 
 
 arraylist *UI_get_components() {
     return _components;
 }
+
 
 
 // #END
