@@ -1,7 +1,13 @@
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wincompatible-pointer-types"
+
 #define SDL_MAIN_HANDLED
 
 #include "ui.c"
+
+#define WINDOW_WIDTH 800
+#define WINDOW_HEIGHT 600
 
 void render();
 void tick();
@@ -10,13 +16,12 @@ GPU_Target *screen;
 TTF_Font *font;
 int points = 0;
 UILabel *score_label;
+UIComponent *menu;
 
 void update_scoreboard() {
     String a = String("Score: ");
     String b = String_from_int(points);
     String final = String_concat(a, b);
-
-    printf("final: %s \n", final.data);
 
     UILabel_set_text(score_label, final);
     UI_update(score_label);
@@ -26,7 +31,7 @@ void update_scoreboard() {
 }
 
 void test_click_event(UIComponent *component, bool pressed) {
-    component->pos = to_vec((double)rand() / RAND_MAX * 400);
+    component->pos = to_vec((double)rand() / RAND_MAX * (WINDOW_WIDTH / 2));
     UILabel *label = component;
     int num = rand() % 5;
 
@@ -50,7 +55,42 @@ void test_click_event(UIComponent *component, bool pressed) {
     UI_update(label);
 }
 
+void paused_click_event(UIComponent *comp, bool pressed) {
+    comp->parent->visible = false;
+}
 
+void make_menu() {
+    menu = UI_alloc(UIComponent);
+    menu->size = (v2){400, 300};
+    menu->pos = v2_sub((v2){WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2}, v2_div(menu->size, to_vec(2)));
+
+    menu->default_style.bg_color = (SDL_Color){0, 0, 0, 125};
+
+    UILabel *paused_label = UI_alloc(UILabel);
+    UILabel_set_text(paused_label, String("Paused!"));
+    paused_label->component.size = (v2){400, 100};
+    paused_label->component.pos.y = 40;
+    paused_label->alignment_x = ALIGNMENT_CENTER;
+    paused_label->component.default_style = (UIStyle){.bg_color = (SDL_Color){0, 0, 0, 0}, .fg_color = (SDL_Color){255, 255, 255, 255}};
+
+    UI_add_child(menu, paused_label);
+
+    UIButton *button = UI_alloc(UIButton);
+    UILabel_set_text(button, String("Continue"));
+
+    UI_set_size(button, (v2){400, 100});
+    UI_set_pos(button, (v2){0, 160});
+
+    button->on_click = paused_click_event;
+
+    UI_add_child(menu, button);
+
+
+
+    UI_add_child(root, menu);
+    UI_update(menu);
+
+}
 
 int main(int argc, char* argv[])
 {
@@ -61,7 +101,7 @@ int main(int argc, char* argv[])
     }
 
     // Create an SDL_gpu window
-    screen = GPU_Init(800, 600, GPU_DEFAULT_INIT_FLAGS);
+    screen = GPU_Init(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_DEFAULT_INIT_FLAGS);
     if (screen == NULL) {
         printf("GPU_Init Error: %s\n", GPU_PopErrorCode().details);
         SDL_Quit();
@@ -79,7 +119,7 @@ int main(int argc, char* argv[])
     button->label.alignment_y = ALIGNMENT_CENTER;
     UILabel_set_text(button, String("10000"));
     UI_update(button);
-    UIComponent_add_child(UI_get_root(), button);
+    UI_add_child(UI_get_root(), button);
 
 
     score_label = UI_alloc(UILabel);
@@ -90,7 +130,9 @@ int main(int argc, char* argv[])
     score_label->component.default_style.bg_color = (SDL_Color){0, 0, 0, 0};
     UILabel_set_text(score_label, String("Score: "));
     UI_update(score_label);
-    UIComponent_add_child(UI_get_root(), score_label);
+    UI_add_child(UI_get_root(), score_label);
+
+    make_menu();
 
     // Main loop flag
     bool quit = false;
@@ -106,6 +148,11 @@ int main(int argc, char* argv[])
                 quit = true;
             }
             UI_handle_event(e);
+
+
+            if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) {
+                menu->visible = true;
+            } 
         }
 
         tick();
@@ -136,3 +183,8 @@ void render() {
 void tick() {
 
 }
+
+
+
+
+#pragma GCC diagnostic pop

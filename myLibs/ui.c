@@ -1,3 +1,7 @@
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wincompatible-pointer-types"
+
 #include <SDL.h>
 #include <SDL_ttf.h>
 #include <SDL_gpu.h>
@@ -30,6 +34,7 @@ typedef enum StyleType {
 } StyleType;
 
 typedef struct UIComponent {
+    bool is_root;
     v2 pos, size;
     int z_index;
     struct UIComponent **children;
@@ -81,6 +86,16 @@ UIComponent *root;
 
 // #FUNC
 
+v2 UI_get_size(UIComponent *comp);
+v2 UI_get_pos(UIComponent *comp);
+
+void UI_set_pos(UIComponent *comp, v2 pos);
+void UI_set_size(UIComponent *comp, v2 size);
+
+v2 UI_get_global_pos(UIComponent *comp);
+
+SDL_Surface *_UI_create_color_surface(int width, int height, SDL_Color color);
+
 void UI_init();
 UIStyle UIStyle_new();
 UIComponent UIComponent_new();
@@ -94,6 +109,7 @@ UIStyle UIComponent_get_current_style(UIComponent *component);
 v2 _get_mouse_pos();
 bool is_point_in_rect(v2 point, v2 rect_pos, v2 rect_size);
 
+void UIComponent_update(UIComponent *component);
 void UILabel_update(UIComponent *component);
 void UIButton_update(UIComponent *comp);
 
@@ -172,7 +188,7 @@ void _UI_mouse_motion(SDL_MouseMotionEvent event) {
             continue; // skip the children too
         }
 
-        bool contains_mouse = is_point_in_rect(mouse_pos, comp->pos, comp->size);
+        bool contains_mouse = is_point_in_rect(mouse_pos, UI_get_global_pos(comp), comp->size);
         
         if (comp->contains_mouse != contains_mouse) {
             comp->contains_mouse = contains_mouse;
@@ -200,6 +216,7 @@ void UI_init() {
     default_font = TTF_OpenFont("FFFFORWA.TTF", default_font_ptsize);
 
     root = UI_alloc(UIComponent);
+    root->is_root = true;
 }   
 
 UIStyle UIStyle_new() {
@@ -213,11 +230,12 @@ UIStyle UIStyle_new() {
 
 UIComponent UIComponent_new() {
     UIComponent component;
+    component.is_root = false;
     component.children = array(UIComponent *, 10);
     component.parent = NULL;
     component.size = to_vec(100);
     component.pos = V2_ZERO;
-    component.update = NULL;
+    component.update = UIComponent_update;
     component.render = UIComponent_render;
     component.z_index = 0;
     component.visible = true;
@@ -253,12 +271,6 @@ void UILabel_update(UIComponent *component) {
     UILabel *label = component;
     
     UIStyle current_style = UIComponent_get_current_style(label);
-
-    if (label->text.data == NULL) {
-        printf("data: NULL \n");
-    } else {
-        printf("data: %s \n", label->text.data);
-    }
 
     SDL_Surface *text_surface = TTF_RenderText_Blended(label->font, label->text.data, current_style.fg_color);
 
@@ -325,19 +337,23 @@ void UILabel_update(UIComponent *component) {
 }
 
 void UI_render(GPU_Target *target, UIComponent *component) {
-    component->render(target, component);
+    if (!component->is_root) {
+        component->render(target, component);
+    }
 
     for (int i = 0; i < array_length(component->children); i++) {
-        component->children[i]->render(target, component->children[i]);
+        UI_render(target, component->children[i]);
     }
 }
 
 void UIComponent_render(GPU_Target *target, UIComponent *component) {
     if (!UIComponent_is_visible(component)) return;
 
+    v2 global_pos = UI_get_global_pos(component);
+
     GPU_Rect rect = {
-        component->pos.x,
-        component->pos.y,
+        global_pos.x,
+        global_pos.y,
         component->size.x,
         component->size.y
     };
@@ -357,7 +373,7 @@ UILabel UILabel_new() {
     return label;
 }
 
-UIComponent UIComponent_add_child(UIComponent *parent, UIComponent *child) {
+UIComponent UI_add_child(UIComponent *parent, UIComponent *child) {
     array_append(parent->children, child);
     child->parent = parent;
 }
@@ -414,14 +430,14 @@ void _UI_mouse_click(SDL_MouseButtonEvent event, bool pressed) {
         if (!component->isbutton) goto children;
         UIButton *button = component;
         bool should_activate = button->activate_on_release == !pressed;
-        if (is_point_in_rect(mouse_pos, button->label.component.pos, button->label.component.size)) {
+        if (is_point_in_rect(mouse_pos, UI_get_global_pos(button), UI_get_size(button))) {
             
             if (button->on_click != NULL && should_activate) {
                 button->on_click(button, pressed);
             }
             
             // button might move inside on_click, but im not dealing with that right now bc its unlikely
-            button->label.component.contains_mouse = is_point_in_rect(mouse_pos, button->label.component.pos, button->label.component.size);
+            button->label.component.contains_mouse = is_point_in_rect(mouse_pos, UI_get_global_pos(button), UI_get_size(button));
             button->label.component.update(button);
         }
         
@@ -460,8 +476,75 @@ void UI_update(UIComponent *comp) {
     comp->update(comp);
 
     for (int i = 0; i < array_length(comp->children); i++) {
-        comp->children[i]->update(comp->children[i]);
+        UI_update(comp->children[i]);
     }
 }
 
+void UIComponent_update(UIComponent *component) {
+
+    UIStyle current_style = UIComponent_get_current_style(component);
+
+    SDL_Surface *surface = _UI_create_color_surface(component->size.x, component->size.y, current_style.bg_color);
+
+    GPU_Image *texture = GPU_CopyImageFromSurface(surface);
+
+    SDL_FreeSurface(surface);
+
+    component->texture = texture;
+
+    if (component->texture == NULL) {
+        printf("Error! texture is null! \n");
+    }
+}
+
+SDL_Surface *_UI_create_color_surface(int width, int height, SDL_Color color) {
+    SDL_Surface *surf = SDL_CreateRGBSurface(
+        0, 
+        width,
+        height,
+        32, 
+        0xFF000000, 
+        0xFF0000, 
+        0xFF00, 
+        0xFF
+    );
+
+    SDL_FillRect(surf, NULL, SDL_MapRGBA(surf->format, color.r, color.g, color.b, color.a)); 
+
+    return surf;
+}
+
+v2 UI_get_global_pos(UIComponent *comp) {
+    v2 sum = V2_ZERO;
+    UIComponent *current = comp;
+    while (current != NULL) {
+        sum = v2_add(sum, current->pos);
+        current = current->parent;
+    }
+
+    return sum;
+}
+
+void UI_set_pos(UIComponent *comp, v2 pos) {
+    comp->pos = pos;
+}
+
+
+void UI_set_size(UIComponent *comp, v2 size) {
+    comp->size = size; 
+}
+
+
+v2 UI_get_size(UIComponent *comp) {
+    return comp->size;
+}
+
+
+v2 UI_get_pos(UIComponent *comp) {
+    return comp->size;
+}
+
+
 // #END
+
+#pragma GCC diagnostic pop
