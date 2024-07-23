@@ -8,6 +8,7 @@
 #include "mystring.c"
 
 
+#define MAX_COMPONENT_STACK_SIZE 1000
 
 typedef enum TextAlignment {
     ALIGNMENT_CENTER,
@@ -76,13 +77,38 @@ TTF_Font *default_font;
 int default_font_ptsize = 30;
 bool _ui_initialized = false;
 bool _is_mouse_down = false;
-arraylist *_components;
+UIComponent *root;
+
+// #FUNC
+
+void UI_init();
+UIStyle UIStyle_new();
+UIComponent UIComponent_new();
+UILabel UILabel_new();
+UIButton UIButton_new();
 
 void UIComponent_render(GPU_Target *target, UIComponent *component);
+void UI_render(GPU_Target *target, UIComponent *component);
+
+UIStyle UIComponent_get_current_style(UIComponent *component);
+v2 _get_mouse_pos();
+bool is_point_in_rect(v2 point, v2 rect_pos, v2 rect_size);
+
+void UILabel_update(UIComponent *component);
+void UIButton_update(UIComponent *comp);
+
+void _UI_mouse_motion(SDL_MouseMotionEvent event);
+void _UI_mouse_click(SDL_MouseButtonEvent event, bool pressed);
+
+void UI_handle_event(SDL_Event event);
+void UILabel_set_text(UILabel *label, String text);
+
+UIComponent *UI_get_root();
+void UI_update(UIComponent *comp);
 
 
 
-// #START
+// #IMPL
 
 UIStyle UIComponent_get_current_style(UIComponent *component) {
     if (component->isbutton && component->contains_mouse) {
@@ -129,16 +155,37 @@ void _UI_mouse_motion(SDL_MouseMotionEvent event) {
     
     v2 mouse_pos = _get_mouse_pos();
     
+    UIComponent *component_stack[MAX_COMPONENT_STACK_SIZE];
+    int stack_ptr = 0;
 
-    for (int i = 0; i < _components->length; i++) {
-        UIComponent *comp = arraylist_get_val(_components, i);
+    component_stack[stack_ptr++] = root;
+
+    while (stack_ptr > 0) {
+
+        if (stack_ptr > MAX_COMPONENT_STACK_SIZE) {
+            fprintf(stderr, "ERROR! UI is too powerful for the stack! \n");
+        }
+
+        UIComponent *comp = component_stack[--stack_ptr];
         
+        if (!comp->visible) {
+            continue; // skip the children too
+        }
+
         bool contains_mouse = is_point_in_rect(mouse_pos, comp->pos, comp->size);
         
         if (comp->contains_mouse != contains_mouse) {
             comp->contains_mouse = contains_mouse;
-            comp->update(comp);
+            if (comp->update != NULL) {
+                comp->update(comp);
+            }
         }
+
+        children: for (int i = 0; i < array_length(comp->children); i++) {
+            component_stack[stack_ptr++] = comp->children[i];
+        }
+
+
     }
 }
 
@@ -152,8 +199,8 @@ void UI_init() {
 
     default_font = TTF_OpenFont("FFFFORWA.TTF", default_font_ptsize);
 
-    _components = create_arraylist(10);
-}
+    root = UI_alloc(UIComponent);
+}   
 
 UIStyle UIStyle_new() {
     UIStyle style;
@@ -275,10 +322,13 @@ void UILabel_update(UIComponent *component) {
         printf("Error! texture is null! \n");
     }
 
-    if (component->children != NULL) {
-        for (int i = 0; i < array_length(component->children); i++) {
-            component->children[i]->update(component->children[i]);
-        }
+}
+
+void UI_render(GPU_Target *target, UIComponent *component) {
+    component->render(target, component);
+
+    for (int i = 0; i < array_length(component->children); i++) {
+        component->children[i]->render(target, component->children[i]);
     }
 }
 
@@ -338,11 +388,6 @@ UIButton UIButton_new() {
     return button;
 }
 
-void UI_add_component(UIComponent *component) {
-    arraylist_add(_components, component, -1);
-}
-
-
 
 void _UI_mouse_click(SDL_MouseButtonEvent event, bool pressed) {
 
@@ -350,9 +395,23 @@ void _UI_mouse_click(SDL_MouseButtonEvent event, bool pressed) {
 
     v2 mouse_pos = (v2){event.x, event.y};
 
-    for (int i = 0; i < _components->length; i++) {
-        UIComponent *component = arraylist_get_val(_components, i);
-        if (!component->isbutton) continue;
+    UIComponent *component_stack[MAX_COMPONENT_STACK_SIZE];
+    int stack_ptr = 0;
+
+    component_stack[stack_ptr++] = root;
+
+    while (stack_ptr > 0) {
+
+        if (stack_ptr > MAX_COMPONENT_STACK_SIZE) {
+            fprintf(stderr, "ERROR! UI is too powerful for the stack! \n");
+        }
+
+
+        UIComponent *component = component_stack[--stack_ptr];
+
+        if (!component->visible) continue; //skip the children too, dont need is_visible() bc it starts from the root
+
+        if (!component->isbutton) goto children;
         UIButton *button = component;
         bool should_activate = button->activate_on_release == !pressed;
         if (is_point_in_rect(mouse_pos, button->label.component.pos, button->label.component.size)) {
@@ -365,8 +424,13 @@ void _UI_mouse_click(SDL_MouseButtonEvent event, bool pressed) {
             button->label.component.contains_mouse = is_point_in_rect(mouse_pos, button->label.component.pos, button->label.component.size);
             button->label.component.update(button);
         }
+        
+        
 
-    }
+        children: for (int i = 0; i < array_length(component->children); i++) {
+            component_stack[stack_ptr++] = component->children[i];
+        }
+    };
 }
 
 void UI_handle_event(SDL_Event event) {
@@ -388,11 +452,16 @@ void UILabel_set_text(UILabel *label, String text) {
     label->text = text;
 }
 
-
-arraylist *UI_get_components() {
-    return _components;
+UIComponent *UI_get_root() {
+    return root;
 }
 
+void UI_update(UIComponent *comp) {
+    comp->update(comp);
 
+    for (int i = 0; i < array_length(comp->children); i++) {
+        comp->children[i]->update(comp->children[i]);
+    }
+}
 
 // #END

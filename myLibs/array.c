@@ -11,6 +11,7 @@ typedef struct ArrayHeader {
     int size; 
     int length;
     int item_size;
+    int padding;
 } ArrayHeader;
 
 ArrayHeader *array_header(void *array) {

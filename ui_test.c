@@ -19,7 +19,7 @@ void update_scoreboard() {
     printf("final: %s \n", final.data);
 
     UILabel_set_text(score_label, final);
-    score_label->component.update(score_label);
+    UI_update(score_label);
 
     String_delete(&a);
     String_delete(&b);
@@ -47,7 +47,7 @@ void test_click_event(UIComponent *component, bool pressed) {
     else if (num == 4) {
         label->text = String("5");
     }
-    component->update(component);
+    UI_update(label);
 }
 
 
@@ -78,8 +78,8 @@ int main(int argc, char* argv[])
     button->label.alignment_x = ALIGNMENT_CENTER;
     button->label.alignment_y = ALIGNMENT_CENTER;
     UILabel_set_text(button, String("10000"));
-    button->label.component.update(button);
-    UI_add_component(button);
+    UI_update(button);
+    UIComponent_add_child(UI_get_root(), button);
 
 
     score_label = UI_alloc(UILabel);
@@ -89,8 +89,8 @@ int main(int argc, char* argv[])
     score_label->alignment_y = ALIGNMENT_CENTER;
     score_label->component.default_style.bg_color = (SDL_Color){0, 0, 0, 0};
     UILabel_set_text(score_label, String("Score: "));
-    score_label->component.update(score_label);
-    UI_add_component(score_label);
+    UI_update(score_label);
+    UIComponent_add_child(UI_get_root(), score_label);
 
     // Main loop flag
     bool quit = false;
@@ -127,12 +127,7 @@ void render() {
 
     GPU_RectangleFilled2(screen, GPU_MakeRect(0, 0, 1000, 1000), (SDL_Color){60, 120, 255, 255});
 
-    arraylist *ui_comps = UI_get_components();
-
-    for (int i = 0; i < ui_comps->length; i++) {
-        UIComponent *component = arraylist_get_val(ui_comps, i);
-        component->render(screen, component);
-    }
+    UI_render(screen, UI_get_root());
 
     // Update the screen
     GPU_Flip(screen);
