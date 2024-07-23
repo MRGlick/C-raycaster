@@ -1,3 +1,7 @@
+
+#ifndef ARRAYLIST
+#define ARRAYLIST
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h> //memmove
@@ -152,3 +156,6 @@ bool arraylist_contains(arraylist *list, void *val) {
 
     return false;
 }
+
+
+#endif

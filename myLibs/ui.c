@@ -76,18 +76,23 @@ typedef struct UIButton {
 
 #define UI_alloc(type) ({type *ptr; ptr = malloc(sizeof(type)); (*ptr) = type##_new(); ptr;})
 
+#define UI_get_comp(comp) (UIComponent *)comp
+
 #define UI_set(type, comp, property, value) ((type *)comp)->property = value 
 
 
 
 
 TTF_Font *default_font;
-int default_font_ptsize = 30;
 bool _ui_initialized = false;
 bool _is_mouse_down = false;
 UIComponent *root;
 
 // #FUNC
+
+void UI_set_global_pos(UIComponent *comp, v2 pos);
+
+void UI_center_around_pos(UIComponent *comp, v2 pos);
 
 void UILabel_set_alignment(UILabel *label, TextAlignment x, TextAlignment y);
 
@@ -114,7 +119,11 @@ void UI_render(GPU_Target *target, UIComponent *component);
 
 UIStyle UIComponent_get_current_style(UIComponent *component);
 v2 _get_mouse_pos();
+
+#ifndef IS_POINT_IN_RECT_FUNC
+#define IS_POINT_IN_RECT_FUNC
 bool is_point_in_rect(v2 point, v2 rect_pos, v2 rect_size);
+#endif
 
 void UIComponent_update(UIComponent *component);
 void UILabel_update(UIComponent *component);
@@ -152,10 +161,12 @@ v2 _get_mouse_pos() {
     SDL_GetMouseState(&x, &y);
     return (v2){x, y};
 }
-
+#ifndef IS_POINT_IN_RECT_FUNC
+#define IS_POINT_IN_RECT_FUNC
 bool is_point_in_rect(v2 point, v2 rect_pos, v2 rect_size) {
     return point.x >= rect_pos.x && point.x <= rect_pos.x + rect_size.x && point.y >= rect_pos.y && point.y <= rect_pos.y + rect_size.y;
 }
+#endif
 
 void UIButton_update(UIComponent *comp) {
     UIButton *button = comp;
@@ -220,7 +231,7 @@ void UI_init() {
     _ui_initialized = true;
     TTF_Init();
 
-    default_font = TTF_OpenFont("FFFFORWA.TTF", default_font_ptsize);
+    default_font = TTF_OpenFont("FFFFORWA.TTF", DEFAULT_FONT_SIZE);
 
     root = UI_alloc(UIComponent);
     root->is_root = true;
@@ -376,6 +387,8 @@ void UIComponent_render(GPU_Target *target, UIComponent *component) {
 UILabel UILabel_new() {
     UILabel label;
     label.component = UIComponent_new();
+    label.component.default_style.bg_color = (SDL_Color){0, 0, 0, 0};
+    label.component.default_style.fg_color = (SDL_Color){255, 255, 255, 255};
     label.component.update = UILabel_update;
     label.text = String("Text here");
     label.font = default_font;
@@ -389,6 +402,10 @@ UILabel UILabel_new() {
 UIComponent UI_add_child(UIComponent *parent, UIComponent *child) {
     array_append(parent->children, child);
     child->parent = parent;
+
+    if (parent == root) { // QoL
+        UI_update(child);
+    }
 }
 
 void default_on_click(UIComponent *component, bool pressed) {
@@ -571,6 +588,22 @@ void UILabel_set_alignment(UILabel *label, TextAlignment x, TextAlignment y) {
     label->alignment_y = y;
 }
 
+void UI_center_around_pos(UIComponent *comp, v2 pos) {
+    UI_set_global_pos(comp, v2_sub(pos, v2_div(comp->size, to_vec(2))));
+}
+
+
+void UI_set_global_pos(UIComponent *comp, v2 pos) {
+
+    if (comp->parent == NULL) {
+        comp->pos = pos;
+        return;
+    }
+
+    v2 parent_pos = UI_get_global_pos(comp->parent);
+
+    UI_set_pos(comp, v2_sub(pos, parent_pos));
+}
 
 
 // #END

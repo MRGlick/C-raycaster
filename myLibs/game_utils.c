@@ -44,6 +44,8 @@
     } \
 } while (0)
 
+#define Color(r, g, b, a) (SDL_Color){r, g, b, a}
+
 typedef struct SortObject {
     void *val;
     double num;
@@ -218,9 +220,12 @@ double inverse_lerp(double a, double b, double mid) {
     return (mid - a) / (b - a);
 }
 
+#ifndef IS_POINT_IN_RECT_FUNC
+#define IS_POINT_IN_RECT_FUNC
 bool is_point_in_rect(v2 point, v2 rect_pos, v2 rect_size) {
     return (in_range(point.x, rect_pos.x, rect_pos.x + rect_size.x) && in_range(point.y, rect_pos.y, rect_pos.y + rect_size.y));
 }
+#endif
 
 
 // Merge sort

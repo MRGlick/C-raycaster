@@ -5,6 +5,7 @@
 #include "game_utils.c"
 #include "globals.h"
 #include "ui.c"
+#include "mystring.c"
 
 // SDL_Renderer *renderer;
 // SDL_Window *window;
@@ -16,8 +17,8 @@
 #define WINDOW_HEIGHT 580
 #define RESOLUTION_X 720
 #define RESOLUTION_Y 360
-#define X_SENSITIVITY .1
-#define Y_SENSITIVITY 0.8
+#define X_SENSITIVITY .2
+#define Y_SENSITIVITY 1.6
 #define COLOR_BLACK \
     (SDL_Color) { 0, 0, 0 }
 #define TRANSPARENT \
@@ -354,6 +355,10 @@ typedef struct CollisionData {
 
 // #FUNC
 
+void toggle_pause();
+
+void make_ui();
+
 void _player_die();
 
 void ability_dash_before_activate(Ability *ability);
@@ -550,6 +555,9 @@ GPU_Target *screen;
 GPU_Image *screen_image;
 GPU_Target *actual_screen;
 
+// #UI
+UIComponent *pause_menu;
+
 // #TEXTURES
 GPU_Image **dash_screen_anim;
 GPU_Image *lightmap_image;
@@ -608,6 +616,9 @@ GPU_ShaderBlock floor_shader_block;
 
 // #VAR
 
+double game_speed = 1;
+bool paused = false;
+
 bool queued_player_death = false;
 
 double screen_modulate_r = 1;
@@ -624,7 +635,8 @@ arraylist *gameobjects;
 Player *player = NULL;
 bool keyPressArr[26];
 bool render_debug = false;
-bool lockMouse = true;
+
+bool lock_and_hide_mouse = true;
 bool isLMouseDown = false;
 bool isRMouseDown = false;
 double startFov = 90;
@@ -661,9 +673,6 @@ const double PLAYER_SHOOT_COOLDOWN = 0.5;
 int main(int argc, char *argv[]) {
     if (SDL_Init(SDL_INIT_EVERYTHING) < 0) printf("Shit. \n");
 
-    // window = SDL_CreateWindow("Doom style 3D!", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_WIDTH, WINDOW_HEIGHT, 0);
-
-
     actual_screen = GPU_Init(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_INIT_DISABLE_VSYNC);
     SDL_SetWindowTitle(SDL_GetWindowFromID(actual_screen->context->windowID), "Goofy");
 
@@ -678,7 +687,9 @@ int main(int argc, char *argv[]) {
         levelToLoad = argv[1];
     }
 
-    init_ui();
+    UI_init();
+
+    make_ui();
 
     init();
 
@@ -688,6 +699,7 @@ int main(int argc, char *argv[]) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             handle_input(event);
+            UI_handle_event(event);
         }
 
         u64 now = SDL_GetTicks64();
@@ -697,7 +709,7 @@ int main(int argc, char *argv[]) {
         // render_timer += delta;
         if (tick_timer >= 1000 / TPS) {
             realFps = 1000.0 / tick_timer;
-            tick(mili_to_sec(tick_timer));
+            tick(paused? 0 : mili_to_sec(tick_timer) * game_speed);
             render(mili_to_sec(tick_timer));
             tick_timer = 0;
         }
@@ -974,11 +986,13 @@ void handle_input(SDL_Event event) {
                 printf("player is null \n");
                 return;
             }
-            player->angle += event.motion.xrel * X_SENSITIVITY;
-            player->handOffset.x = lerp(player->handOffset.x, -event.motion.xrel * 2, 0.06);
-            player->pitch += event.motion.yrel * Y_SENSITIVITY;
-            player->handOffset.y = lerp(player->handOffset.y, -event.motion.yrel * 2, 0.06);
-            player->pitch = clamp(player->pitch, -280, 280);
+            if (lock_and_hide_mouse) {
+                player->angle += event.motion.xrel * X_SENSITIVITY;
+                player->handOffset.x = lerp(player->handOffset.x, -event.motion.xrel * 2, 0.06);
+                player->pitch += event.motion.yrel * Y_SENSITIVITY;
+                player->handOffset.y = lerp(player->handOffset.y, -event.motion.yrel * 2, 0.06);
+                player->pitch = clamp(player->pitch, -280, 280);
+            }
             break;
         case SDL_MOUSEBUTTONDOWN:
             if (event.button.button == SDL_BUTTON_LEFT) {
@@ -1004,8 +1018,8 @@ void key_pressed(SDL_Keycode key) {
         running = false;
         return;
     }
-    if (key == SDLK_p) {
-        lockMouse = !lockMouse;
+    if (key == SDLK_ESCAPE) {
+        toggle_pause();
         return;
     }
     if (key == SDLK_o) {
@@ -1177,7 +1191,7 @@ void tick(double delta) {
 
     tanHalfFOV = tan(deg_to_rad(fov / 2));
 
-    if (lockMouse) {
+    if (lock_and_hide_mouse) {
         SDL_WarpMouseInWindow(get_window(), WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
         
     }
@@ -1201,7 +1215,7 @@ void tick(double delta) {
     }
     cameraOffset = v2_lerp(cameraOffset, to_vec(0), 0.2);
 
-    SDL_ShowCursor(!lockMouse);
+    SDL_ShowCursor(!lock_and_hide_mouse);
 
     animationTick(&animatedWallSprite->animations[animatedWallSprite->currentAnimationIdx], delta);
     spriteTick(leftHandSprite, delta);
@@ -1762,10 +1776,10 @@ void render_ability_hud() {
 }
 
 
-void renderHUD() {
+void renderHUD(double delta) {
 
     GPU_BlitRect(getSpriteCurrentTexture(dash_anim_sprite), NULL, screen, NULL);
-    spriteTick(dash_anim_sprite, 0.016);
+    spriteTick(dash_anim_sprite, delta);
 
     GPU_SetRGB(vignette_texture, vignette_color.r, vignette_color.g, vignette_color.b);
     GPU_BlitRect(vignette_texture, NULL, screen, NULL);
@@ -1783,6 +1797,8 @@ void renderHUD() {
     int shots = max(player->pendingShots, (int)(player->shootChargeTimer * 3));
 
     GPU_Rect playerPendingShotsRect = {WINDOW_WIDTH / 2 + -10 * shots, WINDOW_HEIGHT * 0.8, 20 * shots, WINDOW_HEIGHT * 0.05};
+
+    UI_render(screen, UI_get_root());
 
 }
 
@@ -1860,7 +1876,7 @@ void render(double delta) {  // #RENDER
 
     if (render_debug) renderDebug();
 
-    renderHUD();
+    renderHUD(delta);
 
     screen_modulate_r = lerp(screen_modulate_r, 1, delta / 2);
     screen_modulate_g = lerp(screen_modulate_g, 1, delta / 2);
@@ -2368,9 +2384,9 @@ void effectTick(Effect *effect, double delta) {
 void enemyTick(Enemy *enemy, double delta) {
     enemy->collider->pos = enemy->entity.pos;
 
-    bool paused = enemy->pause_timer > 0;
+    bool is_paused = enemy->pause_timer > 0;
 
-    if (paused) {
+    if (is_paused) {
         enemy->pause_timer -= delta;
     } else {
         enemy_move(enemy, delta);
@@ -3236,7 +3252,7 @@ void enemy_move(Enemy *enemy, double delta) {
     v2 vel = v2_mul(enemy->move_dir, to_vec(enemy->speed * enemy->speed_multiplier));
     vel = v2_mul(vel, to_vec(delta));
 
-    enemy->vel = v2_lerp(enemy->vel, vel, delta * 5);
+    enemy->vel = vel;
 
     enemy->entity.pos = v2_add(enemy->entity.pos, enemy->vel);
     
@@ -3799,9 +3815,8 @@ void ability_dash_activate(Ability *ability) {
 
 void activate_ability(Ability *ability) {
     
-    if (ability == NULL) return;
+    if (ability == NULL || !ability->can_use || paused) return;
 
-    if (!ability->can_use) return;
 
     ability->can_use = false;
 
@@ -3817,7 +3832,58 @@ void ability_dash_before_activate(Ability *ability) {
 }
 
 
+
+void _continue_button_pressed(UIComponent *comp, bool pressed) {
+    toggle_pause();
+}
+
+
+void make_ui() {
+
+    pause_menu = UI_alloc(UIComponent);
+
+    UI_set_size(pause_menu, (v2){WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2});
+    UI_set_pos(pause_menu, (v2){WINDOW_WIDTH / 4, WINDOW_HEIGHT / 4});
+
+    pause_menu->default_style = (UIStyle){.bg_color = Color(0, 0, 0, 125), .fg_color = Color(255, 255, 255, 255)};
+    
+    UILabel *paused_label = UI_alloc(UILabel);
+    UI_add_child(pause_menu, paused_label);
+    
+    UILabel_set_text(paused_label, String("Paused!"));
+    UILabel_set_alignment(paused_label, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
+    UI_set_pos(paused_label, (v2){0, 50});
+    UI_set_size(paused_label, (v2){WINDOW_WIDTH / 2, WINDOW_WIDTH / 16});
+
+    UIButton *continue_button = UI_alloc(UIButton);
+    UI_add_child(pause_menu, continue_button);
+    
+    
+    UI_set_size(continue_button, v2_div(UI_get_size(paused_label), (v2){2, 1}));
+    UI_center_around_pos(continue_button, (v2){WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2 + 50});
+    UILabel_set_alignment(continue_button, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
+    UILabel_set_text(continue_button, String("Continue"));
+
+    continue_button->on_click = _continue_button_pressed;
+
+    UIStyle style = (UIStyle){.bg_color = Color(0, 0, 0, 125), .fg_color = Color(255, 255, 255, 255)};
+
+    UI_set(UIComponent, continue_button, default_style, style);
+
+
+
+    
+    pause_menu->visible = false;
+    UI_add_child(UI_get_root(), pause_menu);
+}
+
+
+void toggle_pause() {
+    paused = !paused;
+    lock_and_hide_mouse = !paused;
+    pause_menu->visible = paused;
+}
+
+
 // #END
-
-
 #pragma GCC diagnostic pop
