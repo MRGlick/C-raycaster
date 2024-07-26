@@ -823,10 +823,13 @@ void init() {  // #INIT
 
     enemy_death_explosion_particles->spread = 2;
     enemy_death_explosion_particles->height_dir = 1;
-    enemy_death_explosion_particles->min_speed = 40;
-    enemy_death_explosion_particles->max_speed = 60;
+    enemy_death_explosion_particles->min_speed = 10;
+    enemy_death_explosion_particles->max_speed = 160;
     enemy_death_explosion_particles->particle_lifetime = 2.5;
     enemy_death_explosion_particles->height_accel = PARTICLE_GRAVITY * 2;
+    enemy_death_explosion_particles->floor_drag = 0.4;
+    enemy_death_explosion_particles->max_size = to_vec(400);
+    enemy_death_explosion_particles->min_size = to_vec(700);
 
     int bloom_frag = GPU_LoadShader(GPU_FRAGMENT_SHADER, "Shaders/bloom_frag.glsl");
     int bloom_vert = GPU_LoadShader(GPU_VERTEX_SHADER, "Shaders/bloom_vert.glsl");
@@ -3725,10 +3728,17 @@ ParticleSpawner create_particle_spawner(v2 pos, double height) {
         .bounciness = 0.5,
         .particle_lifetime = 1,
         .active = true,
-        .target = NULL,
-        .sprite.isAnimated = false,
-        .sprite.texture = defualt_particle_texture
+        .target = NULL
     };
+
+    Sprite sprite;
+    sprite.animCount = 0;
+    sprite.animations = NULL;
+    sprite.currentAnimationIdx = 0;
+    sprite.isAnimated = false;
+    sprite.texture = defualt_particle_texture;
+
+    spawner.sprite = sprite;
 
     spawner.target = NULL;
 
@@ -3760,10 +3770,11 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
 
     double speed = randf_range(spawner->min_speed, spawner->max_speed);
     v2 dir = v2_rotate(spawner->dir, randf_range(-PI * spawner->spread, PI * spawner->spread));
+    double height_dir = spawner->height_dir -  spawner->height_dir *  randf_range(-PI * spawner->spread, PI * spawner->spread) / PI;
     
     double vel_x = dir.x * speed;
     double vel_y = dir.y * speed;
-    double vel_z = spawner->height_dir * speed * 1000; // bc height is different like that
+    double vel_z = height_dir * speed * 1000; // bc height is different like that
 
     particle.vel = (v2){vel_x, vel_y};
     particle.h_vel = vel_z;
@@ -3811,10 +3822,15 @@ void particle_tick(Particle *particle, double delta) {
     particle->effect.entity.pos = v2_add(particle->effect.entity.pos, v2_mul(particle->vel, to_vec(delta)));
     particle->effect.entity.height += particle->h_vel * delta;
     double floor_bound = particle->effect.entity.size.y / 2;
+    double ceil_bound = get_max_height() - particle->effect.entity.size.y / 2;
     if (particle->effect.entity.height < floor_bound) {
         particle->effect.entity.height = floor_bound;
         particle->h_vel *= -particle->bounciness;
         particle->vel = v2_mul(particle->vel, to_vec(1 - particle->floor_drag));
+    }
+    if (particle->effect.entity.height > ceil_bound) {
+        particle->effect.entity.height = ceil_bound;
+        particle->h_vel *= -particle->bounciness;
     }
 
     effectTick((Effect *)particle, delta);
