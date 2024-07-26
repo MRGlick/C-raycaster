@@ -248,8 +248,9 @@ typedef struct ParticleSpawner {
 
 typedef struct RenderObject {
     void *val;
-    int type;
     double dist_squared;
+    int type;
+    bool isnull;
 } RenderObject;
 
 typedef struct Enemy {
@@ -674,7 +675,7 @@ int cameraShakeTicksLeft = 0;
 double cameraShakeTimeToNextTick = 0.02;
 double cameraShakeCurrentStrength = 0;
 bool cameraShakeFadeActive = false;
-RenderObject *wallStripesToRender[RESOLUTION_X];
+RenderObject wallStripesToRender[RESOLUTION_X];
 v2 cameraOffset = {0, 0};
 v2 playerForward;
 char *levelToLoad = NULL;
@@ -1166,7 +1167,6 @@ void playerTick(double delta) {
             if (dist < movement) {
                 move_without_ray = false;
                 player->pos = v2_add(player->pos, v2_mul(playerForward, to_vec(dist - 10)));
-                cd_print(true, "Hello world \n");
             }
         }
     }
@@ -1508,13 +1508,13 @@ typedef struct WallStripe {
     int i; // 4
 } WallStripe;
 
-RenderObject *getWallStripe(int i) {
+RenderObject getWallStripe(int i) {
     v2 ray_dir = getRayDirByIdx(i);
 
     RayCollisionData data = castRay(player->pos, ray_dir);
 
     if (!data.hit) {
-        return NULL;
+        return (RenderObject){.isnull = true};
     }
 
     WallStripe *stripe = malloc(sizeof(WallStripe));
@@ -1534,16 +1534,13 @@ RenderObject *getWallStripe(int i) {
     stripe->wallWidth = data.wallWidth;
     stripe->pos = data.collpos;
 
-    RenderObject *currentRenderObj = malloc(sizeof(RenderObject));
-    if (currentRenderObj == NULL) {
-        printf("tf is this trash lang \n");
-    }
+    RenderObject currentRenderObj = {.isnull = false};
 
     double real_dist = dist / cos_angle_to_forward;
 
-    currentRenderObj->dist_squared = real_dist * real_dist;
-    currentRenderObj->val = stripe;
-    currentRenderObj->type = WALL_STRIPE;
+    currentRenderObj.dist_squared = real_dist * real_dist;
+    currentRenderObj.val = stripe;
+    currentRenderObj.type = WALL_STRIPE;
 
     return currentRenderObj;
 }
@@ -1560,8 +1557,17 @@ int addWallStripes_Threaded(void *data) {
     }
 }
 
-arraylist *getRenderList() {
-    arraylist *renderList = create_arraylist(RESOLUTION_X + 5);
+int _cmp(const void *a, const void *b) {
+    const RenderObject *ra = a;
+    const RenderObject *rb = b;
+    double d1 = ra->isnull? 999999999999 : ra->dist_squared;
+    double d2 = rb->isnull? 999999999999 : rb->dist_squared;
+
+    return d2 - d1;
+}
+
+RenderObject *getRenderList() {
+    RenderObject *renderList = array(RenderObject, RESOLUTION_X + gameobjects->length - 1);
 
     if (NUM_WALL_THREADS == 1) {
         int i = 0;
@@ -1580,59 +1586,46 @@ arraylist *getRenderList() {
         }
     }
 
-    
-
-    // convert everything to sort objects, sort, get back our sorted goods, put
-    // into main list
-    SortObject sortObjects[RESOLUTION_X];
-    for (int i = 0; i < RESOLUTION_X; i++) {
-        SortObject sObj = {wallStripesToRender[i], wallStripesToRender[i] == NULL ? 9999999999 : wallStripesToRender[i]->dist_squared};
-        sortObjects[i] = sObj;
-    }
-
-    SortObject *sorted = merge_sort(sortObjects, RESOLUTION_X);
     for (int i = RESOLUTION_X - 1; i >= 0; i--) {
-        arraylist_add(renderList, sorted[i].val, RENDER_OBJECT);
+        array_append(renderList, wallStripesToRender[i]);
     }
-    free(sorted);
 
     for (int i = 0; i < gameobjects->length; i++) {
         obj *object = arraylist_get(gameobjects, i);
 
-        RenderObject *currentRObj = malloc(sizeof(RenderObject));
-        v2 pos;
+        RenderObject currentRObj = (RenderObject){.isnull = true};
+        v2 pos = V2_ZERO;
 
         if (is_enemy_type(object->type)) {
 
-            currentRObj->val = object->val;
-            currentRObj->type = ENEMY;
+            currentRObj = (RenderObject){.isnull = false};
+
+            currentRObj.val = object->val;
+            currentRObj.type = ENEMY;
             pos = ((Enemy *)object->val)->entity.pos;
 
         } else if (is_entity_type(object->type)) {
 
-            currentRObj->val = object->val;
-            currentRObj->type = ENTITY;
+            currentRObj = (RenderObject){.isnull = false};
+
+
+            currentRObj.val = object->val;
+            currentRObj.type = ENTITY;
             pos = ((Entity *)object->val)->pos;
 
+        } else {
+            continue;
         }
 
-        currentRObj->dist_squared = v2_distance_squared(pos, player->pos);
-
-        bool added = false;
-
-        for (int i = 0; i < renderList->length; i++) {
-            RenderObject *rObj = arraylist_get(renderList, i)->val;
-            if (rObj == NULL || currentRObj->dist_squared <= rObj->dist_squared) {
-                continue;
-            }
-            arraylist_insert(renderList, currentRObj, RENDER_OBJECT, i);
-            added = true;
-            break;
-        }
-        if (!added) {
-            arraylist_add(renderList, currentRObj, RENDER_OBJECT);
-        }
+        currentRObj.dist_squared = v2_distance_squared(pos, player->pos);
+        
+        array_append(renderList, currentRObj);
+        
     }
+
+    int l = array_length(renderList);
+
+    SDL_qsort(renderList, l - 1, sizeof(RenderObject), _cmp);
 
     return renderList;
 }
@@ -1860,37 +1853,38 @@ void render(double delta) {  // #RENDER
     GPU_Clear(screen);
     GPU_Clear(hud);
 
-    char *newTitle = "FPS: ";
-    char fps[4];
-    decimal_to_text(realFps, fps);
+    String title = String("FPS: ");
+    String fps_text = String_new(20);
+    decimal_to_text(realFps, fps_text.data);
+    String final = String_concat(title, fps_text);
 
-    char *final = concat(newTitle, fps);
+    SDL_SetWindowTitle(get_window(), final.data);
 
-    SDL_SetWindowTitle(get_window(), final);
-
-    free(final);
+    String_delete(&final);
+    String_delete(&fps_text);
+    String_delete(&title);
 
     // SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
-    arraylist *renderList = getRenderList();
+    RenderObject *renderList = getRenderList();
 
     render_floor_and_ceiling();
 
-    for (int i = 0; i < renderList->length; i++) {
-        RenderObject *rObj = arraylist_get(renderList, i)->val;
-        if (rObj == NULL) {
+    for (int i = 0; i < array_length(renderList); i++) {
+        RenderObject rObj = renderList[i];
+        if (rObj.isnull) {
             continue;
         }
 
-        switch (rObj->type) {
+        switch (rObj.type) {
             case (int)ENTITY:
-                renderEntity(*(Entity *)rObj->val);
+                renderEntity(*(Entity *)rObj.val);
                 break;
             case (int)WALL_STRIPE:
-                renderWallStripe((WallStripe *)rObj->val);
+                renderWallStripe((WallStripe *)rObj.val);
                 break;
             case (int)ENEMY:;
-                Enemy *enemy = rObj->val;
+                Enemy *enemy = rObj.val;
                 if (enemy->dirSprite != NULL) {
                     renderDirSprite(enemy->dirSprite, enemy->entity.pos, enemy->entity.size, enemy->entity.height);
                 } else {
@@ -1899,7 +1893,7 @@ void render(double delta) {  // #RENDER
                 break;
 
             case (int)BULLET:;
-                Bullet *bullet = rObj->val;
+                Bullet *bullet = rObj.val;
                 if (bullet->dirSprite != NULL) {
                     renderDirSprite(bullet->dirSprite, bullet->entity.pos, bullet->entity.size, bullet->entity.height);
                 } else {
@@ -1907,14 +1901,16 @@ void render(double delta) {  // #RENDER
                 }
                 break;
         }
+        //free(rObj);
     }
 
-    for (int i = 0; i < renderList->length; i++) {
-        free(arraylist_get(renderList, i)->val);
-    }
+    // for (int i = 0; i < renderList->length; i++) {
+    //     obj *object = arraylist_get(renderList, i);
+    //     free(object->val);
+    // }
     // cd_print(true, "");
 
-    arraylist_free(renderList);
+    array_free(renderList);
 
     if (render_debug) renderDebug();
 
@@ -2656,8 +2652,6 @@ Bullet *createDefaultBullet(v2 pos, v2 dir) {
     bullet->particle_spawner->active = true;
 
     add_game_object(bullet->particle_spawner, PARTICLE_SPAWNER);
-
-    particle_spawner_explode(bullet->particle_spawner);
 
     return bullet;
 }
@@ -3981,7 +3975,6 @@ void toggle_pause() {
 }
 
 void particle_spawner_explode(ParticleSpawner *spawner) {
-    printf("explode \n");
     for (int i = 0; i < 20; i++) {
         particle_spawner_spawn(spawner);
     }

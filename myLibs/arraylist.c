@@ -51,7 +51,7 @@ arraylist *create_arraylist(size_t size) {
     }
     list->size = size;
     list->length = 0;
-    list->objects = malloc(sizeof(obj *) * size);
+    list->objects = calloc(size, sizeof(obj *)); // haters gonna hate
     return list;
 }
 
