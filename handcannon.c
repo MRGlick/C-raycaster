@@ -1625,7 +1625,7 @@ RenderObject *getRenderList() {
 
     int l = array_length(renderList);
 
-    SDL_qsort(renderList, l - 1, sizeof(RenderObject), _cmp);
+    SDL_qsort(renderList, l, sizeof(RenderObject), _cmp);
 
     return renderList;
 }
@@ -3482,6 +3482,7 @@ void exploder_tick(Enemy *enemy, double delta) {
 
         if (exploder->enemy.dist_squared_to_player < 400) {
             exploder_explode(exploder);
+            enemy_die(exploder);
             return;
         }
     }
@@ -3551,7 +3552,7 @@ void exploder_explode(ExploderEnemy *exploder) {
 
 
 
-    enemy_die(exploder);
+    //enemy_die(exploder);
 }
 
 
@@ -3615,10 +3616,8 @@ void ability_secondary_shoot_activate(Ability *ability) {
     Rapidfire *rapid_fire = (Rapidfire *)ability;
     rapid_fire->shots_left = rapid_fire->shot_amount;
 
-    while (rapid_fire->shots_left > 0) {
-        _shoot(0.05);
-        rapid_fire->shots_left--;
-    }
+    while (rapid_fire->shots_left-- > 0) _shoot(0.05);
+    
 
     player->vel = v2_mul(playerForward, to_vec(-5));
 }
@@ -3823,7 +3822,7 @@ void particle_tick(Particle *particle, double delta) {
 
 void exploder_on_take_dmg(Enemy *enemy, double dmg) {
     
-    if (enemy->health <= 1) {
+    if (enemy->health < 1) {
         exploder_explode(enemy);
     }
 }
