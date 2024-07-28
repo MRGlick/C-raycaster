@@ -229,8 +229,9 @@ bool is_point_in_rect(v2 point, v2 rect_pos, v2 rect_size) {
 
 
 // Merge sort
+// Completely destroyed by qsort()
+// Will probably never touch this bc memory
 
-// Merges the arrays in a sorted fashion
 SortObject *merge(SortObject *arr1, SortObject *arr2, int l1, int l2) {
     SortObject *res = malloc(sizeof(SortObject) * (l1 + l2));
     int i1 = 0;

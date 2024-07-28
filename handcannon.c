@@ -934,7 +934,7 @@ void init() {  // #INIT
 
     shooter_hit_texture = load_texture("Textures/ShooterEnemy/hit_frame1.png");
 
-    healthbar_texture = load_texture("Textures/health_bar.png");
+    healthbar_texture = load_texture("Textures/health_bar1.png");
 
     vignette_texture = load_texture("Textures/vignette.png");
 
@@ -1726,7 +1726,6 @@ void render_hand() {
         baked_light_color.b = 1.5;
     }
 
-
     GPU_Image *texture = getSpriteCurrentTexture(leftHandSprite);
     
 
@@ -1764,7 +1763,18 @@ void render_health_bar() {
         11 * scale.y
     };
 
+    GPU_Rect health_bg_rect = {
+        16 * scale.x,
+        18 * scale.y,
+        78 * scale.x,
+        11 * scale.y
+    };
+
     // SDL_SetRenderDrawColor(renderer, 200, 0, 0, 255);
+
+    // 180d2f
+
+    GPU_RectangleFilled2(screen, health_bg_rect, (SDL_Color){24, 13, 47, 255});
     GPU_RectangleFilled2(screen, health_rect, (SDL_Color){200, 0, 0, 255});
 
     GPU_BlitRect(healthbar_texture, NULL, hud, &outline_rect);
