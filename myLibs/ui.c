@@ -126,7 +126,6 @@ UIStyle UIComponent_get_current_style(UIComponent *component);
 v2 _get_mouse_pos();
 
 #ifndef IS_POINT_IN_RECT_FUNC
-#define IS_POINT_IN_RECT_FUNC
 bool is_point_in_rect(v2 point, v2 rect_pos, v2 rect_size);
 #endif
 

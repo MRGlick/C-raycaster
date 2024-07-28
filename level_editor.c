@@ -1,5 +1,6 @@
 #include "game_utils.c"
 #include "globals.h"
+#include "mystring.c"
 
 SDL_Renderer *renderer;
 SDL_Window *window;
@@ -97,6 +98,12 @@ int main(int argc, char **argv) {
 
     if (argc >= 2) {
         level_file = argv[1];
+        StringRef str = StringRef(level_file);
+        if (!String_equal(String_slice(str, str.len - 8, str.len), StringRef(".hclevel"))) {
+            printf("Invalid file format. Only '.hclevel' files are allowed. \n");
+        }
+    } else {
+        printf("No file was entered. Results will not be saved. \n");
     }
     init();
 
@@ -610,7 +617,7 @@ void render(u64 delta) {
 void save(SaveData saveData, char *file) {
     FILE *fh = fopen(level_file, "w");
     if (fh == NULL) {
-        printf("Couldn't open file \n");    
+        printf("Couldn't open file for writing. Error code: %d \n", errno);
     }
     
     size_t dataSize = sizeof(int) * TILEMAP_HEIGHT * TILEMAP_WIDTH * 4;
@@ -650,8 +657,10 @@ void save(SaveData saveData, char *file) {
 void load_level(char *file) {
     FILE *fh = fopen(level_file, "r");
     if (fh == NULL) {
-        printf("File probably doesnt exist. \n");
+        printf("File doesnt exist. Creating new file: '%s' \n", level_file);
         return;
+    } else {
+        printf("Loading file: '%s' \n", level_file);
     }
 
     fseek(fh, 0L, SEEK_END);

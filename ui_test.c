@@ -112,7 +112,7 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    UI_init();
+    UI_init(SDL_GetWindowFromID(screen->context->windowID), (v2){WINDOW_WIDTH, WINDOW_HEIGHT});
     
     font = TTF_OpenFont("FFFFORWA.TTF", 30);
 

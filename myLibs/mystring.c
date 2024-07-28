@@ -9,16 +9,19 @@
 typedef struct String {
     char *data;
     int len;
+    bool ref;
 } String;
 
-#define String(str) String_copy_from_literal(str)
-#define StringAllocated(str) (String){.len = strlen(str), .data = str}
+typedef const String StringRef;
 
+#define String(str) String_copy_from_literal(str)
+#define StringRef(str) (String){.len = strlen(str), .data = str}
 
 
 String String_copy_from_literal(const char *literal) {
     String str = {
-        .len = strlen(literal)
+        .len = strlen(literal),
+        .ref = false
     };
 
     str.data = malloc(str.len + 1);
@@ -33,7 +36,8 @@ String String_copy_from_literal(const char *literal) {
 String String_new(int len) {
     String new = {
         .len = len,
-        .data = malloc(len + 1)
+        .data = malloc(len + 1),
+        .ref = false
     };
 
     new.data[len] = 0;
@@ -41,7 +45,7 @@ String String_new(int len) {
     return new;
 }
 
-String String_concat(String a, String b) {
+String String_concat(StringRef a, StringRef b) {
     String new = String_new(a.len + b.len);
 
     memcpy(new.data, a.data, a.len);
@@ -76,5 +80,53 @@ String String_from_int(int num) {
 
     return string;
 }
+
+
+bool String_equal(StringRef a, StringRef b) {
+    return strncmp(a.data, b.data, a.len) == 0;
+}
+
+StringRef String_slice(StringRef a, int start, int end) {
+    if (start > end) {
+        printf("Couldn't slice string! Start larger than end! \n");
+        return (StringRef){.data = NULL, .len = -1};
+    }
+    StringRef slice = (StringRef) {
+        .data = a.data + start,
+        .len = end - start,
+        .ref = true
+    };
+
+    return slice;
+}
+
+String String_cslice(StringRef a, int start, int end) {
+    
+    if (start > end) {
+        printf("Couldn't cslice string! Start larger than end! \n");
+        return (StringRef){.data = NULL, .len = -1};
+    }
+    
+    String new = String_new(end - start);
+
+    memcpy(new.data, a.data + start, a.len);
+
+    return new;
+}
+
+bool String_ends_with(StringRef a, StringRef b) {
+    if (b.len > a.len) return false;
+
+    return String_equal(String_slice(a, a.len - b.len, a.len), b);
+}
+
+bool String_starts_with(StringRef a, StringRef b) {
+    if (b.len > a.len) return false;
+
+    return strncmp(a.data, b.data, b.len) == 0;
+}
+
+
+
 
 #endif
