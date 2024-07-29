@@ -6,7 +6,7 @@ SDL_Renderer *renderer;
 SDL_Window *window;
 
 #define WINDOW_WIDTH 1080
-#define WINDOW_HEIGHT 720
+#define WINDOW_HEIGHT 600
 #define FPS 60
 #define TPS 60
 
@@ -404,7 +404,7 @@ Placeable get_current_selection() {
     }
 }
 
-char *get_current_selection_string() {
+String get_current_selection_string() {
 
     //     IDK = -1,
     // WALL,
@@ -413,33 +413,35 @@ char *get_current_selection_string() {
     // FLOOR,
     // CEILING
 
+    StringRef res = StringRef("Current: ");
+
     switch (get_current_selection()) {
         case P_PLAYER:
-            return "Current: Player";
+            return String_concat(res, StringRef("Player"));
             break;
         case P_SHOOTER:
-            return "Current: Shooter";
+            return String_concat(res, StringRef("Shooter"));
             break;
         case P_WALL:
-            return "Current: Wall";
+            return String_concat(res, StringRef("Wall"));
             break;
         case P_FLOOR:
-            return "Current: Floor";
+            return String_concat(res, StringRef("Floor"));
             break;
         case P_FLOOR_LIGHT:
-            return "Current: Floor light";
+            return String_concat(res, StringRef("Floor light"));
             break;
         case P_CEILING:
-            return "Current: Ceiling";
+            return String_concat(res, StringRef("Ceiling"));
             break;
         case P_CEILING_LIGHT:
-            return "Current: Ceiling light";
+            return String_concat(res, StringRef("Ceiling light"));
             break;
         case P_EXPLODER:
-            return "Current: Exploder";
+            return String_concat(res, StringRef("Exploder"));
             break;
         case P_IDK:
-            return "Current: IDK";
+            return String_concat(res, StringRef("IDK"));
             break;
     }
 }
@@ -463,31 +465,43 @@ void tick(u64 delta) {
         remove_object(row, col);
     }
 
-    char *title;
-    char *placemode;
+    String title;
 
     switch (place_mode) {
         case PLACEMODE_FLOOR:
-            placemode = "Place mode: FLOOR";
+            title = String("Place mode: FLOOR");
             break;
         case PLACEMODE_WALL:
-            placemode = "Place mode: WALL";
+            title = String("Place mode: WALL");
             break;
         case PLACEMODE_ENTITY:
-            placemode = "Place mode: ENTITY";
+            title = String("Place mode: ENTITY");
             break;
         case PLACEMODE_CEILING:
-            placemode = "Place mode: CEILING";
+            title = String("Place mode: CEILING");
             break;
         default:
-            placemode = "Place mode: unknown";
+            title = String("Place mode: IDK");
             break;
     }
+    String_append(&title, StringRef(" | "));
 
-    char *currentTileText = get_current_selection_string();
-    title = concat(concat(currentTileText, "  "), placemode);
 
-    SDL_SetWindowTitle(window, title);
+    String currentTileText = get_current_selection_string();
+    title = String_concatf(title, currentTileText);
+
+    String_append(&title, StringRef(" | "));
+
+
+    if (paint_mode == PAINTMODE_DRAW) String_append(&title, StringRef("Paint mode: DRAW"));
+    else String_append(&title, StringRef("Paint mode: FILL"));
+
+    
+
+    SDL_SetWindowTitle(window, title.data);
+
+
+    String_delete(&title);
 }
 
 void draw_player() {
@@ -657,7 +671,12 @@ void save(SaveData saveData, char *file) {
 void load_level(char *file) {
     FILE *fh = fopen(level_file, "r");
     if (fh == NULL) {
-        printf("File doesnt exist. Creating new file: '%s' \n", level_file);
+        printf("File doesnt exist. ");
+        if (strlen(level_file) != 0) {
+            printf("Creating new file: '%s' \n", level_file);
+        } else {
+            printf("\n");
+        }
         return;
     } else {
         printf("Loading file: '%s' \n", level_file);

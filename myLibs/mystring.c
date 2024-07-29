@@ -54,6 +54,24 @@ String String_concat(StringRef a, StringRef b) {
     return new;
 }
 
+String String_concatf(String a, String b) {
+    String new = String_new(a.len + b.len);
+
+    memcpy(new.data, a.data, a.len);
+    memcpy(new.data + a.len, b.data, b.len);
+
+    free(a.data);
+    free(b.data);
+
+    return new;
+}
+
+void String_append(String *a, StringRef other) {
+    String temp = *a;
+    *a = String_concat(*a, other);
+    free(temp.data);
+}
+
 String String_delete(String *str) {
     free(str->data);
     str->len = -1;
