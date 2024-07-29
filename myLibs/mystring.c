@@ -21,7 +21,7 @@ typedef struct String {
 typedef String StringRef;
 
 #define String(str) String_copy_from_literal(str)
-#define StringRef(str) (String){.len = strlen(str), .data = str}
+#define StringRef(str) (String){.len = strlen(str), .data = str, .ref = true}
 
 
 String String_copy_from_literal(const char *literal) {
@@ -78,7 +78,11 @@ void String_append(String *a, StringRef other) {
     free(temp.data);
 }
 
-String String_delete(String *str) {
+void String_delete(String *str) {
+    if (str->ref) {
+        printf("ERROR! Deleting a StringRef is not allowed! \n str: '%s'", str->data);
+        return;
+    }
     free(str->data);
     str->len = -1;
 }

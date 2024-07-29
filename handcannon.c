@@ -679,7 +679,7 @@ const char *font = "font.ttf";
 const SDL_Color fogColor = {0, 0, 0, 255};
 double tanHalfFOV;
 double tanHalfStartFOV;
-double ambient_light = 0.5;
+double ambient_light = 1.5;
 int floorRenderStart;
 int **levelTileMap;
 int **floorTileMap;
@@ -836,7 +836,6 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
 
 void init() {  // #INIT
 
-    generate_dungeon();
     //exit(1);
 
     enemy_death_explosion_particles = malloc(sizeof(ParticleSpawner));
@@ -1028,6 +1027,10 @@ void init() {  // #INIT
     skybox_texture = load_texture("Textures/skybox.png");
 
     //SDL_RenderSetLogicalSize(SDL_GetRenderer(get_window()), WINDOW_WIDTH, WINDOW_HEIGHT);
+
+
+    generate_dungeon();
+    load_dungeon();
 
 
 }  // #INIT END
@@ -1854,7 +1857,7 @@ void renderHUD(double delta) {
 
     render_hand();
 
-    render_health_bar();
+    // render_health_bar();
 
     render_ability_hud();
 
@@ -4045,6 +4048,7 @@ Room Room_new(v2 pos) {
     room.up = NULL;
     room.is_start = false;
     room.is_boss = false;
+    room.room_file_name = String("test_room.hcroom");
 
 
     return room;
@@ -4121,21 +4125,128 @@ void generate_dungeon() {
             printf("pos: %.0f, %.0f ", rooms[i][j].room_idx);
         }
         printf(" \n");
-        printf("------------------ \n");
     }
     printf("---------------------------------------- \n");
 
 
 }
 
+void load_room(Room room) {
+
+    FILE *fh = fopen(room.room_file_name.data, "r");
+    if (fh == NULL) {
+        printf("File doesnt exist. File: '%s' \n", room.room_file_name.data);
+        return;
+    }
+
+    int fileSize = ROOM_WIDTH * ROOM_HEIGHT * 4;
+
+    char *data = malloc(sizeof(char) * fileSize);  // sizeof char is 1 but i do it for clarity
+
+    fgets(data, fileSize, fh);
+
+    int idx = 0;
+
+    int offset_r = room.room_idx.y * ROOM_HEIGHT;
+    int offset_c = room.room_idx.x * ROOM_WIDTH;
+
+    for (int r = 0; r < ROOM_HEIGHT; r++) {
+        for (int c = 0; c < ROOM_WIDTH; c++) {
+            floorTileMap[offset_r + r][offset_c + c] = data[idx++];
+            if (floorTileMap[offset_r + r][offset_c + c] == (int)P_FLOOR_LIGHT) {
+                LightPoint *test_point = malloc(sizeof(LightPoint));
+                test_point->color = (SDL_Color){255, 50, 50};//{255, 200, 100};
+                test_point->strength = 4;
+                test_point->radius = 140;
+                test_point->pos = (v2){(offset_c + c + 0.5) * tileSize, (offset_r + r + 0.5) * tileSize};
+                add_game_object(test_point, LIGHT_POINT);
+            }
+        }
+    }
+
+    for (int r = 0; r < ROOM_HEIGHT; r++) {
+        for (int c = 0; c < ROOM_WIDTH; c++) {
+            levelTileMap[offset_r + r][offset_c + c] = data[idx++];
+        }
+    }
+
+    for (int r = 0; r < ROOM_HEIGHT; r++) {
+        for (int c = 0; c < ROOM_WIDTH; c++) {
+            ceilingTileMap[offset_r + r][offset_c + c] = data[idx++];
+            if (ceilingTileMap[offset_r + r][offset_c + c] == (int)P_CEILING_LIGHT) {
+                LightPoint *test_point = malloc(sizeof(LightPoint));
+                test_point->color = (SDL_Color){255, 170, 70};//{255, 200, 100};
+                test_point->strength = 5;
+                test_point->radius = 400;
+                test_point->pos = (v2){(offset_c + c + 0.5) * tileSize, (offset_r + r + 0.5) * tileSize};
+                add_game_object(test_point, LIGHT_POINT);
+            }
+        }
+    }
+
+    for (int r = 0; r < ROOM_HEIGHT; r++) {
+        for (int c = 0; c < ROOM_WIDTH; c++) {
+            int type = data[idx++];
+            v2 tile_middle = v2_add(v2_mul((v2){offset_c + c, offset_r + r}, to_vec(tileSize)), to_vec(tileSize / 2));
+
+            if (type != P_PLAYER || !room.is_start) {
+                place_entity(tile_middle, type);
+            }
+        }
+    }
+
+    free(data);
+
+    fclose(fh);
+
+} 
+
 void load_dungeon() {
+    clearLevel();
+
+    reset_tilemap(&levelTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    reset_tilemap(&floorTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    reset_tilemap(&ceilingTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+
     for (int r = 0; r < DUNGEON_SIZE; r++) {
         for (int c = 0; c < DUNGEON_SIZE; c++) {
             Room current = rooms[r][c];
 
-            
+            load_room(current);
+
         }    
     }
+
+
+    tilemap_image = GPU_CreateImage(TILEMAP_WIDTH, TILEMAP_HEIGHT, GPU_FORMAT_RGBA);
+
+    SDL_Surface *surface = GPU_CopySurfaceFromImage(tilemap_image);
+
+    
+    bake_lights();
+
+    for (int row = 0; row < TILEMAP_HEIGHT; row++) {
+        for (int col = 0; col < TILEMAP_WIDTH; col++) {
+
+            int tile = levelTileMap[row][col] == -1? 0 : 1;
+            
+
+            SDL_Color color = {
+                tile * 255,
+                tile * 255,
+                tile * 255,
+                255
+            };
+
+            ((int *)surface->pixels)[row * TILEMAP_WIDTH + col] = color.a << 24 | color.b << 16 | color.g << 8 | color.r;
+        }
+    }
+
+    GPU_UpdateImage(tilemap_image, NULL, surface, NULL);
+
+    SDL_FreeSurface(surface);
+
+
 }
 
 
