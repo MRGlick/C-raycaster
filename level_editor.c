@@ -62,6 +62,7 @@ void mouse_just_pressed(int button);
 
 Placeable get_current_selection();
 
+
 bool running = true;
 int current_selection;
 int **wall_tilemap;
@@ -70,7 +71,8 @@ int **entity_tilemap;
 int **ceiling_tilemap;
 bool l_mouse_down = false;
 bool r_mouse_down = false;
-const int tile_size = WINDOW_WIDTH / TILEMAP_WIDTH;
+
+int tile_size = WINDOW_WIDTH / ROOM_WIDTH;
 int paint_mode = PAINTMODE_DRAW;
 PlaceMode place_mode;
 char *level_file;
@@ -147,10 +149,10 @@ int main(int argc, char **argv) {
 }
 
 void init() {
-    init_grid(int, TILEMAP_HEIGHT, TILEMAP_WIDTH, -1, wall_tilemap);
-    init_grid(int, TILEMAP_HEIGHT, TILEMAP_WIDTH, -1, floor_tilemap);
-    init_grid(int, TILEMAP_HEIGHT, TILEMAP_WIDTH, -1, ceiling_tilemap);
-    init_grid(int, TILEMAP_HEIGHT, TILEMAP_WIDTH, -1, entity_tilemap);
+    init_grid(int, ROOM_HEIGHT, ROOM_WIDTH, -1, wall_tilemap);
+    init_grid(int, ROOM_HEIGHT, ROOM_WIDTH, -1, floor_tilemap);
+    init_grid(int, ROOM_HEIGHT, ROOM_WIDTH, -1, ceiling_tilemap);
+    init_grid(int, ROOM_HEIGHT, ROOM_WIDTH, -1, entity_tilemap);
 
     place_mode = PLACEMODE_CEILING;
 
@@ -168,8 +170,8 @@ void init() {
 // | | | |
 
 void print_tilemap() {
-    for (int i = 0; i < TILEMAP_HEIGHT; i++) {
-        for (int j = 0; j < TILEMAP_WIDTH; j++) {
+    for (int i = 0; i < ROOM_HEIGHT; i++) {
+        for (int j = 0; j < ROOM_WIDTH; j++) {
             printf("%d ", wall_tilemap[i][j]);
         }
         printf("\n");
@@ -177,8 +179,8 @@ void print_tilemap() {
 }
 
 void remove_player() {
-    for (int i = 0; i < TILEMAP_WIDTH; i++) {
-        for (int j = 0; j < TILEMAP_HEIGHT; j++) {
+    for (int i = 0; i < ROOM_WIDTH; i++) {
+        for (int j = 0; j < ROOM_HEIGHT; j++) {
             if (entity_tilemap[j][i] == (int)P_PLAYER) {
                 entity_tilemap[j][i] = -1;
                 return;
@@ -189,7 +191,7 @@ void remove_player() {
 
 void place_object(int r, int c) {
 
-    if (!in_range(r, 0, TILEMAP_HEIGHT - 1) || !in_range(c, 0, TILEMAP_WIDTH - 1)) return;
+    if (!in_range(r, 0, ROOM_HEIGHT - 1) || !in_range(c, 0, ROOM_WIDTH - 1)) return;
     
 
 
@@ -228,7 +230,7 @@ void place_object(int r, int c) {
 }
 
 void remove_object(int row, int col) {
-    if (!in_range(row, 0, TILEMAP_HEIGHT - 1) || !in_range(col, 0, TILEMAP_WIDTH - 1)) return;
+    if (!in_range(row, 0, ROOM_HEIGHT - 1) || !in_range(col, 0, ROOM_WIDTH - 1)) return;
 
 
 
@@ -533,10 +535,10 @@ void draw_gridlines() {
             break;
     }
 
-    for (int i = 0; i < TILEMAP_WIDTH; i++) {
+    for (int i = 0; i < ROOM_WIDTH; i++) {
         SDL_RenderDrawLine(renderer, i * tile_size, 0, i * tile_size, WINDOW_HEIGHT);
     }
-    for (int i = 0; i < TILEMAP_HEIGHT; i++) {
+    for (int i = 0; i < ROOM_HEIGHT; i++) {
         SDL_RenderDrawLine(renderer, 0, i * tile_size, WINDOW_WIDTH, i * tile_size);        
     }
 }
@@ -572,8 +574,8 @@ void set_color_by_type(Placeable type, int opacity) {
 } 
 
 void draw() {
-    for (int x = 0; x < TILEMAP_WIDTH; x++) {
-        for (int y = 0; y < TILEMAP_HEIGHT; y++) {
+    for (int x = 0; x < ROOM_WIDTH; x++) {
+        for (int y = 0; y < ROOM_HEIGHT; y++) {
             SDL_Rect rect = {
                 x * tile_size,
                 y * tile_size,
@@ -634,30 +636,30 @@ void save(SaveData saveData, char *file) {
         printf("Couldn't open file for writing. Error code: %d \n", errno);
     }
     
-    size_t dataSize = sizeof(int) * TILEMAP_HEIGHT * TILEMAP_WIDTH * 4;
+    size_t dataSize = sizeof(int) * ROOM_HEIGHT * ROOM_WIDTH * 4;
     char data[dataSize];
     int idx = 0;
 
-    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
-        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+    for (int r = 0; r < ROOM_HEIGHT; r++) {
+        for (int c = 0; c < ROOM_WIDTH; c++) {
             data[idx++] = floor_tilemap[r][c];
         }
     }
 
-    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
-        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+    for (int r = 0; r < ROOM_HEIGHT; r++) {
+        for (int c = 0; c < ROOM_WIDTH; c++) {
             data[idx++] = wall_tilemap[r][c];
         }
     }
 
-    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
-        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+    for (int r = 0; r < ROOM_HEIGHT; r++) {
+        for (int c = 0; c < ROOM_WIDTH; c++) {
             data[idx++] = ceiling_tilemap[r][c];
         }
     }
 
-    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
-        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+    for (int r = 0; r < ROOM_HEIGHT; r++) {
+        for (int c = 0; c < ROOM_WIDTH; c++) {
             data[idx++] = entity_tilemap[r][c];
         }
     }
@@ -690,26 +692,26 @@ void load_level(char *file) {
     fgets(data, fileSize, fh);
     int idx = 0;
 
-    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
-        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+    for (int r = 0; r < ROOM_HEIGHT; r++) {
+        for (int c = 0; c < ROOM_WIDTH; c++) {
             floor_tilemap[r][c] = data[idx++];
         }
     }
 
-    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
-        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+    for (int r = 0; r < ROOM_HEIGHT; r++) {
+        for (int c = 0; c < ROOM_WIDTH; c++) {
             wall_tilemap[r][c] = data[idx++];
         }
     }
 
-    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
-        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+    for (int r = 0; r < ROOM_HEIGHT; r++) {
+        for (int c = 0; c < ROOM_WIDTH; c++) {
             ceiling_tilemap[r][c] = data[idx++];
         }
     }
 
-    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
-        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+    for (int r = 0; r < ROOM_HEIGHT; r++) {
+        for (int c = 0; c < ROOM_WIDTH; c++) {
             entity_tilemap[r][c] = data[idx++];
         }
     }

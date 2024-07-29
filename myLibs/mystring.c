@@ -6,13 +6,19 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#define false 0
+#define true 1
+#ifndef bool
+#define bool char
+#endif
+
 typedef struct String {
     char *data;
     int len;
     bool ref;
 } String;
 
-typedef const String StringRef;
+typedef String StringRef;
 
 #define String(str) String_copy_from_literal(str)
 #define StringRef(str) (String){.len = strlen(str), .data = str}

@@ -367,6 +367,7 @@ typedef struct Room {
 
 // #FUNC
 
+void load_dungeon();
 
 Room Room_new(v2 pos);
 
@@ -836,7 +837,7 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
 void init() {  // #INIT
 
     generate_dungeon();
-    exit(1);
+    //exit(1);
 
     enemy_death_explosion_particles = malloc(sizeof(ParticleSpawner));
     *enemy_death_explosion_particles = create_particle_spawner(V2_ZERO, 0);
@@ -4127,6 +4128,15 @@ void generate_dungeon() {
 
 }
 
+void load_dungeon() {
+    for (int r = 0; r < DUNGEON_SIZE; r++) {
+        for (int c = 0; c < DUNGEON_SIZE; c++) {
+            Room current = rooms[r][c];
+
+            
+        }    
+    }
+}
 
 
 // #END
