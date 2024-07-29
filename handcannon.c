@@ -679,7 +679,7 @@ const char *font = "font.ttf";
 const SDL_Color fogColor = {0, 0, 0, 255};
 double tanHalfFOV;
 double tanHalfStartFOV;
-double ambient_light = 1.5;
+double ambient_light = 0.5;
 int floorRenderStart;
 int **levelTileMap;
 int **floorTileMap;
@@ -869,13 +869,11 @@ void init() {  // #INIT
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
             SDL_Color color = (SDL_Color){255, 255, 255, 255};
-            GPU_RectangleFilled2(image_target, (GPU_Rect){c, r, 1000, 1000}, color);
+            GPU_RectangleFilled2(image_target, (GPU_Rect){c, r, 1, 1}, color);
         }
     }
 
     GPU_FreeTarget(image_target);
-
-    GPU_SaveImage(tilemap_image, "test.png", GPU_FILE_PNG);
 
     floor_and_ceiling_spritesheet = load_texture("Textures/floor_and_ceiling_spritesheet.png");
 
@@ -1017,12 +1015,12 @@ void init() {  // #INIT
 
     entityTexture = load_texture("Textures/scary_monster.png");
 
-    if (isValidLevel(levelToLoad)) {
-        load_level(levelToLoad);
+    // if (isValidLevel(levelToLoad)) {
+    //     load_level(levelToLoad);
 
-    } else {
-        load_level("Levels/default_level.hclevel");
-    }
+    // } else {
+    //     load_level("Levels/default_level.hclevel");
+    // }
 
     skybox_texture = load_texture("Textures/skybox.png");
 
@@ -1857,7 +1855,7 @@ void renderHUD(double delta) {
 
     render_hand();
 
-    // render_health_bar();
+    render_health_bar();
 
     render_ability_hud();
 
@@ -2258,6 +2256,24 @@ void clearLevel() {
 
 }
 
+void spawn_floor_light(v2 pos) {
+    LightPoint *light = malloc(sizeof(LightPoint));
+    light->color = (SDL_Color){255, 50, 50};//{255, 200, 100};
+    light->strength = 4;
+    light->radius = 140;
+    light->pos = pos;
+    add_game_object(light, LIGHT_POINT);
+}
+
+void spawn_ceiling_light(v2 pos) {
+    LightPoint *light = malloc(sizeof(LightPoint));
+    light->color = (SDL_Color){255, 170, 70};//{255, 200, 100};
+    light->strength = 5;
+    light->radius = 400;
+    light->pos = pos;
+    add_game_object(light, LIGHT_POINT);
+}
+
 void load_level(char *file) {
     clearLevel();
 
@@ -2271,63 +2287,62 @@ void load_level(char *file) {
         return;
     }
 
-    int fileSize = TILEMAP_HEIGHT * TILEMAP_WIDTH * 4;
+    int data_count = TILEMAP_HEIGHT * TILEMAP_WIDTH * 4 + 1; // worst case
 
-    char *data = malloc(sizeof(char) * fileSize);  // sizeof char is 1 but i do it for clarity
+    int data[data_count];
 
-    fgets(data, fileSize, fh);
+    fread(data, sizeof(int), data_count, fh);
 
-    int idx = 0;
+    int data_ptr = 0;
+
+    SaveType save_type = (SaveType)data[data_ptr++];
+
+    if (save_type != ST_LEVEL) {
+        printf("File is not a level! Not loading that! \n");
+        fclose(fh);
+        return;
+    }
 
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
-            floorTileMap[r][c] = data[idx++];
-            if (floorTileMap[r][c] == (int)P_FLOOR_LIGHT) {
-                LightPoint *test_point = malloc(sizeof(LightPoint));
-                test_point->color = (SDL_Color){255, 50, 50};//{255, 200, 100};
-                test_point->strength = 4;
-                test_point->radius = 140;
-                test_point->pos = (v2){(c + 0.5) * tileSize, (r + 0.5) * tileSize};
-                add_game_object(test_point, LIGHT_POINT);
+            floorTileMap[r][c] = data[data_ptr++];
+            if (floorTileMap[r][c] == P_FLOOR_LIGHT) {
+                v2 tile_mid = (v2){(c + 0.5) * tileSize, (r + 0.5) * tileSize};
+                spawn_floor_light(tile_mid);
             }
         }
     }
 
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
-            levelTileMap[r][c] = data[idx++];
+            levelTileMap[r][c] = data[data_ptr++];
         }
     }
 
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
-            ceilingTileMap[r][c] = data[idx++];
-            if (ceilingTileMap[r][c] == (int)P_CEILING_LIGHT) {
-                LightPoint *test_point = malloc(sizeof(LightPoint));
-                test_point->color = (SDL_Color){255, 170, 70};//{255, 200, 100};
-                test_point->strength = 5;
-                test_point->radius = 400;
-                test_point->pos = (v2){(c + 0.5) * tileSize, (r + 0.5) * tileSize};
-                add_game_object(test_point, LIGHT_POINT);
+            ceilingTileMap[r][c] = data[data_ptr++];
+
+
+            if (ceilingTileMap[r][c] == P_CEILING_LIGHT) {
+                v2 tile_mid = (v2){(c + 0.5) * tileSize, (r + 0.5) * tileSize};
+                spawn_ceiling_light(tile_mid);
             }
         }
     }
-
+    
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
-            int type = data[idx++];
-            v2 tile_middle = v2_add(v2_mul((v2){c, r}, to_vec(tileSize)), to_vec(tileSize / 2));
+            int etype = data[data_ptr++];
 
-            place_entity(tile_middle, type);
+            v2 tile_mid = (v2){(c + 0.5) * tileSize, (r + 0.5) * tileSize};
+
+            place_entity(tile_mid, etype);
         }
     }
 
-    free(data);
 
     fclose(fh);
-
-
-
     // create tilemap image for floor shader
 
     tilemap_image = GPU_CreateImage(TILEMAP_WIDTH, TILEMAP_HEIGHT, GPU_FORMAT_RGBA);
@@ -4133,69 +4148,72 @@ void generate_dungeon() {
 
 void load_room(Room room) {
 
-    FILE *fh = fopen(room.room_file_name.data, "r");
+    FILE *fh = fopen("Levels/default_room.hcroom", "r");
     if (fh == NULL) {
         printf("File doesnt exist. File: '%s' \n", room.room_file_name.data);
         return;
     }
 
-    int fileSize = ROOM_WIDTH * ROOM_HEIGHT * 4;
 
-    char *data = malloc(sizeof(char) * fileSize);  // sizeof char is 1 but i do it for clarity
+    int data_count = TILEMAP_HEIGHT * TILEMAP_WIDTH * 4 + 1; // grr
 
-    fgets(data, fileSize, fh);
+    int data[data_count];
 
-    int idx = 0;
+    fread(data, sizeof(int), data_count, fh);
+
+    int data_ptr = 0;
 
     int offset_r = room.room_idx.y * ROOM_HEIGHT;
     int offset_c = room.room_idx.x * ROOM_WIDTH;
 
+    SaveType save_type = (SaveType)data[data_ptr++];
+
+    if (save_type != ST_ROOM) {
+        printf("File is not a room! Not loading that! \n");
+        fclose(fh);
+        return;
+    }
+
     for (int r = 0; r < ROOM_HEIGHT; r++) {
         for (int c = 0; c < ROOM_WIDTH; c++) {
-            floorTileMap[offset_r + r][offset_c + c] = data[idx++];
-            if (floorTileMap[offset_r + r][offset_c + c] == (int)P_FLOOR_LIGHT) {
-                LightPoint *test_point = malloc(sizeof(LightPoint));
-                test_point->color = (SDL_Color){255, 50, 50};//{255, 200, 100};
-                test_point->strength = 4;
-                test_point->radius = 140;
-                test_point->pos = (v2){(offset_c + c + 0.5) * tileSize, (offset_r + r + 0.5) * tileSize};
-                add_game_object(test_point, LIGHT_POINT);
+            floorTileMap[offset_r + r][offset_c + c ] = data[data_ptr++];
+            if (floorTileMap[offset_r + r][offset_c + c ] == P_FLOOR_LIGHT) {
+                v2 tile_mid = (v2){(offset_c + c + 0.5) * tileSize, (offset_r + r + 0.5) * tileSize};
+                spawn_floor_light(tile_mid);
             }
         }
     }
 
     for (int r = 0; r < ROOM_HEIGHT; r++) {
         for (int c = 0; c < ROOM_WIDTH; c++) {
-            levelTileMap[offset_r + r][offset_c + c] = data[idx++];
+            levelTileMap[offset_r + r][offset_c + c ] = data[data_ptr++];
         }
     }
 
     for (int r = 0; r < ROOM_HEIGHT; r++) {
         for (int c = 0; c < ROOM_WIDTH; c++) {
-            ceilingTileMap[offset_r + r][offset_c + c] = data[idx++];
-            if (ceilingTileMap[offset_r + r][offset_c + c] == (int)P_CEILING_LIGHT) {
-                LightPoint *test_point = malloc(sizeof(LightPoint));
-                test_point->color = (SDL_Color){255, 170, 70};//{255, 200, 100};
-                test_point->strength = 5;
-                test_point->radius = 400;
-                test_point->pos = (v2){(offset_c + c + 0.5) * tileSize, (offset_r + r + 0.5) * tileSize};
-                add_game_object(test_point, LIGHT_POINT);
+            ceilingTileMap[offset_r + r][offset_c + c ] = data[data_ptr++];
+
+
+            if (ceilingTileMap[offset_r + r][offset_c + c ] == P_CEILING_LIGHT) {
+                v2 tile_mid = (v2){(offset_c + c + 0.5) * tileSize, (offset_r + r + 0.5) * tileSize};
+                spawn_ceiling_light(tile_mid);
             }
         }
     }
-
+    
     for (int r = 0; r < ROOM_HEIGHT; r++) {
         for (int c = 0; c < ROOM_WIDTH; c++) {
-            int type = data[idx++];
-            v2 tile_middle = v2_add(v2_mul((v2){offset_c + c, offset_r + r}, to_vec(tileSize)), to_vec(tileSize / 2));
+            int etype = data[data_ptr++];
 
-            if (type != P_PLAYER || !room.is_start) {
-                place_entity(tile_middle, type);
+            v2 tile_mid = (v2){(offset_c + c + 0.5) * tileSize, (offset_r + r + 0.5) * tileSize};
+
+            if (room.is_start || etype != P_PLAYER) {
+                place_entity(tile_mid, etype);
             }
+
         }
     }
-
-    free(data);
 
     fclose(fh);
 
@@ -4222,9 +4240,6 @@ void load_dungeon() {
 
     SDL_Surface *surface = GPU_CopySurfaceFromImage(tilemap_image);
 
-    
-    bake_lights();
-
     for (int row = 0; row < TILEMAP_HEIGHT; row++) {
         for (int col = 0; col < TILEMAP_WIDTH; col++) {
 
@@ -4246,6 +4261,9 @@ void load_dungeon() {
 
     SDL_FreeSurface(surface);
 
+
+    bake_lights();
+    
 
 }
 

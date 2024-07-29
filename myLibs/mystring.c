@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include "array.c"
 
 #define false 0
 #define true 1
@@ -142,6 +143,10 @@ String String_cslice(StringRef a, int start, int end) {
     return new;
 }
 
+String String_copy(String original) {
+    return String_cslice(original, 0, original.len);
+}
+
 bool String_ends_with(StringRef a, StringRef b) {
     if (b.len > a.len) return false;
 
@@ -154,6 +159,24 @@ bool String_starts_with(StringRef a, StringRef b) {
     return strncmp(a.data, b.data, b.len) == 0;
 }
 
+StringRef *String_split(StringRef a, char splitter) {
+    int i = 0, word_start = 0;
+    StringRef *res = array(StringRef, 5);
+
+    while (i < a.len) {
+        if (a.data[i] == splitter) {
+            StringRef new = String_slice(a, word_start, i);
+            array_append(res, new);
+            word_start = i + 1;
+        }
+        i++;
+    }
+    StringRef last = String_slice(a, word_start, i);
+    array_append(res, last);
+
+
+    return res;
+}
 
 
 

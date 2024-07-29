@@ -2,6 +2,7 @@
 #include "globals.h"
 #include "mystring.c"
 
+
 SDL_Renderer *renderer;
 SDL_Window *window;
 
@@ -77,6 +78,11 @@ int paint_mode = PAINTMODE_DRAW;
 PlaceMode place_mode;
 char *level_file;
 LevelEditorEntity *player;
+SaveType current_save_type;
+
+
+int _width = TILEMAP_WIDTH;
+int _height = TILEMAP_HEIGHT;
 
 int main(int argc, char **argv) {
     if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
@@ -98,15 +104,42 @@ int main(int argc, char **argv) {
         RENDERER_FLAGS
     );
 
-    if (argc >= 2) {
-        level_file = argv[1];
-        StringRef str = StringRef(level_file);
-        if (!String_equal(String_slice(str, str.len - 8, str.len), StringRef(".hclevel"))) {
-            printf("Invalid file format. Only '.hclevel' files are allowed. \n");
-        }
+    if (argc == 1) {
+        printf("No file was entered. Results will not be saved. automatically set to save_type: level\n");
+        current_save_type = ST_LEVEL;
     } else {
-        printf("No file was entered. Results will not be saved. \n");
+        StringRef save_type = StringRef(argv[1]);
+        if (String_equal(save_type, StringRef("-level"))) {
+            current_save_type = ST_LEVEL;
+            printf("Set save type to 'level'. \n");
+        } else if (String_equal(save_type, StringRef("-room"))) {
+            current_save_type = ST_ROOM;
+            printf("Set save type to 'room'. \n");
+        } else {
+            printf("Invalid save type. Options are: -room, -level\n");
+            exit(1);
+        }
+
+        if (argc > 2) {
+            level_file = argv[2];
+            StringRef str = StringRef(level_file);
+            StringRef *split = String_split(str, '.');
+
+            if (array_length(split) != 0) {
+                StringRef ext = split[array_length(split) - 1];
+                if (String_equal(ext, StringRef("hclevel")) && current_save_type == ST_LEVEL) {
+                    printf("Opened in level format. \n");
+                } else if (String_equal(ext, StringRef("hcroom")) && current_save_type == ST_ROOM) {
+                    printf("Opened in room format. \n");
+                } else {
+                    printf("Invalid format for save type: '%s'. \n", ext.data);
+                    exit(1);
+                }
+            }
+            array_free(split);
+        }
     }
+
     init();
 
     u64 tick_timer = 0, render_timer = 0;
@@ -137,6 +170,7 @@ int main(int argc, char **argv) {
     data.floorTilemap = floor_tilemap;
     data.ceilingTilemap = ceiling_tilemap;
     data.entityTilemap = entity_tilemap;
+    data.type = current_save_type;
     
 
     save(data, level_file);
@@ -149,10 +183,18 @@ int main(int argc, char **argv) {
 }
 
 void init() {
-    init_grid(int, ROOM_HEIGHT, ROOM_WIDTH, -1, wall_tilemap);
-    init_grid(int, ROOM_HEIGHT, ROOM_WIDTH, -1, floor_tilemap);
-    init_grid(int, ROOM_HEIGHT, ROOM_WIDTH, -1, ceiling_tilemap);
-    init_grid(int, ROOM_HEIGHT, ROOM_WIDTH, -1, entity_tilemap);
+
+    if (current_save_type == ST_ROOM) {
+        _width = ROOM_WIDTH;
+        _height = ROOM_HEIGHT;
+    }
+
+    tile_size = WINDOW_WIDTH / _width;
+
+    init_grid(int, _height, _width, -1, wall_tilemap);
+    init_grid(int, _height, _width, -1, floor_tilemap);
+    init_grid(int, _height, _width, -1, ceiling_tilemap);
+    init_grid(int, _height, _width, -1, entity_tilemap);
 
     place_mode = PLACEMODE_CEILING;
 
@@ -170,8 +212,8 @@ void init() {
 // | | | |
 
 void print_tilemap() {
-    for (int i = 0; i < ROOM_HEIGHT; i++) {
-        for (int j = 0; j < ROOM_WIDTH; j++) {
+    for (int i = 0; i < _height; i++) {
+        for (int j = 0; j < _width; j++) {
             printf("%d ", wall_tilemap[i][j]);
         }
         printf("\n");
@@ -179,8 +221,8 @@ void print_tilemap() {
 }
 
 void remove_player() {
-    for (int i = 0; i < ROOM_WIDTH; i++) {
-        for (int j = 0; j < ROOM_HEIGHT; j++) {
+    for (int i = 0; i < _width; i++) {
+        for (int j = 0; j < _height; j++) {
             if (entity_tilemap[j][i] == (int)P_PLAYER) {
                 entity_tilemap[j][i] = -1;
                 return;
@@ -191,7 +233,7 @@ void remove_player() {
 
 void place_object(int r, int c) {
 
-    if (!in_range(r, 0, ROOM_HEIGHT - 1) || !in_range(c, 0, ROOM_WIDTH - 1)) return;
+    if (!in_range(r, 0, _height - 1) || !in_range(c, 0, _width - 1)) return;
     
 
 
@@ -230,7 +272,7 @@ void place_object(int r, int c) {
 }
 
 void remove_object(int row, int col) {
-    if (!in_range(row, 0, ROOM_HEIGHT - 1) || !in_range(col, 0, ROOM_WIDTH - 1)) return;
+    if (!in_range(row, 0, _height - 1) || !in_range(col, 0, _width - 1)) return;
 
 
 
@@ -535,10 +577,10 @@ void draw_gridlines() {
             break;
     }
 
-    for (int i = 0; i < ROOM_WIDTH; i++) {
+    for (int i = 0; i < _width; i++) {
         SDL_RenderDrawLine(renderer, i * tile_size, 0, i * tile_size, WINDOW_HEIGHT);
     }
-    for (int i = 0; i < ROOM_HEIGHT; i++) {
+    for (int i = 0; i < _height; i++) {
         SDL_RenderDrawLine(renderer, 0, i * tile_size, WINDOW_WIDTH, i * tile_size);        
     }
 }
@@ -574,8 +616,8 @@ void set_color_by_type(Placeable type, int opacity) {
 } 
 
 void draw() {
-    for (int x = 0; x < ROOM_WIDTH; x++) {
-        for (int y = 0; y < ROOM_HEIGHT; y++) {
+    for (int x = 0; x < _width; x++) {
+        for (int y = 0; y < _height; y++) {
             SDL_Rect rect = {
                 x * tile_size,
                 y * tile_size,
@@ -631,39 +673,53 @@ void render(u64 delta) {
 
 
 void save(SaveData saveData, char *file) {
+
+    if (saveData.type != ST_LEVEL && saveData.type != ST_ROOM) {
+        printf("Invalid save type! Not saving that. type: %d \n", saveData.type);
+    }
+    
+
     FILE *fh = fopen(level_file, "w");
     if (fh == NULL) {
         printf("Couldn't open file for writing. Error code: %d \n", errno);
     }
     
-    size_t dataSize = sizeof(int) * ROOM_HEIGHT * ROOM_WIDTH * 4;
-    char data[dataSize];
-    int idx = 0;
+    int width = saveData.type == ST_LEVEL? TILEMAP_WIDTH : ROOM_WIDTH;
+    int height = saveData.type == ST_LEVEL? TILEMAP_HEIGHT : ROOM_HEIGHT;
 
-    for (int r = 0; r < ROOM_HEIGHT; r++) {
-        for (int c = 0; c < ROOM_WIDTH; c++) {
-            data[idx++] = floor_tilemap[r][c];
+    size_t data_count = width * height * 4 + 1;
+
+    int data[data_count];
+    memset(data, 0, data_count + 1 * sizeof(int));
+
+    int data_ptr = 0;
+    data[data_ptr++] = (int)saveData.type;
+
+    for (int r = 0; r < height; r++) {
+        for (int c = 0; c < width; c++) {
+            data[data_ptr++] = floor_tilemap[r][c];
         }
     }
 
-    for (int r = 0; r < ROOM_HEIGHT; r++) {
-        for (int c = 0; c < ROOM_WIDTH; c++) {
-            data[idx++] = wall_tilemap[r][c];
+    for (int r = 0; r < height; r++) {
+        for (int c = 0; c < width; c++) {
+            data[data_ptr++] = wall_tilemap[r][c];
         }
     }
 
-    for (int r = 0; r < ROOM_HEIGHT; r++) {
-        for (int c = 0; c < ROOM_WIDTH; c++) {
-            data[idx++] = ceiling_tilemap[r][c];
+    for (int r = 0; r < height; r++) {
+        for (int c = 0; c < width; c++) {
+            data[data_ptr++] = ceiling_tilemap[r][c];
         }
     }
 
-    for (int r = 0; r < ROOM_HEIGHT; r++) {
-        for (int c = 0; c < ROOM_WIDTH; c++) {
-            data[idx++] = entity_tilemap[r][c];
+    for (int r = 0; r < height; r++) {
+        for (int c = 0; c < width; c++) {
+            data[data_ptr++] = entity_tilemap[r][c];
         }
     }
 
+    // new code...
 
     fwrite(&data, 1, sizeof(data), fh);
 
@@ -684,40 +740,42 @@ void load_level(char *file) {
         printf("Loading file: '%s' \n", level_file);
     }
 
-    fseek(fh, 0L, SEEK_END);
-    int fileSize = ftell(fh);
-    rewind(fh);
+    int data_count = TILEMAP_HEIGHT * TILEMAP_WIDTH * 4 + 1; // worst case
 
-    char *data = malloc(sizeof(char) * fileSize); // sizeof char is 1 but i do it for clarity
-    fgets(data, fileSize, fh);
-    int idx = 0;
+    int data[data_count];
+    fread(&data, data_count * sizeof(int), 1, fh);
 
-    for (int r = 0; r < ROOM_HEIGHT; r++) {
-        for (int c = 0; c < ROOM_WIDTH; c++) {
-            floor_tilemap[r][c] = data[idx++];
+    int data_ptr = 0;
+
+    int save_type = data[data_ptr++];
+
+    int width = save_type == ST_LEVEL? TILEMAP_WIDTH : ROOM_WIDTH;
+    int height = save_type == ST_LEVEL? TILEMAP_HEIGHT : ROOM_HEIGHT;
+
+    for (int r = 0; r < height; r++) {
+        for (int c = 0; c < width; c++) {
+            floor_tilemap[r][c] = data[data_ptr++];
         }
     }
 
-    for (int r = 0; r < ROOM_HEIGHT; r++) {
-        for (int c = 0; c < ROOM_WIDTH; c++) {
-            wall_tilemap[r][c] = data[idx++];
+    for (int r = 0; r < height; r++) {
+        for (int c = 0; c < width; c++) {
+            wall_tilemap[r][c] = data[data_ptr++];
         }
     }
 
-    for (int r = 0; r < ROOM_HEIGHT; r++) {
-        for (int c = 0; c < ROOM_WIDTH; c++) {
-            ceiling_tilemap[r][c] = data[idx++];
+    for (int r = 0; r < height; r++) {
+        for (int c = 0; c < width; c++) {
+            ceiling_tilemap[r][c] = data[data_ptr++];
         }
     }
 
-    for (int r = 0; r < ROOM_HEIGHT; r++) {
-        for (int c = 0; c < ROOM_WIDTH; c++) {
-            entity_tilemap[r][c] = data[idx++];
+    for (int r = 0; r < height; r++) {
+        for (int c = 0; c < width; c++) {
+            entity_tilemap[r][c] = data[data_ptr++];
         }
     }
 
-
-    free(data);
 
     fclose(fh);
 }

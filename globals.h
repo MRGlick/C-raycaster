@@ -34,11 +34,16 @@ typedef enum EntityID {
     ENTITY_SHOOTER = 1
 } EntityID;
 
+typedef enum SaveType {
+    ST_LEVEL,
+    ST_ROOM
+} SaveType;
 
 typedef struct SaveData {
     int **wallTilemap;
     int **floorTilemap;
     int **ceilingTilemap;
     int **entityTilemap;
+    SaveType type;
 } SaveData;
 

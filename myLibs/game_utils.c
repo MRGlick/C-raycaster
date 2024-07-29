@@ -30,8 +30,6 @@
 
 #endif
 
-#define new(type) malloc(sizeof(type))
-
 #define debug_crash() *(int *)NULL = 42
 
 #define init_grid(type, rows, cols, default, result) do { \
