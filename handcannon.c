@@ -357,7 +357,20 @@ typedef struct CollisionData {
     bool didCollide;
 } CollisionData;
 
+typedef struct Room {
+    v2 room_idx; // 0, 0 -> 3, 3
+    String room_file_name;
+    bool is_start, is_boss;
+
+    struct Room *left, *right, *up, *down;
+} Room;
+
 // #FUNC
+
+
+Room Room_new(v2 pos);
+
+void generate_dungeon();
 
 void enemy_die(Enemy *enemy);
 
@@ -630,6 +643,10 @@ GPU_ShaderBlock bloom_shader_block;
 // #PARTICLES (the global ones)
 ParticleSpawner *enemy_death_explosion_particles;
 
+// #ROOMGEN
+Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
+
+
 // #VAR
 
 double game_speed = 1;
@@ -817,6 +834,9 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
 }
 
 void init() {  // #INIT
+
+    generate_dungeon();
+    exit(1);
 
     enemy_death_explosion_particles = malloc(sizeof(ParticleSpawner));
     *enemy_death_explosion_particles = create_particle_spawner(V2_ZERO, 0);
@@ -4014,6 +4034,99 @@ void enemy_die(Enemy *enemy) {
 
     remove_game_object(enemy, ENEMY);
 }
+
+Room Room_new(v2 pos) {
+    Room room;
+    room.room_idx = pos;
+    room.left = NULL;
+    room.right = NULL;
+    room.down = NULL;
+    room.up = NULL;
+    room.is_start = false;
+    room.is_boss = false;
+
+
+    return room;
+}
+
+
+void generate_dungeon() {
+    
+    
+    bool visited[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
+
+    Room start_room = Room_new(to_vec(randi_range(0, DUNGEON_SIZE - 1)));
+
+    start_room.is_start = true;
+
+    rooms[(int)start_room.room_idx.y][(int)start_room.room_idx.x] = start_room;
+    
+
+    v2 stack[DUNGEON_SIZE * DUNGEON_SIZE] = {0};
+    int stack_ptr = 0;
+
+    stack[stack_ptr++] = start_room.room_idx;
+
+    while (stack_ptr > 0) {
+        v2 current = stack[--stack_ptr];
+        Room *current_room = &rooms[(int)current.y][(int)current.x];
+        visited[(int)current.y][(int)current.x] = true;
+
+        v2 dirs[4] = {V2_LEFT, V2_RIGHT, V2_UP, V2_DOWN};
+        const int LEFT = 0;
+        const int RIGHT = 1;
+        const int UP = 2;
+        const int DOWN = 3;
+        int dir_indicies[4] = {0, 1, 2, 3}; // l, r, u, d
+
+        shuffle_array(dirs, 4);
+
+        for (int i = 0; i < 4; i++) {
+            int dir_idx = dir_indicies[i];
+            v2 dir = dirs[dir_idx];
+            v2 pos = v2_add(current, dir);
+            if (!in_range(pos.x, 0, DUNGEON_SIZE - 1) || !in_range(pos.y, 0, DUNGEON_SIZE - 1)) continue;
+            if (visited[(int)pos.y][(int)pos.x]) continue;
+
+            rooms[(int)pos.y][(int)pos.x] = Room_new(pos);
+            Room *new_ref = &rooms[(int)pos.y][(int)pos.x];
+            
+            switch (dir_idx) {
+                case 0:
+                    new_ref->right = current_room;
+                    current_room->left = new_ref;
+                    break;
+                case 1:
+                    new_ref->left = current_room;
+                    current_room->right = new_ref;
+                    break;
+                case 2:
+                    new_ref->down = current_room;
+                    current_room->up = new_ref;
+                    break;
+                case 3:
+                    new_ref->up = current_room;
+                    current_room->down = new_ref;
+                    break;
+            }
+
+            stack[stack_ptr++] = pos;
+
+        }
+    }
+
+    for (int i = 0; i < DUNGEON_SIZE; i++) {
+        for (int j = 0; j < DUNGEON_SIZE; j++) {
+            printf("pos: %.0f, %.0f ", rooms[i][j].room_idx);
+        }
+        printf(" \n");
+        printf("------------------ \n");
+    }
+    printf("---------------------------------------- \n");
+
+
+}
+
 
 
 // #END

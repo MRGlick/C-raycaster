@@ -1,5 +1,13 @@
 
 
+// #define TILEMAP_WIDTH 60
+// #define TILEMAP_HEIGHT 40
+
+#define ROOM_WIDTH 15
+#define ROOM_HEIGHT 10
+
+#define DUNGEON_SIZE 4
+
 #define TILEMAP_WIDTH 60
 #define TILEMAP_HEIGHT 40
 

@@ -313,4 +313,14 @@ void play_spatial_sound(Sound *sound, double base_volume, v2 listener_pos, v2 so
     play_sound(sound, volume_multiplier);
 }
 
+void shuffle_array(int *arr, int l) {
+    for (int i = 0; i < l; i++) {
+        int rand_idx = randi_range(0, i);
+
+        int temp = arr[i];
+        arr[i] = arr[rand_idx];
+        arr[rand_idx] = temp;
+    }
+}
+
 // #END
