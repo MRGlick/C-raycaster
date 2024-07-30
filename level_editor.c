@@ -398,6 +398,9 @@ Placeable get_current_selection() {
                 case 0:
                     return P_WALL;
                     break;
+                case 1:
+                    return P_DOOR;
+                    break;
                 default:
                     return P_IDK;
                     break;
@@ -468,6 +471,9 @@ String get_current_selection_string() {
             break;
         case P_WALL:
             return String_concat(res, StringRef("Wall"));
+            break;
+        case P_DOOR:
+            return String_concat(res, StringRef("Door"));
             break;
         case P_FLOOR:
             return String_concat(res, StringRef("Floor"));
@@ -590,6 +596,9 @@ void set_color_by_type(Placeable type, int opacity) {
     switch (type) {
         case P_WALL:
             SDL_SetRenderDrawColor(renderer, 255, 255, 255, opacity);
+            break;
+        case P_DOOR:
+            SDL_SetRenderDrawColor(renderer, 255, 255, 0, opacity);
             break;
         case P_PLAYER:
             SDL_SetRenderDrawColor(renderer, 255, 0, 0, opacity);

@@ -363,6 +363,9 @@ typedef struct Room {
     bool is_start, is_boss;
 
     struct Room *left, *right, *up, *down;
+    v2 left_entrance_pos, right_entrance_pos, top_entrance_pos, bottom_entrance_pos;
+
+    bool initialized;
 } Room;
 
 // #FUNC
@@ -1304,10 +1307,22 @@ double distance_to_color(double distance, double a) {
 }
 
 void renderDebug() {  // #DEBUG
+    int tile_size = WINDOW_HEIGHT / (ROOM_HEIGHT * DUNGEON_SIZE);
 
-    GPU_SetImageFilter(lightmap_image, GPU_FILTER_NEAREST);
-    GPU_BlitRect(lightmap_image, NULL, screen, NULL);
-    GPU_SetImageFilter(lightmap_image, GPU_FILTER_LINEAR);
+    for (int r = 0; r < ROOM_HEIGHT * DUNGEON_SIZE; r++) {
+        for (int c = 0; c < ROOM_WIDTH * DUNGEON_SIZE; c++) {
+            bool is_wall = levelTileMap[r][c] == -1? 0 : 1;
+            bool is_floor_light = floorTileMap[r][c] == P_FLOOR_LIGHT? true : false;
+
+            if (is_wall) {
+                GPU_RectangleFilled2(screen, (GPU_Rect){c * tile_size, r * tile_size, tile_size, tile_size}, GPU_MakeColor(255 * is_floor_light, 255, 255, 255));
+            } else {
+                GPU_RectangleFilled2(screen, (GPU_Rect){c * tile_size, r * tile_size, tile_size, tile_size}, GPU_MakeColor(255 * is_floor_light, 0, 0, 255));
+            }  
+        }
+    }
+
+    // GPU_RectangleFilled2(screen, (GPU_Rect){player->pos.x / (DUNGEON_SIZE / 2), player->pos.y / DUNGEON_SIZE, tile_size / 2, tile_size / 2}, GPU_MakeColor(255, 0, 0, 255));
     
 }
 
@@ -1438,6 +1453,8 @@ void render_floor_and_ceiling() {
     GPU_SetUniformfv(GPU_GetUniformLocation(floor_shader, "tilemapSize"), 2, 1, tilemap_size);
     GPU_SetUniformf(GPU_GetUniformLocation(floor_shader, "pitch"), player->pitch + cameraOffset.y);
     
+    float tex_ids[20] = {P_FLOOR, P_CEILING, P_FLOOR_LIGHT, P_CEILING_LIGHT};
+    GPU_SetUniformfv(GPU_GetUniformLocation(floor_shader, "texIds"), 1, 20, tex_ids);
 
     GPU_SetShaderImage(floorTexture, GPU_GetUniformLocation(floor_shader, "floorTex"), 1);
     GPU_SetShaderImage(lightmap_image, GPU_GetUniformLocation(floor_shader, "lightmapTex"), 2);
@@ -4060,89 +4077,99 @@ Room Room_new(v2 pos) {
     room.is_start = false;
     room.is_boss = false;
     room.room_file_name = String("test_room.hcroom");
+    room.initialized = true;
 
 
     return room;
 }
 
+void generate_room_recursive(Room *room_ptr, bool visited[DUNGEON_SIZE][DUNGEON_SIZE]) {
+    visited[(int)room_ptr->room_idx.y][(int)room_ptr->room_idx.x] = true;
+    // generated_count++;
+
+    v2 current = room_ptr->room_idx;
+
+    v2 dirs[4] = {V2_LEFT, V2_RIGHT, V2_UP, V2_DOWN};
+    const int LEFT = 0;
+    const int RIGHT = 1;
+    const int UP = 2;
+    const int DOWN = 3;
+    int dir_indicies[4] = {LEFT, RIGHT, UP, DOWN};
+
+    shuffle_array(dir_indicies, 4);
+
+
+    for (int i = 0; i < 4; i++) {
+        int dir_idx = dir_indicies[i];
+        v2 dir = dirs[dir_idx];
+
+
+        v2 pos = v2_add(current, dir);
+        if (!in_range(pos.x, 0, DUNGEON_SIZE - 1) || !in_range(pos.y, 0, DUNGEON_SIZE - 1)) continue;
+        if (visited[(int)pos.y][(int)pos.x]) continue;
+
+        rooms[(int)pos.y][(int)pos.x] = Room_new(pos);
+        visited[(int)pos.y][(int)pos.x] = true;
+
+        Room *new_ref = &rooms[(int)pos.y][(int)pos.x];
+
+        printf("dir: %.2f, %.2f \n", dir.x, dir.y);
+        printf("prev: %.2f, %.2f next: %.2f, %.2f \n", current.x, current.y, pos.x, pos.y);
+        
+        switch (dir_idx) {
+            case 0:
+                printf("left \n");
+                room_ptr->left = new_ref;
+                new_ref->right = room_ptr;
+                break;
+            case 1:
+                printf("right \n");
+                room_ptr->right = new_ref;
+                new_ref->left = room_ptr;
+                break;
+            case 2:
+                printf("up \n");
+                room_ptr->up = new_ref;
+                new_ref->down = room_ptr;
+                break;
+            case 3:
+                printf("down \n");
+                room_ptr->down = new_ref;
+                new_ref->up = room_ptr;
+                break;
+            default:
+                printf("Uh oh \n");
+                break;
+        }
+
+        generate_room_recursive(new_ref, visited);
+    }
+}
 
 void generate_dungeon() {
     
-    
     bool visited[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
 
-    Room start_room = Room_new(to_vec(randi_range(0, DUNGEON_SIZE - 1)));
+    Room start_room = Room_new((v2){randi_range(0, DUNGEON_SIZE - 1), randi_range(0, DUNGEON_SIZE - 1)});
 
     start_room.is_start = true;
 
     rooms[(int)start_room.room_idx.y][(int)start_room.room_idx.x] = start_room;
+
+    printf("Start row: %d Start col: %d \n", (int)start_room.room_idx.y, (int)start_room.room_idx.x);
     
-
-    v2 stack[DUNGEON_SIZE * DUNGEON_SIZE] = {0};
-    int stack_ptr = 0;
-
-    stack[stack_ptr++] = start_room.room_idx;
-
-    while (stack_ptr > 0) {
-        v2 current = stack[--stack_ptr];
-        Room *current_room = &rooms[(int)current.y][(int)current.x];
-        visited[(int)current.y][(int)current.x] = true;
-
-        v2 dirs[4] = {V2_LEFT, V2_RIGHT, V2_UP, V2_DOWN};
-        const int LEFT = 0;
-        const int RIGHT = 1;
-        const int UP = 2;
-        const int DOWN = 3;
-        int dir_indicies[4] = {0, 1, 2, 3}; // l, r, u, d
-
-        shuffle_array(dirs, 4);
-
-        for (int i = 0; i < 4; i++) {
-            int dir_idx = dir_indicies[i];
-            v2 dir = dirs[dir_idx];
-            v2 pos = v2_add(current, dir);
-            if (!in_range(pos.x, 0, DUNGEON_SIZE - 1) || !in_range(pos.y, 0, DUNGEON_SIZE - 1)) continue;
-            if (visited[(int)pos.y][(int)pos.x]) continue;
-
-            rooms[(int)pos.y][(int)pos.x] = Room_new(pos);
-            Room *new_ref = &rooms[(int)pos.y][(int)pos.x];
-            
-            switch (dir_idx) {
-                case 0:
-                    new_ref->right = current_room;
-                    current_room->left = new_ref;
-                    break;
-                case 1:
-                    new_ref->left = current_room;
-                    current_room->right = new_ref;
-                    break;
-                case 2:
-                    new_ref->down = current_room;
-                    current_room->up = new_ref;
-                    break;
-                case 3:
-                    new_ref->up = current_room;
-                    current_room->down = new_ref;
-                    break;
-            }
-
-            stack[stack_ptr++] = pos;
-
-        }
-    }
-
-    for (int i = 0; i < DUNGEON_SIZE; i++) {
-        for (int j = 0; j < DUNGEON_SIZE; j++) {
-            printf("pos: %.0f, %.0f ", rooms[i][j].room_idx);
-        }
-        printf(" \n");
-    }
-    printf("---------------------------------------- \n");
-
+    generate_room_recursive(&rooms[(int)start_room.room_idx.y][(int)start_room.room_idx.x], visited);
 
 }
 
-void load_room(Room room) {
+void load_room(Room *room_ptr) {
+
+    room_ptr->left_entrance_pos = (v2){(int)ROOM_WIDTH / 2, (int)ROOM_HEIGHT / 2};
+    room_ptr->right_entrance_pos = (v2){(int)ROOM_WIDTH / 2, (int)ROOM_HEIGHT / 2};
+    room_ptr->top_entrance_pos = (v2){(int)ROOM_WIDTH / 2, (int)ROOM_HEIGHT / 2};
+    room_ptr->bottom_entrance_pos = (v2){(int)ROOM_WIDTH / 2, (int)ROOM_HEIGHT / 2};
+
+    Room room = *room_ptr;
 
     FILE *fh = fopen("Levels/default_room.hcroom", "r");
     if (fh == NULL) {
@@ -4151,7 +4178,7 @@ void load_room(Room room) {
     }
 
 
-    int data_count = TILEMAP_HEIGHT * TILEMAP_WIDTH * 4 + 1; // grr
+    int data_count = ROOM_HEIGHT * ROOM_WIDTH * 4 + 1; // grr
 
     int data[data_count];
 
@@ -4161,6 +4188,7 @@ void load_room(Room room) {
 
     int offset_r = room.room_idx.y * ROOM_HEIGHT;
     int offset_c = room.room_idx.x * ROOM_WIDTH;
+    
 
     SaveType save_type = (SaveType)data[data_ptr++];
 
@@ -4213,7 +4241,102 @@ void load_room(Room room) {
 
     fclose(fh);
 
-} 
+}
+
+void _carve_path(v2 pos1, v2 pos2, bool vertical) {
+
+    printf("Carve path: pos1: %.2f, %.2f. pos2: %.2f, %.2f. vertical: %d \n", pos1.x, pos1.y, pos2.x, pos2.y, vertical);
+
+    int start_row = pos1.y;
+    int start_col = pos1.x;
+
+    int col_dist = abs(pos1.x - pos2.x);
+    int row_dist = abs(pos1.y - pos2.y);
+
+    int current_col = start_col;
+    int current_row = start_row;
+    int dir_c = sign(pos2.x - pos1.x);
+    int dir_r = sign(pos2.y - pos1.y);
+
+
+    printf("dir c: %d, dir r: %d \n", dir_c, dir_r);
+
+    if (!vertical) {        
+
+        // for (int c = current_col; c != start_col + col_dist / 2; c += dir_c) {
+        //     current_col = c;
+        //     levelTileMap[current_row][current_col] = -1;
+        //     floorTileMap[current_row][current_col] = P_FLOOR_LIGHT;
+        // }
+        // for (int r = current_row; r != start_row + row_dist; r += dir_r) {
+        //     current_row = r;
+        //     levelTileMap[current_row][current_col] = -1;
+        //     floorTileMap[current_row][current_col] = P_FLOOR_LIGHT;
+            
+        // }
+        for (int c = current_col; c != start_col + col_dist * dir_c; c += dir_c) {
+            current_col = c;
+            floorTileMap[current_row][current_col] = P_FLOOR_LIGHT;
+            levelTileMap[current_row][current_col] = -1;
+        }
+
+    } else {
+        // for (int r = current_row; r != start_row + row_dist / 2; r += dir_r) {
+        //     current_row = r;
+        //     levelTileMap[current_row][current_col] = -1;
+        //     floorTileMap[current_row][current_col] = P_FLOOR_LIGHT;
+        // }
+        // for (int c = current_col; c != start_col + col_dist; c += dir_c) {
+        //     current_col = c;
+        //     levelTileMap[current_row][current_col] = -1;
+        //     floorTileMap[current_row][current_col] = P_FLOOR_LIGHT;
+        // }
+        for (int r = current_row; r != start_row + row_dist * dir_r; r += dir_r) {
+            current_row = r;
+            levelTileMap[current_row][current_col] = -1;
+            floorTileMap[current_row][current_col] = P_FLOOR_LIGHT;
+        }
+    }
+}
+
+void carve_room_paths() {
+    bool visited[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
+
+    for (int r = 0; r < DUNGEON_SIZE; r++) {
+        for (int c = 0; c < DUNGEON_SIZE; c++) {
+            const Room room = rooms[r][c];
+            visited[r][c] = true;
+            v2 room_pos = v2_mul(room.room_idx, (v2){ROOM_WIDTH, ROOM_HEIGHT});
+
+            v2 offset = (v2){0, 0};
+
+            if (room.left != NULL && !visited[(int)room.left->room_idx.y][(int)room.left->room_idx.x]) {
+                printf("Carving path left. \n");
+                v2 left_room_pos = v2_mul(room.left->room_idx, (v2){ROOM_WIDTH, ROOM_HEIGHT});
+                _carve_path(v2_add(room_pos, room.left_entrance_pos), v2_add(left_room_pos, v2_sub(room.left->right_entrance_pos, offset)), false);
+            }
+            
+            if (room.right != NULL && !visited[(int)room.right->room_idx.y][(int)room.right->room_idx.x]) {
+                printf("Carving path right. \n");
+                v2 right_room_pos = v2_mul(room.right->room_idx, (v2){ROOM_WIDTH, ROOM_HEIGHT});
+                _carve_path(v2_add(room_pos, room.right_entrance_pos), v2_add(right_room_pos, v2_sub(room.right->left_entrance_pos, offset)), false);
+            }       
+
+            if (room.up != NULL && !visited[(int)room.up->room_idx.y][(int)room.up->room_idx.x]) {
+                printf("Carving path up. \n");
+                v2 top_room_pos = v2_mul(room.up->room_idx, (v2){ROOM_WIDTH, ROOM_HEIGHT});
+                _carve_path(v2_add(room_pos, room.top_entrance_pos), v2_add(top_room_pos, v2_sub(room.up->bottom_entrance_pos, offset)), true);
+            }       
+
+            if (room.down != NULL && !visited[(int)room.down->room_idx.y][(int)room.down->room_idx.x]) {
+                printf("Carving path down. \n");
+                v2 bottom_room_pos = v2_mul(room.down->room_idx, (v2){ROOM_WIDTH, ROOM_HEIGHT});
+                _carve_path(v2_add(room_pos, room.bottom_entrance_pos), v2_add(bottom_room_pos, v2_sub(room.down->top_entrance_pos, offset)), true);
+            }       
+
+        }
+    }
+}
 
 void load_dungeon() {
     clearLevel();
@@ -4224,12 +4347,13 @@ void load_dungeon() {
 
     for (int r = 0; r < DUNGEON_SIZE; r++) {
         for (int c = 0; c < DUNGEON_SIZE; c++) {
-            Room current = rooms[r][c];
 
-            load_room(current);
+            load_room(&rooms[r][c]);
 
         }    
     }
+
+    carve_room_paths();
 
 
     tilemap_image = GPU_CreateImage(TILEMAP_WIDTH, TILEMAP_HEIGHT, GPU_FORMAT_RGBA);

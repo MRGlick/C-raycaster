@@ -122,7 +122,7 @@ int get_sample_count(Sound *sound) {
 }
 
 int sign(int x) {
-    return x > 0 - 0 > x;
+    return (x > 0) - (0 > x);
 }
 
 void apply_volume_s16(const u8 *base, u8 *dst, int len, double volume_multiplier) { // works

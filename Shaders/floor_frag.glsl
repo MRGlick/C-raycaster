@@ -26,7 +26,7 @@ uniform float pitch;
 uniform vec2 lValues[RES_Y];
 uniform vec2 rValues[RES_Y];
 
-uniform float texIds[5];
+uniform float texIds[20];
 
 vec2 lerp_vec2(vec2 a, vec2 b, float w) {
     return a + w * (b - a);
@@ -68,16 +68,12 @@ void main(void) {
         if (ceilingTile == texIds[1]) {
             texturePos = vec2(0.0, 1.0);
         } else if (ceilingTile == texIds[3]) {
-            texturePos = vec2(0.0, 1.0);
-        } else if (ceilingTile == texIds[5]){
             texturePos = vec2(1.0, 1.0);
         }
     } else {
         if (floorTile == texIds[0]) {
             texturePos = vec2(0.0, 0.0);
         } else if (floorTile == texIds[2]) {
-            texturePos = vec2(0.0, 0.0);
-        } else if (floorTile == texIds[4]){
             texturePos = vec2(1.0, 0.0);
         }
     }
