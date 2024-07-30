@@ -26,6 +26,8 @@ uniform float pitch;
 uniform vec2 lValues[RES_Y];
 uniform vec2 rValues[RES_Y];
 
+uniform float texIds[5];
+
 vec2 lerp_vec2(vec2 a, vec2 b, float w) {
     return a + w * (b - a);
 }
@@ -55,8 +57,6 @@ void main(void) {
     vec2 texturePos = vec2(0.0, 0.0);
     
     bool isCeiling = texCoord.y + pitch / windowSize.y < 0.5;
-    float floorStart = 3.0;
-    float ceilingStart = 5.0;
 
     vec2 tilemapPos = currentPixelPos / TILESIZE;
     vec3 tileFloorAndCeiling = get_tile(tilemapPos);
@@ -65,19 +65,19 @@ void main(void) {
     float floorTile = round(tileFloorAndCeiling.b * 25.5);
 
     if (isCeiling) {
-        if (ceilingTile == 0.0) {
+        if (ceilingTile == texIds[1]) {
             texturePos = vec2(0.0, 1.0);
-        } else if (ceilingTile == 5.0) {
+        } else if (ceilingTile == texIds[3]) {
             texturePos = vec2(0.0, 1.0);
-        } else if (ceilingTile == 6.0){
+        } else if (ceilingTile == texIds[5]){
             texturePos = vec2(1.0, 1.0);
         }
     } else {
-        if (floorTile == 0.0) {
+        if (floorTile == texIds[0]) {
             texturePos = vec2(0.0, 0.0);
-        } else if (floorTile == 3.0) {
+        } else if (floorTile == texIds[2]) {
             texturePos = vec2(0.0, 0.0);
-        } else if (floorTile == 4.0){
+        } else if (floorTile == texIds[4]){
             texturePos = vec2(1.0, 0.0);
         }
     }

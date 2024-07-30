@@ -3202,8 +3202,6 @@ bool is_enemy_type(int type) {
 
 void reset_level() {
 
-    printf("player health: %d \n", player->health);
-
     if (isValidLevel(levelToLoad)) {
         load_level(levelToLoad);
     } else {
@@ -3212,8 +3210,6 @@ void reset_level() {
 }
 
 void player_take_dmg(double dmg) {
-
-    printf("Damage: %.2f Health: %.2f \n", dmg, player->health);
 
     player->health -= dmg;
 
@@ -4243,14 +4239,14 @@ void load_dungeon() {
     for (int row = 0; row < TILEMAP_HEIGHT; row++) {
         for (int col = 0; col < TILEMAP_WIDTH; col++) {
 
-            int tile = levelTileMap[row][col] == -1? 0 : 1;
-            
+            int floorTile = floorTileMap[row][col] == -1? 0 : floorTileMap[row][col];
+            int ceilingTile = ceilingTileMap[row][col] == -1? 0 : ceilingTileMap[row][col];
 
             SDL_Color color = {
-                tile * 255,
-                tile * 255,
-                tile * 255,
-                255
+                SDL_clamp(ceilingTile * 10, 0, 255),
+                SDL_clamp(0, 0, 255),
+                SDL_clamp(floorTile * 10, 0, 255),
+                SDL_clamp(255, 0, 255)
             };
 
             ((int *)surface->pixels)[row * TILEMAP_WIDTH + col] = color.a << 24 | color.b << 16 | color.g << 8 | color.r;

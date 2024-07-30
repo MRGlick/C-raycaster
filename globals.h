@@ -13,7 +13,10 @@
 
 typedef enum Placeable {
     P_IDK = -1,
-    P_WALL,
+    P_WALL_START,
+        P_WALL,
+        P_DOOR,
+    P_WALL_END,
     P_DOOR,
     P_PLAYER,
     P_FLOOR,
