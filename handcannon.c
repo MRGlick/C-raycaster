@@ -4171,7 +4171,21 @@ void load_room(Room *room_ptr) {
 
     Room room = *room_ptr;
 
-    FILE *fh = fopen("Levels/default_room.hcroom", "r");
+    int ROOM_COUNT = 3; // replace with folder counting implementation thing
+
+    int room_idx = randi_range(1, ROOM_COUNT);
+
+
+    String room_num_str = String_from_int(room_idx);
+    String path = String_concat(StringRef("Levels/DungeonRooms/Stage1/"), room_num_str);
+    String final = String_concat(path, StringRef(".hcroom"));
+
+    room_ptr->room_file_name = final;
+
+    String_delete(&path);
+    String_delete(&room_num_str);
+
+    FILE *fh = fopen(room_ptr->room_file_name.data, "r");
     if (fh == NULL) {
         printf("File doesnt exist. File: '%s' \n", room.room_file_name.data);
         return;
@@ -4210,7 +4224,31 @@ void load_room(Room *room_ptr) {
 
     for (int r = 0; r < ROOM_HEIGHT; r++) {
         for (int c = 0; c < ROOM_WIDTH; c++) {
-            levelTileMap[offset_r + r][offset_c + c ] = data[data_ptr++];
+
+            int tile = data[data_ptr++];
+
+            if (tile == P_DOOR) {
+                v2 entrance_pos = (v2){c, r};
+                if (entrance_pos.x > room_ptr->right_entrance_pos.x) {
+                    room_ptr->right_entrance_pos = entrance_pos;
+                }
+                if (entrance_pos.x < room_ptr->left_entrance_pos.x) {
+                    room_ptr->left_entrance_pos = entrance_pos;
+                }
+                if (entrance_pos.y > room_ptr->bottom_entrance_pos.y) {
+                    room_ptr->bottom_entrance_pos = entrance_pos;
+                }
+                if (entrance_pos.y < room_ptr->top_entrance_pos.y) {
+                    room_ptr->top_entrance_pos = entrance_pos;
+                }
+
+                levelTileMap[offset_r + r][offset_c + c] = P_WALL;
+            } else {
+                levelTileMap[offset_r + r][offset_c + c] = tile;
+            }
+
+
+
         }
     }
 
@@ -4232,10 +4270,11 @@ void load_room(Room *room_ptr) {
 
             v2 tile_mid = (v2){(offset_c + c + 0.5) * tileSize, (offset_r + r + 0.5) * tileSize};
 
-            if (room.is_start || etype != P_PLAYER) {
+            if (room.is_start && etype == P_PLAYER) {
+                place_entity(tile_mid, P_PLAYER);
+            } else if (etype != P_PLAYER) {
                 place_entity(tile_mid, etype);
             }
-
         }
     }
 
@@ -4263,38 +4302,32 @@ void _carve_path(v2 pos1, v2 pos2, bool vertical) {
 
     if (!vertical) {        
 
-        // for (int c = current_col; c != start_col + col_dist / 2; c += dir_c) {
-        //     current_col = c;
-        //     levelTileMap[current_row][current_col] = -1;
-        //     floorTileMap[current_row][current_col] = P_FLOOR_LIGHT;
-        // }
-        // for (int r = current_row; r != start_row + row_dist; r += dir_r) {
-        //     current_row = r;
-        //     levelTileMap[current_row][current_col] = -1;
-        //     floorTileMap[current_row][current_col] = P_FLOOR_LIGHT;
-            
-        // }
-        for (int c = current_col; c != start_col + col_dist * dir_c; c += dir_c) {
+        for (int c = current_col; c != start_col + col_dist / 2; c += dir_c) {
             current_col = c;
-            floorTileMap[current_row][current_col] = P_FLOOR_LIGHT;
+            levelTileMap[current_row][current_col] = -1;
+        }
+        for (int r = current_row; r != start_row + row_dist; r += dir_r) {
+            current_row = r;
+            levelTileMap[current_row][current_col] = -1;
+            
+        }
+        for (int c = current_col; c != start_col + col_dist * dir_c + 1; c += dir_c) {
+            current_col = c;
             levelTileMap[current_row][current_col] = -1;
         }
 
     } else {
-        // for (int r = current_row; r != start_row + row_dist / 2; r += dir_r) {
-        //     current_row = r;
-        //     levelTileMap[current_row][current_col] = -1;
-        //     floorTileMap[current_row][current_col] = P_FLOOR_LIGHT;
-        // }
-        // for (int c = current_col; c != start_col + col_dist; c += dir_c) {
-        //     current_col = c;
-        //     levelTileMap[current_row][current_col] = -1;
-        //     floorTileMap[current_row][current_col] = P_FLOOR_LIGHT;
-        // }
-        for (int r = current_row; r != start_row + row_dist * dir_r; r += dir_r) {
+        for (int r = current_row; r != start_row + row_dist / 2; r += dir_r) {
             current_row = r;
             levelTileMap[current_row][current_col] = -1;
-            floorTileMap[current_row][current_col] = P_FLOOR_LIGHT;
+        }
+        for (int c = current_col; c != start_col + col_dist; c += dir_c) {
+            current_col = c;
+            levelTileMap[current_row][current_col] = -1;
+        }
+        for (int r = current_row; r != start_row + row_dist * dir_r + 1; r += dir_r) {
+            current_row = r;
+            levelTileMap[current_row][current_col] = -1;
         }
     }
 }
