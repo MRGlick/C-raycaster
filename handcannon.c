@@ -4272,7 +4272,7 @@ void load_room(Room *room_ptr) {
 
             if (room.is_start && etype == P_PLAYER) {
                 place_entity(tile_mid, P_PLAYER);
-            } else if (etype != P_PLAYER) {
+            } else if (etype != P_PLAYER && !room.is_start) {
                 place_entity(tile_mid, etype);
             }
         }
@@ -4306,12 +4306,12 @@ void _carve_path(v2 pos1, v2 pos2, bool vertical) {
             current_col = c;
             levelTileMap[current_row][current_col] = -1;
         }
-        for (int r = current_row; r != start_row + row_dist; r += dir_r) {
+        for (int r = current_row; r != start_row + row_dist * dir_r; r += dir_r) {
             current_row = r;
             levelTileMap[current_row][current_col] = -1;
             
         }
-        for (int c = current_col; c != start_col + col_dist * dir_c + 1; c += dir_c) {
+        for (int c = current_col; c != start_col + (col_dist + 1) * dir_c; c += dir_c) {
             current_col = c;
             levelTileMap[current_row][current_col] = -1;
         }
@@ -4321,15 +4321,17 @@ void _carve_path(v2 pos1, v2 pos2, bool vertical) {
             current_row = r;
             levelTileMap[current_row][current_col] = -1;
         }
-        for (int c = current_col; c != start_col + col_dist; c += dir_c) {
+        for (int c = current_col; c != start_col + col_dist * dir_c; c += dir_c) {
             current_col = c;
             levelTileMap[current_row][current_col] = -1;
         }
-        for (int r = current_row; r != start_row + row_dist * dir_r + 1; r += dir_r) {
+        for (int r = current_row; r != start_row + (row_dist + 1) * dir_r; r += dir_r) {
             current_row = r;
             levelTileMap[current_row][current_col] = -1;
         }
     }
+
+    levelTileMap[current_row][current_col] = -1;
 }
 
 void carve_room_paths() {

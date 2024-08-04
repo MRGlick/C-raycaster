@@ -3,13 +3,13 @@
 // #define TILEMAP_WIDTH 60
 // #define TILEMAP_HEIGHT 40
 
-#define ROOM_WIDTH 15
-#define ROOM_HEIGHT 10
+#define ROOM_WIDTH 30
+#define ROOM_HEIGHT 20
 
 #define DUNGEON_SIZE 4
 
-#define TILEMAP_WIDTH 60
-#define TILEMAP_HEIGHT 40
+#define TILEMAP_WIDTH 120
+#define TILEMAP_HEIGHT 80
 
 typedef enum Placeable {
     P_IDK = -1,
