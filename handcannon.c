@@ -25,6 +25,7 @@
     (SDL_Color) { 0, 0, 0, 0 }
 #define RENDER_DISTANCE 350
 #define WALL_HEIGHT 30
+#define WALL_HEIGHT_MULTIPLIER 2
 #define NUM_WALL_THREADS 1
 #define NUM_FLOOR_THREADS 2
 #define MAX_LIGHT 9
@@ -167,6 +168,8 @@ typedef struct Player {
     v2 pos, vel;
     double speed, angle, torque, collSize;
     double pitch_angle;
+    double height;
+    double height_vel;
     double pitch;
     bool sprinting;
     bool canShoot;
@@ -824,7 +827,7 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
 
     enemy.dirSprite->dir = (v2){1, 0};
 
-    enemy.entity.height = get_max_height() * 0.1;
+    enemy.entity.height = 7200;
 
     enemy.collider = malloc(sizeof(CircleCollider));
     enemy.collider->radius = 10;
@@ -1102,6 +1105,18 @@ void key_pressed(SDL_Keycode key) {
         reset_level();
     }
 
+    if (key == SDLK_SPACE) {
+        player->height_vel = -7;
+    }
+
+    if (key == SDLK_UP) {
+        player->height += 80;
+    }
+    if (key == SDLK_DOWN) {
+        player->height -= 80;
+    }
+    player->height = clamp(player->height, -WINDOW_HEIGHT, 0);
+
     if (key == SDLK_LSHIFT) {
         activate_ability(player->utility);
     }
@@ -1140,6 +1155,15 @@ v2 get_key_vector(SDL_Keycode k1, SDL_Keycode k2, SDL_Keycode k3, SDL_Keycode k4
 void playerTick(double delta) {
 
     double speed_multiplier = 1;
+
+
+
+    player->height_vel += 0.1;
+    player->height += player->height_vel;
+    if (player->height > -145) {
+        player->height_vel = 0;
+    }
+    player->height = clamp(player->height, -WINDOW_HEIGHT, -145);
 
     player->collider->pos = player->pos;
 
@@ -1315,14 +1339,14 @@ void renderDebug() {  // #DEBUG
             bool is_floor_light = floorTileMap[r][c] == P_FLOOR_LIGHT? true : false;
 
             if (is_wall) {
-                GPU_RectangleFilled2(screen, (GPU_Rect){c * tile_size, r * tile_size, tile_size, tile_size}, GPU_MakeColor(255 * is_floor_light, 255, 255, 255));
+                GPU_RectangleFilled2(screen, (GPU_Rect){c * tile_size / 2, r * tile_size / 2, tile_size / 2, tile_size / 2}, GPU_MakeColor(255 * is_floor_light, 255, 255, 255));
             } else {
-                GPU_RectangleFilled2(screen, (GPU_Rect){c * tile_size, r * tile_size, tile_size, tile_size}, GPU_MakeColor(255 * is_floor_light, 0, 0, 255));
+                GPU_RectangleFilled2(screen, (GPU_Rect){c * tile_size / 2, r * tile_size / 2, tile_size, tile_size / 2}, GPU_MakeColor(255 * is_floor_light, 0, 0, 255));
             }  
         }
     }
 
-    // GPU_RectangleFilled2(screen, (GPU_Rect){player->pos.x / (DUNGEON_SIZE / 2), player->pos.y / DUNGEON_SIZE, tile_size / 2, tile_size / 2}, GPU_MakeColor(255, 0, 0, 255));
+    GPU_RectangleFilled2(screen, (GPU_Rect){player->pos.x / tileSize * tile_size, player->pos.y / tileSize * tile_size, tile_size / 2, tile_size / 2}, GPU_MakeColor(255, 0, 0, 255));
     
 }
 
@@ -1384,7 +1408,9 @@ v2 worldToScreen(v2 pos, double height, bool allow_out_of_screen) { // gotta ref
 
     double fov_factor = tanHalfStartFOV / tanHalfFOV;
     double wallSize = WALL_HEIGHT * WINDOW_HEIGHT / dist_to_viewplane * fov_factor;
-    double y_pos = WINDOW_HEIGHT / 2 + wallSize / 2 - height / dist_to_viewplane;
+    double y_pos = WINDOW_HEIGHT / 2 + wallSize / 2 - (height + WINDOW_HEIGHT / 2) / dist_to_viewplane;
+    
+    y_pos -= (player->height) * (wallSize / WINDOW_HEIGHT);
 
     x_pos += cameraOffset.x;
     y_pos += -player->pitch + cameraOffset.y;
@@ -1401,11 +1427,18 @@ v2 screenToFloor(v2 pos) {
     }
 
     double fovFactor = tanHalfStartFOV / tanHalfFOV;
-    double dist = (WALL_HEIGHT * WINDOW_HEIGHT) / (wallSize)*fovFactor;
+    double dist = (WALL_HEIGHT * WALL_HEIGHT_MULTIPLIER * WINDOW_HEIGHT / wallSize) * fovFactor;
 
     double cosAngleToForward = v2_cos_angle_between(rayDir, playerForward);
 
     dist /= cosAngleToForward;
+
+
+    bool is_ceiling = pos.y < WINDOW_HEIGHT / 2;
+
+    double m = is_ceiling? 1 + (player->height + WINDOW_HEIGHT / 2) / (WINDOW_HEIGHT / 2) : 1 - (player->height + WINDOW_HEIGHT / 2) / (WINDOW_HEIGHT / 2);
+
+    dist *= m;
 
     return v2_add(player->pos, v2_mul(rayDir, to_vec(dist)));
 }
@@ -1566,7 +1599,7 @@ RenderObject getWallStripe(int i) {
     double cos_angle_to_forward = v2_cos_angle_between(ray_dir, playerForward);
     double dist = v2_distance(data.startpos, data.collpos) * cos_angle_to_forward;
     double fov_factor = tanHalfStartFOV / tanHalfFOV;
-    double final_size = WALL_HEIGHT * WINDOW_HEIGHT / dist * fov_factor;
+    double final_size = WALL_HEIGHT * WALL_HEIGHT_MULTIPLIER * WINDOW_HEIGHT / dist * fov_factor;
 
     stripe->size = final_size;
     
@@ -1693,9 +1726,12 @@ void renderWallStripe(WallStripe *stripe) {
 
     GPU_Rect srcRect = {(int)loop_clamp(stripe->collIdx * stripe->wallWidth, 0, textureSize.x), 0, 1, textureSize.y};
 
+    double dist_squared = ((RenderObject *)stripe)->dist_squared;
+    double dist = sqrt(dist_squared);
+
     GPU_Rect dstRect = {
         stripe->i * WINDOW_WIDTH / RESOLUTION_X + cameraOffset.x, 
-        WINDOW_HEIGHT / 2 - stripe->size / 2 - player->pitch + cameraOffset.y,
+        WINDOW_HEIGHT / 2 - stripe->size / 2 - player->pitch - (player->height + WINDOW_HEIGHT / 2) * (stripe->size / WINDOW_HEIGHT) + cameraOffset.y,
         WINDOW_WIDTH / RESOLUTION_X + 1,
         stripe->size
     };
@@ -2009,6 +2045,8 @@ void init_player(v2 pos) {
     player->collider->pos = player->pos;
     player->maxHealth = 10;
     player->health = player->maxHealth;
+    player->height = -145;
+    player->height_vel = 0;
 
     Ability *default_primary = malloc(sizeof(Ability));
     Rapidfire *default_secondary = malloc(sizeof(Rapidfire));
@@ -2867,7 +2905,7 @@ ShooterEnemy *enemy_shooter_create(v2 pos) {
         return NULL;
     }
     shooter->enemy = createEnemy(pos, NULL);
-    shooter->enemy.maxHealth = 8;
+    shooter->enemy.maxHealth = 5;
     shooter->enemy.health = shooter->enemy.maxHealth;
     shooter->enemy.hit_texture = shooter_hit_texture;
     shooter->enemy.tick = shooterTick;
@@ -3207,7 +3245,7 @@ void bake_lights() {
 
 double get_max_height() {
     double fov_factor = tanHalfStartFOV / tanHalfFOV;
-    return (WALL_HEIGHT * WINDOW_HEIGHT) * fov_factor;
+    return (WALL_HEIGHT * WALL_HEIGHT_MULTIPLIER * WINDOW_HEIGHT) * fov_factor;
 }
 
 bool is_enemy_type(int type) {
@@ -3219,11 +3257,8 @@ bool is_enemy_type(int type) {
 
 void reset_level() {
 
-    if (isValidLevel(levelToLoad)) {
-        load_level(levelToLoad);
-    } else {
-        load_level("Levels/default_level.hclevel");
-    }
+    generate_dungeon();
+    load_dungeon();
 }
 
 void player_take_dmg(double dmg) {
@@ -3521,7 +3556,7 @@ ExploderEnemy *enemy_exploder_create(v2 pos) {
     exploder->enemy.time_to_pursue = 2;
     exploder->enemy.speed = 90;
 
-    exploder->enemy.entity.height = get_max_height() * 0.18;
+    exploder->enemy.entity.height = 6000;
     return exploder;
 }
 
