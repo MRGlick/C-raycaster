@@ -24,6 +24,7 @@ void * _create_array(int item_size, int size) {
     header->size = size;
     header->length = 0;
     header->item_size = item_size;
+    header->padding = 1;
 
 
     return header + 1;
@@ -82,6 +83,10 @@ void _expand_array(void **array) {
 
 void _array_ensure_capacity(void **array) {
     ArrayHeader *header = array_header(*array);
+
+    if (header->padding != 1) {
+        printf("Header not properly initialized! Definitely gonna be a bad time. \n");
+    }
 
     if (header->length >= header->size) {
         _expand_array(array);

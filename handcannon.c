@@ -827,7 +827,7 @@ Enemy createEnemy(v2 pos, DirectionalSprite *dir_sprite) {
 
     enemy.dirSprite->dir = (v2){1, 0};
 
-    enemy.entity.height = 7200;
+    enemy.entity.height = get_max_height() / 2;
 
     enemy.collider = malloc(sizeof(CircleCollider));
     enemy.collider->radius = 10;
@@ -845,12 +845,12 @@ void init() {  // #INIT
     //exit(1);
 
     enemy_death_explosion_particles = malloc(sizeof(ParticleSpawner));
-    *enemy_death_explosion_particles = create_particle_spawner(V2_ZERO, 0);
+    *enemy_death_explosion_particles = create_particle_spawner(V2_ZERO, get_max_height() / 2);
 
     enemy_death_explosion_particles->spread = 2;
     enemy_death_explosion_particles->height_dir = 1;
     enemy_death_explosion_particles->min_speed = 10;
-    enemy_death_explosion_particles->max_speed = 160;
+    enemy_death_explosion_particles->max_speed = 80;
     enemy_death_explosion_particles->particle_lifetime = 2.5;
     enemy_death_explosion_particles->height_accel = PARTICLE_GRAVITY * 2;
     enemy_death_explosion_particles->floor_drag = 0.4;
@@ -1032,8 +1032,9 @@ void init() {  // #INIT
 
     //SDL_RenderSetLogicalSize(SDL_GetRenderer(get_window()), WINDOW_WIDTH, WINDOW_HEIGHT);
 
-
+    init_loading_screen();
     generate_dungeon();
+    update_loading_progress(0.1);
     load_dungeon();
 
 
@@ -1106,14 +1107,9 @@ void key_pressed(SDL_Keycode key) {
     }
 
     if (key == SDLK_SPACE) {
-        player->height_vel = -7;
-    }
-
-    if (key == SDLK_UP) {
-        player->height += 80;
-    }
-    if (key == SDLK_DOWN) {
-        player->height -= 80;
+        if (player->height == -145) {
+            player->height_vel = -7;
+        }
     }
     player->height = clamp(player->height, -WINDOW_HEIGHT, 0);
 
@@ -1193,7 +1189,12 @@ void playerTick(double delta) {
         player->handOffset.y = lerp(player->handOffset.y, 0, 0.1);
     }
 
-    player->vel = v2_lerp(player->vel, v2_add(v2_mul(move_dir, to_vec(keyVec.x)), v2_mul(move_dir_rotated, to_vec(keyVec.y))), delta * 10);
+    int drag = 2;
+    if (player->height == -145) {
+        drag = 10;
+    }
+
+    player->vel = v2_lerp(player->vel, v2_add(v2_mul(move_dir, to_vec(keyVec.x)), v2_mul(move_dir_rotated, to_vec(keyVec.y))), delta * drag);
 
     CollisionData player_coldata = getCircleTileMapCollision(*player->collider);
     if (player_coldata.didCollide) {
@@ -1407,7 +1408,7 @@ v2 worldToScreen(v2 pos, double height, bool allow_out_of_screen) { // gotta ref
     double x_pos = WINDOW_WIDTH / 2 + (ratio * WINDOW_WIDTH) * x_pos_sign;
 
     double fov_factor = tanHalfStartFOV / tanHalfFOV;
-    double wallSize = WALL_HEIGHT * WINDOW_HEIGHT / dist_to_viewplane * fov_factor;
+    double wallSize = WALL_HEIGHT * WALL_HEIGHT_MULTIPLIER * WINDOW_HEIGHT / dist_to_viewplane * fov_factor;
     double y_pos = WINDOW_HEIGHT / 2 + wallSize / 2 - (height + WINDOW_HEIGHT / 2) / dist_to_viewplane;
     
     y_pos -= (player->height) * (wallSize / WINDOW_HEIGHT);
@@ -1524,11 +1525,11 @@ void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affe
 
     double fov_factor = tanHalfFOV / tanHalfStartFOV;
 
-    v2 final_size = v2_div(size, to_vec(dist_to_player * fov_factor));
+    v2 final_size = v2_div(size, to_vec(dist_to_viewplane * fov_factor));
 
     GPU_Rect dstRect = {
         screen_pos.x - final_size.x / 2,
-        screen_pos.y - final_size.y / 2,
+        screen_pos.y - final_size.y,
         final_size.x,
         final_size.y
     };
@@ -2520,7 +2521,7 @@ Effect *createEffect(v2 pos, v2 size, Sprite *sprite, double lifeTime) {
     effect->entity.pos = pos;
     effect->entity.size = size;
     effect->entity.sprite = sprite;
-    effect->entity.height = WINDOW_HEIGHT / 6;  // idk it works
+    effect->entity.height = get_max_height() * 0.75;  // idk it works
     effect->lifeTime = lifeTime;
 
     return effect;
@@ -2726,7 +2727,7 @@ Bullet *createDefaultBullet(v2 pos, v2 dir) {
     bullet->entity.sprite->animations[0].fps = 12;
     bullet->entity.sprite->animations[0].loop = true;
     spritePlayAnim(bullet->entity.sprite, 0);
-    bullet->entity.height = get_max_height() / 8;
+    bullet->entity.height = get_max_height() * 0.525;
     bullet->entity.affected_by_light = false;
     bullet->dirSprite = NULL;
     bullet->dmg = 1;
@@ -2747,7 +2748,7 @@ Bullet *createDefaultBullet(v2 pos, v2 dir) {
 
 
     bullet->particle_spawner = malloc(sizeof(ParticleSpawner));
-    *bullet->particle_spawner = create_particle_spawner(V2_ZERO, 0);
+    *bullet->particle_spawner = create_particle_spawner(V2_ZERO, get_max_height() / 2);
 
     bullet->particle_spawner->height_dir = 0;
     bullet->particle_spawner->dir = V2_ZERO;
@@ -3051,9 +3052,9 @@ void bake_lights() {
         for (int c = 0; c < TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION; c++) {
 
             if (r % 100 == 0 && c == 0) {
-                double max_progress = 0.33;
+                double max_progress = 0.1;
                 double progress = (double)r / (TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION);
-                update_loading_progress(progress * max_progress);
+                update_loading_progress(0.8 + progress * max_progress);
             }
 
             baked_light_grid[r][c] = (BakedLightColor){ambient_light, ambient_light, ambient_light};
@@ -3177,7 +3178,7 @@ void bake_lights() {
 
         }
     }
-    update_loading_progress(0.66);
+    update_loading_progress(0.95);
 
 
     // vertical
@@ -3257,7 +3258,9 @@ bool is_enemy_type(int type) {
 
 void reset_level() {
 
+    init_loading_screen();
     generate_dungeon();
+    update_loading_progress(0.1);
     load_dungeon();
 }
 
@@ -3292,7 +3295,7 @@ void init_loading_screen() {
     is_loading = true;
     loading_progress = 0;
 
-    GPU_Clear(screen);
+    GPU_Clear(actual_screen);
 
     const v2 bar_container_size = {
         200,
@@ -3318,17 +3321,17 @@ void init_loading_screen() {
         bar_size.y
     };
 
-    GPU_RectangleFilled2(screen, bar_container, GPU_MakeColor(255, 255, 255, 255));
+    GPU_RectangleFilled2(actual_screen, bar_container, GPU_MakeColor(255, 255, 255, 255));
 
-    GPU_RectangleFilled2(screen, bar_background, GPU_MakeColor(0, 0, 0, 255));
+    GPU_RectangleFilled2(actual_screen, bar_background, GPU_MakeColor(0, 0, 0, 255));
 
-    GPU_Flip(screen);
+    GPU_Flip(actual_screen);
 
 }
 
 void update_loading_progress(double progress) {
 
-    GPU_Clear(screen);
+    GPU_Clear(actual_screen);
 
     const v2 bar_container_size = {
         200,
@@ -3364,13 +3367,13 @@ void update_loading_progress(double progress) {
     };
     bar.w = bar_size.x * progress;
 
-    GPU_RectangleFilled2(screen, bar_container, GPU_MakeColor(255, 255, 255, 255));
+    GPU_RectangleFilled2(actual_screen, bar_container, GPU_MakeColor(255, 255, 255, 255));
 
-    GPU_RectangleFilled2(screen, bar_background, GPU_MakeColor(0, 0, 0, 255));
+    GPU_RectangleFilled2(actual_screen, bar_background, GPU_MakeColor(0, 0, 0, 255));
 
-    GPU_RectangleFilled2(screen, bar, GPU_MakeColor(255, 255, 255, 255));
+    GPU_RectangleFilled2(actual_screen, bar, GPU_MakeColor(255, 255, 255, 255));
 
-    GPU_Flip(screen);
+    GPU_Flip(actual_screen);
 
 }
 
@@ -3556,7 +3559,7 @@ ExploderEnemy *enemy_exploder_create(v2 pos) {
     exploder->enemy.time_to_pursue = 2;
     exploder->enemy.speed = 90;
 
-    exploder->enemy.entity.height = 6000;
+    exploder->enemy.entity.height = get_max_height() / 2;
     return exploder;
 }
 
@@ -3621,7 +3624,7 @@ void exploder_explode(ExploderEnemy *exploder) {
     double size = 24000;
     Effect *effect = createEffect(exploder->enemy.entity.pos, to_vec(size), sprite, 1);
     effect->entity.affected_by_light = false;
-    effect->entity.height = size / 2;
+    effect->entity.height = get_max_height() / 2;
 
     add_game_object(effect, EFFECT);
 
@@ -3645,7 +3648,9 @@ void exploder_explode(ExploderEnemy *exploder) {
     double dist_squared = v2_distance_squared(player->pos, exploder->enemy.entity.pos);
     if (dist_squared < explosion_radius_squared) {
         double kb = lerp(exploder->explosion_kb, 0, inverse_lerp(0, explosion_radius_squared, dist_squared));
+        player->height_vel = -5;
         player->vel = v2_mul(v2_dir(exploder->enemy.entity.pos, player->pos), to_vec(kb));
+
         player_take_dmg(1);
     }
 
@@ -3719,6 +3724,7 @@ void ability_secondary_shoot_activate(Ability *ability) {
     while (rapid_fire->shots_left-- > 0) _shoot(0.05);
     
 
+    player->height_vel = -1;
     player->vel = v2_mul(playerForward, to_vec(-5));
 }
 
@@ -3732,10 +3738,11 @@ void _shoot(double spread) {
 
     v2 shoot_dir = v2_rotate(playerForward, randf_range(-PI * spread, PI * spread));
 
+    v2 effect_size = to_vec(8000);
 
     RayCollisionData ray_data = castRayForAll(player->pos, shoot_dir);
 
-    double effect_height = get_max_height() / 2;
+    double effect_height = get_max_height() * 0.5;
     
     double max_distance;
 
@@ -3743,7 +3750,7 @@ void _shoot(double spread) {
         max_distance = INFINITY;
     } else {
         double p = abs(pitch); // for debugging
-        max_distance = 9000 / p;
+        max_distance = (WALL_HEIGHT * WINDOW_HEIGHT * WALL_HEIGHT_MULTIPLIER / 2) / p;
     }
 
     if (!ray_data.hit && max_distance == INFINITY) return;
@@ -3754,7 +3761,8 @@ void _shoot(double spread) {
     double distance_to_collpos = v2_distance(player->pos, ray_data.collpos);
 
     if (distance_to_collpos > max_distance) {
-        effect_height = pitch < 0? get_max_height() : 0;
+        effect_height = pitch < 0? get_max_height() * 1.5 : get_max_height() / 2;
+        effect_height -= effect_size.y / 2;
         hit_ground_or_ceiling = true;
     }
 
@@ -3768,7 +3776,7 @@ void _shoot(double spread) {
         enemyTakeDmg(ray_data.collider, 1);
     } else if (!hit_ground_or_ceiling) {
         
-        effect_height = get_max_height() / 2 + -pitch * distance_to_collpos; // an estimate. wouldnt work well with high spread, but hopefully hard to notice. nvm, works very well.
+        effect_height = get_max_height() * 0.625 + -pitch * distance_to_collpos - effect_size.y / 2; // an estimate. wouldnt work well with high spread, but hopefully hard to notice. nvm, works very well.
     }
     
 
@@ -3793,6 +3801,10 @@ void _shoot(double spread) {
     hitEffect->entity.sprite->animations[0].loop = false;
     hitEffect->entity.height = effect_height;
     hitEffect->entity.affected_by_light = false;
+
+    enemy_death_explosion_particles->pos = effectPos;
+    enemy_death_explosion_particles->height = effect_height;
+    particle_spawner_explode(enemy_death_explosion_particles);
 
     spritePlayAnim(hitEffect->entity.sprite, 0);
 
@@ -3918,8 +3930,8 @@ void particle_tick(Particle *particle, double delta) {
 
     particle->effect.entity.pos = v2_add(particle->effect.entity.pos, v2_mul(particle->vel, to_vec(delta)));
     particle->effect.entity.height += particle->h_vel * delta;
-    double floor_bound = particle->effect.entity.size.y / 2;
-    double ceil_bound = get_max_height() - particle->effect.entity.size.y / 2;
+    double floor_bound = get_max_height() / 2 + particle->effect.entity.size.y / 2;
+    double ceil_bound = get_max_height() / 2 + get_max_height() - particle->effect.entity.size.y / 2;
     if (particle->effect.entity.height < floor_bound) {
         particle->effect.entity.height = floor_bound;
         particle->h_vel *= -particle->bounciness;
@@ -3996,7 +4008,7 @@ void ability_dash_activate(Ability *ability) {
 
 
     vignette_color = (SDL_Color){50, 150, 255, 165};
-    fov = startFov * 1.3;
+    //fov = startFov * 1.3;
 
 
     RayCollisionData ray = castRay(pos, dir);
@@ -4011,6 +4023,8 @@ void ability_dash_activate(Ability *ability) {
     }
 
     player->pos = v2_add(player->pos, v2_mul(dir, to_vec(dash_distance)));
+    player->height_vel = -2;
+    player->vel = v2_mul(dir, to_vec(5));
 
 }
 
@@ -4415,8 +4429,13 @@ void load_dungeon() {
     reset_tilemap(&floorTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
     reset_tilemap(&ceilingTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
 
+    double prog = 0.1;
+
     for (int r = 0; r < DUNGEON_SIZE; r++) {
         for (int c = 0; c < DUNGEON_SIZE; c++) {
+
+            prog = lerp(0.1, 0.8, (double)(r * DUNGEON_SIZE + c) / (DUNGEON_SIZE * DUNGEON_SIZE));
+            update_loading_progress(prog);
 
             load_room(&rooms[r][c]);
 
@@ -4424,7 +4443,8 @@ void load_dungeon() {
     }
 
     carve_room_paths();
-
+    prog += 0.05;
+    update_loading_progress(prog);
 
     tilemap_image = GPU_CreateImage(TILEMAP_WIDTH, TILEMAP_HEIGHT, GPU_FORMAT_RGBA);
 
@@ -4453,6 +4473,8 @@ void load_dungeon() {
 
 
     bake_lights();
+
+    update_loading_progress(1);
     
 
 }

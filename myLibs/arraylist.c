@@ -123,7 +123,7 @@ void free_object(obj *object) {
 // doesnt free void* val automatically
 int arraylist_remove(arraylist *list, int idx) { 
     if (idx < 0 || idx >= list->length) {
-        printf("Index out of bounds while trying to remove. index: %d \n", idx);
+        printf("Index out of bounds while trying to remove. index: %d line: \n", idx, __LINE__);
         return 0;
     }
     free(arraylist_get(list, idx));
