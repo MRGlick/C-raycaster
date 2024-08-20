@@ -17,8 +17,8 @@
 #define WINDOW_HEIGHT 580
 #define RESOLUTION_X 720
 #define RESOLUTION_Y 360
-#define X_SENSITIVITY .2
-#define Y_SENSITIVITY 1.6
+#define X_SENSITIVITY .1
+#define Y_SENSITIVITY .8
 #define COLOR_BLACK \
     (SDL_Color) { 0, 0, 0 }
 #define TRANSPARENT \
@@ -172,6 +172,7 @@ typedef struct Player {
     double height_vel;
     double pitch;
     bool sprinting;
+    bool crouching;
     bool canShoot;
     double shootCooldown;
     double shootChargeTimer;
@@ -181,6 +182,7 @@ typedef struct Player {
     v2 handOffset;
     double health, maxHealth;
     CircleCollider *collider;
+    double tallness;
 
     Ability *primary, *secondary, *utility, *special;
 } Player;
@@ -201,7 +203,8 @@ typedef struct LightPoint {
 
 typedef struct Effect {
     Entity entity;
-    double lifeTime;
+    double life_time;
+    double life_timer;
 } Effect;
 
 typedef struct Particle {
@@ -212,6 +215,9 @@ typedef struct Particle {
     double h_accel;
     double bounciness;
     double floor_drag;
+    v2 initial_size;
+    bool fade;
+    bool fade_scale;
 } Particle;
 
 typedef struct ParticleSpawner {
@@ -245,6 +251,10 @@ typedef struct ParticleSpawner {
     bool active;
 
     Entity *target;
+
+    bool fade;
+
+    bool fade_scale;
 
 } ParticleSpawner;
 
@@ -351,6 +361,7 @@ typedef struct ExploderEnemy {
 
     double explosion_kb;
     double explosion_radius;
+    bool exploded;
 } ExploderEnemy;
 
 // #ENEMIES END
@@ -372,6 +383,14 @@ typedef struct Room {
 } Room;
 
 // #FUNC
+
+void write_to_debug_label(String string);
+
+bool is_player_on_floor();
+
+double set_time_scale_for_duration(double time_scale, double duration);
+
+double get_player_height();
 
 void load_dungeon();
 
@@ -587,6 +606,7 @@ GPU_Target *actual_screen;
 
 // #UI
 UIComponent *pause_menu;
+UILabel *debug_label;
 
 // #TEXTURES
 GPU_Image **dash_screen_anim;
@@ -656,6 +676,7 @@ Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
 
 // #VAR
 
+double game_speed_duration_timer = 0;
 double game_speed = 1;
 bool paused = false;
 
@@ -679,8 +700,8 @@ bool render_debug = false;
 bool lock_and_hide_mouse = true;
 bool isLMouseDown = false;
 bool isRMouseDown = false;
-double startFov = 90;
-double fov = 90;
+double startFov = 100;
+double fov = 100;
 const char *font = "font.ttf";
 const SDL_Color fogColor = {0, 0, 0, 255};
 double tanHalfFOV;
@@ -848,14 +869,14 @@ void init() {  // #INIT
     *enemy_death_explosion_particles = create_particle_spawner(V2_ZERO, get_max_height() / 2);
 
     enemy_death_explosion_particles->spread = 2;
-    enemy_death_explosion_particles->height_dir = 1;
+    enemy_death_explosion_particles->height_dir = 0.4;
     enemy_death_explosion_particles->min_speed = 10;
-    enemy_death_explosion_particles->max_speed = 80;
+    enemy_death_explosion_particles->max_speed = 350;
     enemy_death_explosion_particles->particle_lifetime = 2.5;
-    enemy_death_explosion_particles->height_accel = PARTICLE_GRAVITY * 2;
+    enemy_death_explosion_particles->height_accel = PARTICLE_GRAVITY * -0.3;
     enemy_death_explosion_particles->floor_drag = 0.4;
-    enemy_death_explosion_particles->max_size = to_vec(400);
-    enemy_death_explosion_particles->min_size = to_vec(700);
+    enemy_death_explosion_particles->max_size = to_vec(4000);
+    enemy_death_explosion_particles->min_size = to_vec(16000);
 
     int bloom_frag = GPU_LoadShader(GPU_FRAGMENT_SHADER, "Shaders/bloom_frag.glsl");
     int bloom_vert = GPU_LoadShader(GPU_VERTEX_SHADER, "Shaders/bloom_vert.glsl");
@@ -1101,17 +1122,32 @@ void key_pressed(SDL_Keycode key) {
         return;
     }
 
+    if (key == SDLK_LCTRL && !player->crouching) {
+        
+        player->crouching = true;
+        
+        double current_speed_sqr = v2_length_squared(player->vel);
+        double crouch_speed = 2;
+        v2 crouch_dir = playerForward;
+
+        if (current_speed_sqr < crouch_speed * crouch_speed) {
+            player->vel = v2_mul(crouch_dir, to_vec(crouch_speed));
+        }
+        
+        
+    }
+
     if (key == SDLK_r) {
 
         reset_level();
     }
 
     if (key == SDLK_SPACE) {
-        if (player->height == -145) {
-            player->height_vel = -7;
+        if (is_player_on_floor()) {
+            player->height_vel = 370;
         }
     }
-    player->height = clamp(player->height, -WINDOW_HEIGHT, 0);
+    player->height = clamp(player->height, 0, get_max_height());
 
     if (key == SDLK_LSHIFT) {
         activate_ability(player->utility);
@@ -1129,6 +1165,9 @@ void key_pressed(SDL_Keycode key) {
 void key_released(SDL_Keycode key) {
     if (key == SDLK_LSHIFT) {
         player->sprinting = false;
+    }
+    if (key == SDLK_LCTRL) {
+        player->crouching = false;
     }
 
     if (!in_range((char)key, 'a', 'z')) return;
@@ -1150,16 +1189,21 @@ v2 get_key_vector(SDL_Keycode k1, SDL_Keycode k2, SDL_Keycode k3, SDL_Keycode k4
 
 void playerTick(double delta) {
 
+    //String height_str = String_from_double(player->height, 2);
+
+    //write_to_debug_label(height_str);
+    //printf("%.2f \n", player->height);
+
     double speed_multiplier = 1;
 
 
 
-    player->height_vel += 0.1;
+    player->height_vel -= 750 * delta;
     player->height += player->height_vel;
-    if (player->height > -145) {
+    if (player->height > get_max_height() - player->tallness * 0.2) {
         player->height_vel = 0;
     }
-    player->height = clamp(player->height, -WINDOW_HEIGHT, -145);
+    player->height = clamp(player->height, player->tallness * 0.8, get_max_height());
 
     player->collider->pos = player->pos;
 
@@ -1189,17 +1233,20 @@ void playerTick(double delta) {
         player->handOffset.y = lerp(player->handOffset.y, 0, 0.1);
     }
 
-    int drag = 2;
-    if (player->height == -145) {
-        drag = 10;
-    }
+    double drag = 0;
+    if (is_player_on_floor()) {
+        if (player->crouching) {
+            drag = 0.15;
+        } else {
+            drag = 1;
+        }
+    } 
 
-    player->vel = v2_lerp(player->vel, v2_add(v2_mul(move_dir, to_vec(keyVec.x)), v2_mul(move_dir_rotated, to_vec(keyVec.y))), delta * drag);
+    v2 movement_vec = v2_add(v2_mul(move_dir, to_vec(keyVec.x)), v2_mul(move_dir_rotated, to_vec(keyVec.y)));
+    player->vel = v2_lerp(player->vel, movement_vec, delta * 10.0 * drag);
 
-    CollisionData player_coldata = getCircleTileMapCollision(*player->collider);
-    if (player_coldata.didCollide) {
-        player->pos = v2_add(player->pos, player_coldata.offset);
-    }
+
+    
     if (player->sprinting) {
         speed_multiplier *= 1.25;
         fov = lerp(fov, startFov * 1.2, delta * 7);
@@ -1213,17 +1260,21 @@ void playerTick(double delta) {
 
     double movement = v2_length(finalVel) * delta;
 
-    if (movement > 2) {
-        RayCollisionData ray = castRay(player->pos, playerForward);
-        if (ray.hit) {
-            double dist = v2_distance(ray.startpos, ray.collpos);
-            if (dist < movement) {
-                move_without_ray = false;
-                player->pos = v2_add(player->pos, v2_mul(playerForward, to_vec(dist - 10)));
-            }
+    RayCollisionData ray = castRay(player->pos, playerForward);
+    if (ray.hit) {
+        double dist = v2_distance(ray.startpos, ray.collpos);
+        if (dist < movement) {
+            move_without_ray = false;
+            player->pos = v2_add(player->pos, v2_mul(playerForward, to_vec(dist - 10)));
         }
     }
     
+    CollisionData player_coldata = getCircleTileMapCollision(*player->collider);
+    if (player_coldata.didCollide) {
+        player->pos = v2_add(player->pos, player_coldata.offset);
+        //player->vel = v2_slide(player->vel, player_coldata.offset);
+    }
+
     if (move_without_ray) 
         player->pos = v2_add(player->pos, v2_mul(finalVel, to_vec(delta)));
     
@@ -1277,6 +1328,12 @@ void objectTick(void *obj, int type, double delta) {
 // #TICK
 void tick(double delta) {
 
+    if (game_speed_duration_timer <= 0) {
+        game_speed = 1;
+    } else {
+        game_speed_duration_timer -= delta / game_speed; // so it counts by real time instead of scaled time
+    }
+
     vignette_color = lerp_color(vignette_color, (SDL_Color){0, 0, 0}, delta);
 
     playerForward = get_player_forward();
@@ -1285,10 +1342,7 @@ void tick(double delta) {
 
     tanHalfFOV = tan(deg_to_rad(fov / 2));
 
-    if (lock_and_hide_mouse) {
-        SDL_WarpMouseInWindow(get_window(), WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
-        
-    }
+    SDL_SetRelativeMouseMode(lock_and_hide_mouse); // bro this function was made for me
 
     
 
@@ -1309,7 +1363,7 @@ void tick(double delta) {
     }
     cameraOffset = v2_lerp(cameraOffset, to_vec(0), 0.2);
 
-    SDL_ShowCursor(!lock_and_hide_mouse);
+    
 
     animationTick(&animatedWallSprite->animations[animatedWallSprite->currentAnimationIdx], delta);
     spriteTick(leftHandSprite, delta);
@@ -1409,9 +1463,7 @@ v2 worldToScreen(v2 pos, double height, bool allow_out_of_screen) { // gotta ref
 
     double fov_factor = tanHalfStartFOV / tanHalfFOV;
     double wallSize = WALL_HEIGHT * WALL_HEIGHT_MULTIPLIER * WINDOW_HEIGHT / dist_to_viewplane * fov_factor;
-    double y_pos = WINDOW_HEIGHT / 2 + wallSize / 2 - (height + WINDOW_HEIGHT / 2) / dist_to_viewplane;
-    
-    y_pos -= (player->height) * (wallSize / WINDOW_HEIGHT);
+    double y_pos = WINDOW_HEIGHT / 2 + wallSize / 2 - ((height - get_player_height()) + WINDOW_HEIGHT / 2) / dist_to_viewplane;
 
     x_pos += cameraOffset.x;
     y_pos += -player->pitch + cameraOffset.y;
@@ -1437,9 +1489,11 @@ v2 screenToFloor(v2 pos) {
 
     bool is_ceiling = pos.y < WINDOW_HEIGHT / 2;
 
-    double m = is_ceiling? 1 + (player->height + WINDOW_HEIGHT / 2) / (WINDOW_HEIGHT / 2) : 1 - (player->height + WINDOW_HEIGHT / 2) / (WINDOW_HEIGHT / 2);
+    double normalized_height = get_player_height() / get_max_height();
 
-    dist *= m;
+    double m = is_ceiling? 1 - normalized_height : normalized_height;
+
+    dist *= m * WALL_HEIGHT_MULTIPLIER;
 
     return v2_add(player->pos, v2_mul(rayDir, to_vec(dist)));
 }
@@ -1730,9 +1784,12 @@ void renderWallStripe(WallStripe *stripe) {
     double dist_squared = ((RenderObject *)stripe)->dist_squared;
     double dist = sqrt(dist_squared);
 
+    double p_height = (get_player_height() / get_max_height() - 0.5) * (stripe->size);
+    cd_print(true, "%.2f \n", get_player_height() / get_max_height());
+
     GPU_Rect dstRect = {
         stripe->i * WINDOW_WIDTH / RESOLUTION_X + cameraOffset.x, 
-        WINDOW_HEIGHT / 2 - stripe->size / 2 - player->pitch - (player->height + WINDOW_HEIGHT / 2) * (stripe->size / WINDOW_HEIGHT) + cameraOffset.y,
+        WINDOW_HEIGHT / 2 - stripe->size / 2 + p_height - player->pitch + cameraOffset.y,
         WINDOW_WIDTH / RESOLUTION_X + 1,
         stripe->size
     };
@@ -1813,7 +1870,7 @@ void render_hand() {
         };
 
         clampColors(rgb);
-
+ 
         GPU_SetRGB(texture, rgb[0], rgb[1], rgb[2]);
         GPU_BlitRect(texture, NULL, hud, &leftHandRect);
     }
@@ -2046,8 +2103,10 @@ void init_player(v2 pos) {
     player->collider->pos = player->pos;
     player->maxHealth = 10;
     player->health = player->maxHealth;
-    player->height = -145;
+    player->tallness = 11000;
+    player->height = player->tallness;
     player->height_vel = 0;
+    player->crouching = false;
 
     Ability *default_primary = malloc(sizeof(Ability));
     Rapidfire *default_secondary = malloc(sizeof(Rapidfire));
@@ -2323,7 +2382,7 @@ void spawn_floor_light(v2 pos) {
 
 void spawn_ceiling_light(v2 pos) {
     LightPoint *light = malloc(sizeof(LightPoint));
-    light->color = (SDL_Color){255, 170, 70};//{255, 200, 100};
+    light->color = (SDL_Color){randf_range(200, 255), randf_range(130, 160), 70};//{255, 200, 100};
     light->strength = 5;
     light->radius = 400;
     light->pos = pos;
@@ -2522,20 +2581,22 @@ Effect *createEffect(v2 pos, v2 size, Sprite *sprite, double lifeTime) {
     effect->entity.size = size;
     effect->entity.sprite = sprite;
     effect->entity.height = get_max_height() * 0.75;  // idk it works
-    effect->lifeTime = lifeTime;
+    effect->life_time = lifeTime;
+    effect->life_timer = effect->life_time;
 
     return effect;
 }
 
 // Todo: add shoot cooldown for base shooting
 void ability_shoot_activate(Ability *ability) {
+    play_sound(player_default_shoot, 0.3);
     _shoot(0.02);
 }
 
 void effectTick(Effect *effect, double delta) {
 
-    effect->lifeTime -= delta;
-    if (effect->lifeTime <= 0) {
+    effect->life_timer -= delta;
+    if (effect->life_timer <= 0) {
         remove_game_object(effect, EFFECT);
         return;
     }
@@ -3535,6 +3596,8 @@ ExploderEnemy *enemy_exploder_create(v2 pos) {
 
     exploder->explosion_kb = 4;
     exploder->explosion_radius = 75;
+
+    exploder->exploded = false;
     
     const int ANIM_LENGTH = 5;
 
@@ -3613,6 +3676,10 @@ void dir_sprite_play_anim(DirectionalSprite *dir_sprite, int anim) {
 
 void exploder_explode(ExploderEnemy *exploder) {
 
+    exploder->exploded = true;
+
+    set_time_scale_for_duration(0.3, 1);
+
     play_spatial_sound(exploder_explosion, 1, exploder->enemy.entity.pos, player->pos, exploder->enemy.sound_max_radius);
 
     Sprite *sprite = createSprite(true, 1);
@@ -3632,6 +3699,14 @@ void exploder_explode(ExploderEnemy *exploder) {
         obj *gameobject = arraylist_get(gameobjects, i);
         if (is_enemy_type(gameobject->type) && gameobject->val != (void *)exploder) {
             Enemy *enemy = gameobject->val;
+
+            if (gameobject->type == ENEMY_EXPLODER) {
+                ExploderEnemy *exploder_enemy = gameobject->val;
+                if (exploder_enemy->exploded) {
+                    continue;
+                }
+            }
+
             double explosion_radius_squared = exploder->explosion_radius * exploder->explosion_radius;
             double dist_squared = v2_distance_squared(enemy->entity.pos, exploder->enemy.entity.pos);
             if (dist_squared < explosion_radius_squared) {
@@ -3652,10 +3727,13 @@ void exploder_explode(ExploderEnemy *exploder) {
         player->vel = v2_mul(v2_dir(exploder->enemy.entity.pos, player->pos), to_vec(kb));
 
         player_take_dmg(1);
+        
     }
 
 
-
+    enemy_death_explosion_particles->pos = exploder->enemy.entity.pos;
+    enemy_death_explosion_particles->height = get_max_height() * 0.2;
+    particle_spawner_explode(enemy_death_explosion_particles);
 
     //enemy_die(exploder);
 }
@@ -3728,11 +3806,11 @@ void ability_secondary_shoot_activate(Ability *ability) {
     player->vel = v2_mul(playerForward, to_vec(-5));
 }
 
-void _shoot(double spread) {
+void _shoot(double spread) { // the sound isnt attacked bc shotgun makes eargasm
 
     double pitch = player->pitch + randf_range(1000 * -spread, 1000 * spread);
 
-    play_sound(player_default_shoot, 0.3);
+    
     shakeCamera(10, 4, true, 1);
     spritePlayAnim(leftHandSprite, 1);
 
@@ -3802,10 +3880,6 @@ void _shoot(double spread) {
     hitEffect->entity.height = effect_height;
     hitEffect->entity.affected_by_light = false;
 
-    enemy_death_explosion_particles->pos = effectPos;
-    enemy_death_explosion_particles->height = effect_height;
-    particle_spawner_explode(enemy_death_explosion_particles);
-
     spritePlayAnim(hitEffect->entity.sprite, 0);
 
     add_game_object(hitEffect, EFFECT);
@@ -3837,7 +3911,9 @@ ParticleSpawner create_particle_spawner(v2 pos, double height) {
         .bounciness = 0.5,
         .particle_lifetime = 1,
         .active = true,
-        .target = NULL
+        .target = NULL,
+        .fade = true,
+        .fade_scale = true
     };
 
     Sprite sprite;
@@ -3879,7 +3955,7 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
 
     double speed = randf_range(spawner->min_speed, spawner->max_speed);
     v2 dir = v2_rotate(spawner->dir, randf_range(-PI * spawner->spread, PI * spawner->spread));
-    double height_dir = spawner->height_dir -  spawner->height_dir *  randf_range(-PI * spawner->spread, PI * spawner->spread) / PI;
+    double height_dir = spawner->height_dir * randf_range(-1, 1);
     
     double vel_x = dir.x * speed;
     double vel_y = dir.y * speed;
@@ -3891,7 +3967,8 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
     particle.accel = spawner->accel;
     particle.h_accel = spawner->height_accel;
 
-    particle.effect.lifeTime = spawner->particle_lifetime;
+    particle.effect.life_time = spawner->particle_lifetime;
+    particle.effect.life_timer = particle.effect.life_time;
 
     particle.bounciness = spawner->bounciness;
     particle.floor_drag = spawner->floor_drag;
@@ -3900,10 +3977,13 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
     particle.effect.entity.height = spawner->height;
     particle.effect.entity.affected_by_light = true;
     
+    particle.fade = spawner->fade;
+    particle.fade_scale = spawner->fade_scale;
+
     double size_rand = randf_range(0, 1);
     v2 size = v2_lerp(spawner->min_size, spawner->max_size, size_rand);
     
-    particle.effect.entity.size = size;
+    particle.initial_size = size;
 
     particle.effect.entity.sprite = malloc(sizeof(Sprite));
     *particle.effect.entity.sprite = spawner->sprite;
@@ -3928,6 +4008,7 @@ void particle_tick(Particle *particle, double delta) {
     particle->vel = v2_add(particle->vel, v2_mul(particle->accel, to_vec(delta)));
     particle->h_vel += particle->h_accel * delta;
 
+    particle->effect.entity.size = v2_lerp(particle->initial_size, V2_ZERO, inverse_lerp(particle->effect.life_time, 0, particle->effect.life_timer));
     particle->effect.entity.pos = v2_add(particle->effect.entity.pos, v2_mul(particle->vel, to_vec(delta)));
     particle->effect.entity.height += particle->h_vel * delta;
     double floor_bound = get_max_height() / 2 + particle->effect.entity.size.y / 2;
@@ -4024,7 +4105,7 @@ void ability_dash_activate(Ability *ability) {
 
     player->pos = v2_add(player->pos, v2_mul(dir, to_vec(dash_distance)));
     player->height_vel = -2;
-    player->vel = v2_mul(dir, to_vec(5));
+    player->vel = v2_mul(dir, to_vec(3));
 
 }
 
@@ -4091,6 +4172,17 @@ void make_ui() {
     
     pause_menu->visible = false;
     UI_add_child(UI_get_root(), pause_menu);
+
+
+    debug_label = UI_alloc(UILabel);
+
+    UILabel_set_text(debug_label, StringRef("debug label: stuff"));
+    
+    debug_label->font_size = 15;
+
+    UI_set_pos(debug_label, V2_ZERO);
+    UI_set_size(debug_label, (v2){WINDOW_WIDTH, WINDOW_HEIGHT / 5});
+    UI_add_child(UI_get_root(), debug_label);
 }
 
 
@@ -4109,9 +4201,7 @@ void particle_spawner_explode(ParticleSpawner *spawner) {
 void enemy_die(Enemy *enemy) {
     play_spatial_sound(enemy_default_kill, 1, player->pos, enemy->entity.pos, enemy->sound_max_radius);
 
-    enemy_death_explosion_particles->pos = enemy->entity.pos;
-    enemy_death_explosion_particles->height = enemy->entity.height;
-    particle_spawner_explode(enemy_death_explosion_particles);
+    
 
     remove_game_object(enemy, ENEMY);
 }
@@ -4477,6 +4567,26 @@ void load_dungeon() {
     update_loading_progress(1);
     
 
+}
+
+double get_player_height() {
+    return player->crouching? player->height - player->tallness / 2 : player->height;
+}
+
+
+double set_time_scale_for_duration(double ts, double duration) {
+    game_speed = ts;
+    game_speed_duration_timer = duration;
+}
+
+bool is_player_on_floor() {
+    return player->height <= player->tallness * 0.8;
+}
+
+// takes ownership of 'string'
+void write_to_debug_label(String string) {
+    UILabel_set_text(debug_label, string);
+    UILabel_update(debug_label);
 }
 
 

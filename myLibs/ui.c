@@ -521,7 +521,7 @@ void UI_handle_event(SDL_Event event) {
 }
 
 void UILabel_set_text(UILabel *label, String text) {
-    if (label->text.data != NULL) String_delete(&label->text);
+    if (label->text.data != NULL && !label->text.ref) String_delete(&label->text);
 
     label->text = text;
 }
