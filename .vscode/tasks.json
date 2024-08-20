@@ -16,7 +16,8 @@
                 "-lSDL2main",
                 "-lSDL2",
                 "-lSDL2_ttf",
-                "-lSDL2_gpu"
+                "-lSDL2_gpu",
+                "-lws2_32"
             ],
             "options": {
                 "cwd": "${fileDirname}",
