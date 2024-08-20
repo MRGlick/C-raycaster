@@ -13,7 +13,6 @@ int MP_SERVER_PORT = 1155;
 char *MP_SERVER_IP = "127.0.0.1";
 
 typedef struct MPPacket {
-    void *data;
     int len;
     int type;
     bool is_broadcast;
@@ -22,15 +21,18 @@ typedef struct MPPacket {
 SOCKET MPClient_socket;
 SOCKET MPServer_socket;
 
-void (*_MP_client_handle_recv)(MPPacket) = NULL;
-void (*_MP_server_handle_recv)(SOCKET, MPPacket) = NULL;
+SOCKET MP_clients[100];
+int MP_clients_amount = 0;
+
+void (*_MP_client_handle_recv)(MPPacket, void *) = NULL;
+void (*_MP_server_handle_recv)(SOCKET, MPPacket, void *) = NULL;
 void (*_MP_on_client_connected)(SOCKET) = NULL;
 void (*_MP_on_client_disconnected)(SOCKET) = NULL;
 
 
 DWORD WINAPI _MPClient_handle_received_data(void *data);
 
-void MPClient_send(MPPacket packet) {
+void MPClient_send(MPPacket packet, void *data) {
 
     if (packet.len > MP_DEFAULT_BUFFER_SIZE - sizeof(packet)) {
         fprintf(stderr, "Packet too big! Packet size: %d \n", packet.len);
@@ -40,7 +42,7 @@ void MPClient_send(MPPacket packet) {
     char buff[MP_DEFAULT_BUFFER_SIZE] = {0};
 
     memcpy(buff, &packet, sizeof(packet));
-    memcpy(buff + sizeof(packet), packet.data, packet.len);
+    memcpy(buff + sizeof(packet), data, packet.len);
 
     send(MPClient_socket, &packet, MP_DEFAULT_BUFFER_SIZE, 0);
 }
@@ -92,7 +94,7 @@ DWORD WINAPI _MPClient_handle_received_data(void *data) {
         MPPacket *packet = receive_buffer;
         // process packet from server...
         if (_MP_client_handle_recv != NULL) {
-            _MP_client_handle_recv((MPPacket){.data = packet->data, .len =packet->len });
+            _MP_client_handle_recv(*packet, receive_buffer + sizeof(MPPacket));
         }
     }
 }
@@ -104,6 +106,8 @@ DWORD WINAPI _MPServer_handle_client(void *data) {
         _MP_on_client_connected(client_socket);
     }
     
+    MP_clients[MP_clients_amount++] = client_socket;
+    
 
 
     char receive_buffer[MP_DEFAULT_BUFFER_SIZE] = {0};
@@ -112,7 +116,13 @@ DWORD WINAPI _MPServer_handle_client(void *data) {
         int result = recv(client_socket, receive_buffer, MP_DEFAULT_BUFFER_SIZE, 0);
 
         if (result <= 0) {
-            printf("Client disconnected! \n");
+            if (result == SOCKET_ERROR) {
+                printf("SOCKET ERROR! \n");
+                printf("err number: %d \n", WSAGetLastError());
+                exit(-12941);
+            } else {
+                printf("Client disconnected! \n");
+            }
             if (_MP_on_client_disconnected != NULL) {
                 _MP_on_client_disconnected(client_socket);
             }
@@ -120,7 +130,6 @@ DWORD WINAPI _MPServer_handle_client(void *data) {
         }
 
         MPPacket *packet = receive_buffer;
-        packet->data = packet + 1;
 
         if (packet->len > MP_DEFAULT_BUFFER_SIZE - sizeof(int)) {
             fprintf(stderr, "The packet is too big! packet size: %d \n", packet->len);
@@ -129,13 +138,22 @@ DWORD WINAPI _MPServer_handle_client(void *data) {
 
         // do stuff with the client's message...
         if (_MP_server_handle_recv != NULL) {
-            _MP_server_handle_recv(client_socket, (MPPacket){.data = packet->data, .len = packet->len, .is_broadcast = packet->is_broadcast});
+            _MP_server_handle_recv(client_socket, *packet, receive_buffer + sizeof(MPPacket));
         }
     }
 }
 
-void MPServer_send(SOCKET client_socket, const char *buff, int bufflen) {
-    send(client_socket, buff, bufflen, 0);
+void MPServer_send(MPPacket packet, void *data) {
+
+    char buf[MP_DEFAULT_BUFFER_SIZE] = {0};
+
+    memcpy(buf, &packet, sizeof(packet));
+
+    memcpy(buf + sizeof(packet), data, packet.len);
+
+    for (int i = 0; i < MP_clients_amount; i++) {
+        send(MP_clients[i], buf, MP_DEFAULT_BUFFER_SIZE, 0);
+    }
 }
 
 DWORD WINAPI _MPServer(void *data) {

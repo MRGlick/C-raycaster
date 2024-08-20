@@ -43,8 +43,17 @@
 
 #define get_window() SDL_GetWindowFromID(actual_screen->context->windowID)
 
+
+// # PACKET TYPES AND STRUCTS
 enum PacketTypes {
+    PACKET_UPDATE_PLAYER_ID,
     PACKET_PLAYER_POS
+};
+struct player_pos_packet {
+    v2 pos; // 16
+    double height; // 8
+    int id; // 4
+    // 4 padding
 };
 
 
@@ -206,7 +215,7 @@ typedef struct Entity {
 
 typedef struct PlayerEntity {
     Entity entity;
-    SOCKET socket;
+    int id;
 } PlayerEntity;
 
 typedef struct LightPoint {
@@ -322,7 +331,9 @@ typedef struct Room {
 
 // #FUNC
 
-void on_server_recv(SOCKET socket, MPPacket packet);
+void on_client_recv(MPPacket packet, void *data);
+
+void on_server_recv(SOCKET socket, MPPacket packet, void *data);
 
 void on_player_connect(SOCKET player_socket);
 
@@ -583,6 +594,9 @@ Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
 
 // #VAR
 
+int client_self_id = -1;
+int next_id = 1;
+
 double game_speed_duration_timer = 0;
 double game_speed = 1;
 bool paused = false;
@@ -663,10 +677,17 @@ int main(int argc, char *argv[]) {
     make_ui();
 
     MP_init(SERVER_PORT);
+    _MP_client_handle_recv = on_client_recv;
+    _MP_on_client_connected = on_player_connect;
+    _MP_on_client_disconnected = on_player_disconnect;
+    _MP_server_handle_recv = on_server_recv;
 
-    if (argc == 2 && argv[1] == "join") {
+    if (!strcmp(argv[1], "join")) {
+        printf("joining \n");
         MPClient(SERVER_IP);
     } else {
+        printf("creating server \n");
+        printf("'%s' \n", argv[1]);
         MPServer();
         MPClient(SERVER_IP); // host and do the thing
     }
@@ -1019,6 +1040,8 @@ v2 get_key_vector(SDL_Keycode k1, SDL_Keycode k2, SDL_Keycode k3, SDL_Keycode k4
     return (v2){get_key_axis(k1, k2), get_key_axis(k3, k4)};
 }
 
+
+
 void playerTick(double delta) {
 
     //String height_str = String_from_double(player->height, 2);
@@ -1111,7 +1134,19 @@ void playerTick(double delta) {
         player->pos = v2_add(player->pos, v2_mul(finalVel, to_vec(delta)));
     
     
-    int data_len = sizeof(v2) + sizeof(double);
+    struct player_pos_packet packet_data = {
+        .pos = player->pos,
+        .height = player->height,
+        .id = client_self_id
+    };
+
+    MPPacket packet = {
+        .type = PACKET_PLAYER_POS,
+        .len = sizeof(packet_data),
+        .is_broadcast = true
+    };
+
+    MPClient_send(packet, &packet_data);
 
 }
 
@@ -3907,7 +3942,22 @@ bool is_entity_type(int type) {
 
 void on_player_connect(SOCKET player_socket) {
     PlayerEntity *player_entity = malloc(sizeof(PlayerEntity));
-    player_entity->socket = player_socket;
+    write_to_debug_label(String_from_int(next_id));
+    player_entity->id = next_id++;
+
+    char buf[MP_DEFAULT_BUFFER_SIZE] = {0};
+
+    MPPacket packet = {
+        .is_broadcast = false,
+        .len = sizeof(player_entity->id),
+        .type = PACKET_UPDATE_PLAYER_ID
+    };
+
+    memcpy(buf, &packet, sizeof(packet));
+    memcpy(buf + sizeof(packet), (void *)&player_entity->id, packet.len);
+
+    send(player_socket, buf, MP_DEFAULT_BUFFER_SIZE, 0);
+
     player_entity->entity.affected_by_light = true;
     player_entity->entity.height = 0;
     player_entity->entity.pos = V2_ZERO;
@@ -3922,20 +3972,49 @@ void on_player_disconnect(SOCKET player_socket) {
 
 }
 
-void on_server_recv(SOCKET socket, MPPacket packet) {
-    char data[MP_DEFAULT_BUFFER_SIZE] = {0};
-
-    memcpy(data, &packet, sizeof(packet));
-    memcpy(data + sizeof(packet), packet.data, packet.len);
+void on_server_recv(SOCKET socket, MPPacket packet, void *data) {
 
     if (packet.is_broadcast) {
         for (int i = 0; i < gameobjects->length; i++) {
-            if (arraylist_get_type(gameobjects, i) == PLAYER_ENTITY) {
-                PlayerEntity *player_entity = arraylist_get_val(gameobjects, i);
-                MPServer_send(player_entity->socket, data, packet.len);
+            MPServer_send(packet, data);
+        }
+    }
+}
+
+void on_client_recv(MPPacket packet, void *data) {
+    if (packet.type == PACKET_UPDATE_PLAYER_ID) {
+
+        client_self_id = *(int *)(data);
+        printf("received id: %d \n", client_self_id);
+    } else if (packet.type == PACKET_PLAYER_POS) {
+
+        struct player_pos_packet packet_data = *(struct player_pos_packet *)data;
+
+        printf("packet<type: %d, id: %d, len: %d> \n", packet.type, packet_data.id, packet.len);
+
+        printf("received pos: %.2f, %.2f \n", packet_data.pos.x, packet_data.pos.y);
+
+        if (packet_data.id == client_self_id) {
+            return;
+        }
+
+        for (int i = 0; i < gameobjects->length; i++) {
+            obj *object = arraylist_get(gameobjects, i);
+
+            if (object->type == PLAYER_ENTITY) {
+                PlayerEntity *player_entity = object->val;
+                cd_print(true, "current id: %d, desired id: %d \n", player_entity->id, packet_data.id);
+                if (player_entity->id == packet_data.id) {
+                    player_entity->entity.pos = packet_data.pos;
+                    player_entity->entity.height = packet_data.height;
+                    printf("found IDeal player! \n");
+                    break;
+                }
             }
         }
     }
+    
+    
 }
 
 
