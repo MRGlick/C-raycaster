@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <winsock.h>
 
 #define DEFAULT_BUFFER_SIZE 1024
@@ -14,10 +15,28 @@ char *SERVER_IP = "127.0.0.1";
 typedef struct MPPacket {
     void *data;
     int len;
+    bool is_broadcast;
 } MPPacket;
 
 void (*_MP_client_handle_recv)(MPPacket) = NULL;
 void (*_MP_server_handle_recv)(SOCKET, MPPacket) = NULL;
+void (*_MP_on_client_connected)(SOCKET) = NULL;
+void (*_MP_on_client_disconnected)(SOCKET) = NULL;
+
+void MPClient_send(MPPacket packet) {
+
+    if (packet.len > DEFAULT_BUFFER_SIZE - sizeof(packet)) {
+        fprintf(stderr, "Packet too big! Packet size: %d \n", packet.len);
+        exit(-1);
+    }
+
+    char buff[DEFAULT_BUFFER_SIZE] = {0};
+
+    memcpy(buff, &packet, sizeof(packet));
+    memcpy(buff + sizeof(packet), packet.data, packet.len);
+
+    send(MPClient_socket, &packet, DEFAULT_BUFFER_SIZE, 0);
+}
 
 void MP_init(const int port) {
     SERVER_PORT = port;
@@ -71,12 +90,27 @@ DWORD WINAPI _MPClient_handle_received_data(void *data) {
 DWORD WINAPI _MPServer_handle_client(void *data) {
     SOCKET client_socket = (SOCKET)data;
 
+    if (_MP_on_client_connected != NULL) {
+        _MP_on_client_connected(client_socket);
+    }
+    
+
+
     char receive_buffer[DEFAULT_BUFFER_SIZE] = {0};
 
     while (TRUE) {
-        recv(client_socket, receive_buffer, DEFAULT_BUFFER_SIZE, 0);
+        int result = recv(client_socket, receive_buffer, DEFAULT_BUFFER_SIZE, 0);
+
+        if (result <= 0) {
+            printf("Client disconnected! \n");
+            if (_MP_on_client_disconnected != NULL) {
+                _MP_on_client_disconnected(client_socket);
+            }
+            return; 
+        }
 
         MPPacket *packet = receive_buffer;
+        packet->data = packet + 1;
 
         if (packet->len > DEFAULT_BUFFER_SIZE - sizeof(int)) {
             fprintf(stderr, "The packet is too big! packet size: %d \n", packet->len);
@@ -85,7 +119,7 @@ DWORD WINAPI _MPServer_handle_client(void *data) {
 
         // do stuff with the client's message...
         if (_MP_server_handle_recv != NULL) {
-            _MP_server_handle_recv(client_socket, (MPPacket){.data = packet->data, .len = packet->len});
+            _MP_server_handle_recv(client_socket, (MPPacket){.data = packet->data, .len = packet->len, .is_broadcast = packet->is_broadcast});
         }
     }
 }
@@ -113,8 +147,6 @@ void MPServer() {
 
     while (TRUE) {
         SOCKET client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_addr_size);
-
-        
 
         HANDLE h = CreateThread(NULL, 0, _MPServer_handle_client, (PVOID)client_socket, 0, NULL);
         CloseHandle(h);

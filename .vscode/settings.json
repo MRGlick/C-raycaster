@@ -19,6 +19,7 @@
         "math.h": "c",
         "globals.h": "c",
         "stdio.h": "c",
-        "initializer_list": "c"
+        "initializer_list": "c",
+        "stdbool.h": "c"
     }
 }
