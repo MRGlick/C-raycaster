@@ -20,6 +20,7 @@
         "globals.h": "c",
         "stdio.h": "c",
         "initializer_list": "c",
-        "stdbool.h": "c"
+        "stdbool.h": "c",
+        "winsock.h": "c"
     }
 }

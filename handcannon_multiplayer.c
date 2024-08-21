@@ -47,13 +47,19 @@
 // # PACKET TYPES AND STRUCTS
 enum PacketTypes {
     PACKET_UPDATE_PLAYER_ID,
-    PACKET_PLAYER_POS
+    PACKET_PLAYER_POS,
+    PACKET_PLAYER_JOINED
 };
 struct player_pos_packet {
     v2 pos; // 16
     double height; // 8
     int id; // 4
     // 4 padding
+};
+
+struct player_joined_packet {
+    int id;
+    // ... more stuff later
 };
 
 
@@ -594,8 +600,10 @@ Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
 
 // #VAR
 
+int server_client_id_list[MP_MAX_CLIENTS] = {0};
+
 int client_self_id = -1;
-int next_id = 1;
+int next_id = 1234;
 
 double game_speed_duration_timer = 0;
 double game_speed = 1;
@@ -1147,6 +1155,7 @@ void playerTick(double delta) {
     };
 
     MPClient_send(packet, &packet_data);
+    
 
 }
 
@@ -1889,14 +1898,7 @@ void render(double delta) {  // #RENDER
                 }
                 break;
         }
-        //free(rObj);
     }
-
-    // for (int i = 0; i < renderList->length; i++) {
-    //     obj *object = arraylist_get(renderList, i);
-    //     free(object->val);
-    // }
-    // cd_print(true, "");
 
     array_free(renderList);
 
@@ -3941,31 +3943,43 @@ bool is_entity_type(int type) {
 }
 
 void on_player_connect(SOCKET player_socket) {
-    PlayerEntity *player_entity = malloc(sizeof(PlayerEntity));
-    write_to_debug_label(String_from_int(next_id));
-    player_entity->id = next_id++;
+    write_to_debug_label(String_from_int(MP_clients_amount));
+    int player_id = next_id++;
+
+    server_client_id_list[MP_clients_amount - 1] = player_id;
 
     char buf[MP_DEFAULT_BUFFER_SIZE] = {0};
 
     MPPacket packet = {
         .is_broadcast = false,
-        .len = sizeof(player_entity->id),
+        .len = sizeof(player_id),
         .type = PACKET_UPDATE_PLAYER_ID
     };
 
     memcpy(buf, &packet, sizeof(packet));
-    memcpy(buf + sizeof(packet), (void *)&player_entity->id, packet.len);
+    memcpy(buf + sizeof(packet), (void *)&player_id, packet.len);
 
-    send(player_socket, buf, MP_DEFAULT_BUFFER_SIZE, 0);
+    send(player_socket, buf, sizeof(packet) + packet.len, 0);
 
-    player_entity->entity.affected_by_light = true;
-    player_entity->entity.height = 0;
-    player_entity->entity.pos = V2_ZERO;
-    player_entity->entity.size = to_vec(3000);
-    player_entity->entity.sprite = createSprite(false, 0);
-    player_entity->entity.sprite->texture = entityTexture;
+    MPServer_send(
+        (MPPacket){.type = PACKET_PLAYER_JOINED, .len = sizeof(struct player_joined_packet), .is_broadcast = true}, 
+        &player_id
+    );
 
-    add_game_object(player_entity, PLAYER_ENTITY);
+    for (int i = 0; i < MP_clients_amount; i++) {
+        printf("Sending to the dude. ID: %d \n", server_client_id_list[i]);
+
+        struct player_joined_packet packet_data = {.id = server_client_id_list[i]};
+
+        MPPacket packet = {.type = PACKET_PLAYER_JOINED, .len = sizeof(struct player_joined_packet), .is_broadcast = false};
+
+        char bruh[MP_DEFAULT_BUFFER_SIZE] = {0};
+
+        memcpy(bruh, &packet, sizeof(packet));
+        memcpy(bruh + sizeof(packet), &packet_data, packet.len);
+
+        send(player_socket, bruh, sizeof(packet) + packet.len, 0);
+    }
 }
 
 void on_player_disconnect(SOCKET player_socket) {
@@ -3974,11 +3988,25 @@ void on_player_disconnect(SOCKET player_socket) {
 
 void on_server_recv(SOCKET socket, MPPacket packet, void *data) {
 
-    if (packet.is_broadcast) {
-        for (int i = 0; i < gameobjects->length; i++) {
-            MPServer_send(packet, data);
-        }
-    }
+
+    MPServer_send(packet, data);
+}
+
+void client_add_player_entity(int id) {
+    PlayerEntity *player_entity = malloc(sizeof(PlayerEntity));
+
+    player_entity->id = id;
+    player_entity->entity.affected_by_light = true;
+    player_entity->entity.height = 0;
+    player_entity->entity.pos = V2_ZERO;
+    player_entity->entity.size = to_vec(10000);
+    player_entity->entity.sprite = createSprite(false, 0);
+    player_entity->entity.sprite->texture = entityTexture;
+
+    printf("Player joined! ID: %d \n", player_entity->id);
+    write_to_debug_label(String_from_int(player_entity->id));
+
+    add_game_object(player_entity, PLAYER_ENTITY);
 }
 
 void on_client_recv(MPPacket packet, void *data) {
@@ -3987,12 +4015,9 @@ void on_client_recv(MPPacket packet, void *data) {
         client_self_id = *(int *)(data);
         printf("received id: %d \n", client_self_id);
     } else if (packet.type == PACKET_PLAYER_POS) {
-
         struct player_pos_packet packet_data = *(struct player_pos_packet *)data;
 
-        printf("packet<type: %d, id: %d, len: %d> \n", packet.type, packet_data.id, packet.len);
-
-        printf("received pos: %.2f, %.2f \n", packet_data.pos.x, packet_data.pos.y);
+        
 
         if (packet_data.id == client_self_id) {
             return;
@@ -4003,15 +4028,43 @@ void on_client_recv(MPPacket packet, void *data) {
 
             if (object->type == PLAYER_ENTITY) {
                 PlayerEntity *player_entity = object->val;
-                cd_print(true, "current id: %d, desired id: %d \n", player_entity->id, packet_data.id);
                 if (player_entity->id == packet_data.id) {
                     player_entity->entity.pos = packet_data.pos;
-                    player_entity->entity.height = packet_data.height;
-                    printf("found IDeal player! \n");
-                    break;
+                    player_entity->entity.height = packet_data.height + player_entity->entity.size.y / 2;
+                    return;
                 }
             }
+
+
         }
+        
+        client_add_player_entity(packet_data.id);
+    
+    } else if (packet.type == PACKET_PLAYER_JOINED) {
+
+        struct player_joined_packet packet_data = *(struct player_joined_packet *)data;
+
+        printf("packet id: %d \n", packet_data.id);
+
+        if (!packet.is_broadcast) {
+            printf("Its the thing. \n");
+        }
+
+        if (packet_data.id == client_self_id) {
+            return;
+        }
+
+
+        for (int i = 0; i < gameobjects->length; i++) {
+            obj *game_object = arraylist_get(gameobjects, i);
+            if (game_object->type == PLAYER_ENTITY) {
+                if (((PlayerEntity *)game_object->val)->id == *(int *)data) return;
+            }
+        }
+
+
+
+        
     }
     
     

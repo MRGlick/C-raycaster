@@ -311,8 +311,6 @@ bool UIComponent_is_visible(UIComponent *component) {
 }
 
 void UILabel_update(UIComponent *component) {
-    
-    printf("Updated! \n");
 
     UILabel *label = component;
     

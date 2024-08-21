@@ -8,11 +8,12 @@
 #include <winsock.h>
 
 #define MP_DEFAULT_BUFFER_SIZE 1024
+#define MP_MAX_CLIENTS 100
 
 int MP_SERVER_PORT = 1155;
 char *MP_SERVER_IP = "127.0.0.1";
 
-typedef struct MPPacket {
+typedef struct MPPacket { // 12 bytes
     int len;
     int type;
     bool is_broadcast;
@@ -21,7 +22,7 @@ typedef struct MPPacket {
 SOCKET MPClient_socket;
 SOCKET MPServer_socket;
 
-SOCKET MP_clients[100];
+SOCKET MP_clients[MP_MAX_CLIENTS];
 int MP_clients_amount = 0;
 
 void (*_MP_client_handle_recv)(MPPacket, void *) = NULL;
@@ -31,6 +32,13 @@ void (*_MP_on_client_disconnected)(SOCKET) = NULL;
 
 
 DWORD WINAPI _MPClient_handle_received_data(void *data);
+
+void MP_print_hex(const unsigned char *buf, int len) {
+    for (int i = 0; i < len; i++) {
+        printf(" %02X, ", buf[i]);
+    }
+    printf("\n");
+}
 
 void MPClient_send(MPPacket packet, void *data) {
 
@@ -44,7 +52,9 @@ void MPClient_send(MPPacket packet, void *data) {
     memcpy(buff, &packet, sizeof(packet));
     memcpy(buff + sizeof(packet), data, packet.len);
 
-    send(MPClient_socket, &packet, MP_DEFAULT_BUFFER_SIZE, 0);
+    v2 pos = *(v2 *)(buff + sizeof(packet));
+
+    send(MPClient_socket, buff, packet.len + sizeof(MPPacket), 0);
 }
 
 void MP_init(const int port) {
@@ -85,34 +95,43 @@ void MPClient(const char *ip) {
 DWORD WINAPI _MPClient_handle_received_data(void *data) {
     SOCKET client_socket = (SOCKET)data;
 
-    char receive_buffer[MP_DEFAULT_BUFFER_SIZE] = {0};
+    
     
     while (TRUE) {
+        
+        char receive_buffer[MP_DEFAULT_BUFFER_SIZE] = {0};
 
-        recv(client_socket, receive_buffer, MP_DEFAULT_BUFFER_SIZE, 0);
+        int bytes_received = recv(client_socket, receive_buffer, MP_DEFAULT_BUFFER_SIZE, 0);
 
-        MPPacket *packet = receive_buffer;
-        // process packet from server...
-        if (_MP_client_handle_recv != NULL) {
-            _MP_client_handle_recv(*packet, receive_buffer + sizeof(MPPacket));
+        if (bytes_received > 0) {
+            MPPacket *packet = receive_buffer;
+            // process packet from server...
+            if (_MP_client_handle_recv != NULL) {
+                _MP_client_handle_recv(*packet, receive_buffer + sizeof(MPPacket));
+            }
         }
+
+        
     }
 }
 
 DWORD WINAPI _MPServer_handle_client(void *data) {
     SOCKET client_socket = (SOCKET)data;
 
+    
+    MP_clients[MP_clients_amount++] = client_socket;
+   
+    
     if (_MP_on_client_connected != NULL) {
         _MP_on_client_connected(client_socket);
     }
-    
-    MP_clients[MP_clients_amount++] = client_socket;
-    
 
 
-    char receive_buffer[MP_DEFAULT_BUFFER_SIZE] = {0};
 
     while (TRUE) {
+        
+        char receive_buffer[MP_DEFAULT_BUFFER_SIZE] = {0};
+        
         int result = recv(client_socket, receive_buffer, MP_DEFAULT_BUFFER_SIZE, 0);
 
         if (result <= 0) {
@@ -123,9 +142,11 @@ DWORD WINAPI _MPServer_handle_client(void *data) {
             } else {
                 printf("Client disconnected! \n");
             }
+
             if (_MP_on_client_disconnected != NULL) {
                 _MP_on_client_disconnected(client_socket);
             }
+
             return result; 
         }
 
@@ -152,8 +173,19 @@ void MPServer_send(MPPacket packet, void *data) {
     memcpy(buf + sizeof(packet), data, packet.len);
 
     for (int i = 0; i < MP_clients_amount; i++) {
-        send(MP_clients[i], buf, MP_DEFAULT_BUFFER_SIZE, 0);
+        send(MP_clients[i], buf, packet.len + sizeof(MPPacket), 0);
     }
+}
+
+void MPServer_send_to(MPPacket packet, void *data, SOCKET target) {
+    char buf[MP_DEFAULT_BUFFER_SIZE] = {0};
+
+    memcpy(buf, &packet, sizeof(packet));
+
+    memcpy(buf + sizeof(packet), data, packet.len);
+
+    send(target, buf, packet.len + sizeof(MPPacket), 0);
+    
 }
 
 DWORD WINAPI _MPServer(void *data) {
