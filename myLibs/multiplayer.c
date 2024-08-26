@@ -88,7 +88,7 @@ DWORD WINAPI _MPClient(void *ip) {
     CloseHandle(h);
 }
 
-void MPClient(const char *ip) {
+void MPClient(char *ip) {
     HANDLE h = CreateThread(NULL, 0, _MPClient, ip, 0, NULL);
     CloseHandle(h);
 }

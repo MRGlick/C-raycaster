@@ -6,8 +6,8 @@ import zipfile
 
 
 # Define the names of the folders and files to be copied
-folders_to_copy = ["Sounds", "Textures", "Levels"]
-files_to_copy = ["SDL2.dll", "SDL2_ttf.dll", "SDL2_gpu.dll", "handcannon.exe"]
+folders_to_copy = ["Sounds", "Textures", "Levels", "Shaders"]
+files_to_copy = ["SDL2.dll", "SDL2_ttf.dll", "SDL2_gpu.dll", "handcannon_multiplayer.exe", "FFFFORWA.TTF", "run_as_server.bat"]
 
 # Define the name of the export folder and the zip file
 export_folder = "export"

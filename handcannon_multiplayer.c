@@ -8,12 +8,10 @@
 #include "mystring.c"
 #include "multiplayer.c"
 
-// SDL_Renderer *renderer;
-// SDL_Window *window;
 
 // #DEFINITIONS
 
-#define SERVER_IP "127.0.0.1"
+#define SERVER_IP "84.95.67.205"
 #define SERVER_PORT 1155
 #define TPS 300
 #define WINDOW_WIDTH 1024
@@ -24,8 +22,6 @@
 #define Y_SENSITIVITY .8
 #define COLOR_BLACK \
     (SDL_Color) { 0, 0, 0 }
-#define TRANSPARENT \
-    (SDL_Color) { 0, 0, 0, 0 }
 #define RENDER_DISTANCE 350
 #define WALL_HEIGHT 30
 #define WALL_HEIGHT_MULTIPLIER 2
@@ -34,6 +30,7 @@
 #define MAX_LIGHT 9
 #define BAKED_LIGHT_RESOLUTION 36
 #define BAKED_LIGHT_CALC_RESOLUTION 8
+#define CLIENT_UPDATE_RATE 20
 
 #define PARTICLE_GRAVITY -50000
 
@@ -636,7 +633,7 @@ double loading_progress = 0;
 BakedLightColor baked_light_grid[TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION][TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION];
 bool fullscreen = false;
 bool running = true;
-arraylist *gameobjects;
+arraylist *gameobjects = NULL;
 Player *player = NULL;
 bool keyPressArr[26];
 bool render_debug = false;
@@ -652,9 +649,9 @@ double tanHalfFOV;
 double tanHalfStartFOV;
 double ambient_light = 0.5;
 int floorRenderStart;
-int **levelTileMap;
-int **floorTileMap;
-int **ceilingTileMap;
+int **levelTileMap = NULL;
+int **floorTileMap = NULL;
+int **ceilingTileMap = NULL;
 const int tileSize = WINDOW_WIDTH / 30;
 double realFps;
 bool isCameraShaking = false;
@@ -710,9 +707,6 @@ int main(int argc, char *argv[]) {
     gameobjects = create_arraylist(10);
 
     init_player(to_vec(500));
-    if (player->collider == NULL) {
-        exit(1934);
-    }
 
     add_game_object(player, PLAYER);
 
@@ -723,20 +717,23 @@ int main(int argc, char *argv[]) {
 
     init();
     
+    //printf("Reached after init");
     // loading_map = true;
     // generate_dungeon();
     // load_dungeon();
     // loading_map = false;
 
-    if (!strcmp(argv[1], "join")) {
-        printf("joining \n");
-        MPClient(SERVER_IP);
-    } else {
+    if (argc == 2 && !strcmp(argv[1], "server")) {
         printf("creating server \n");
         printf("'%s' \n", argv[1]);
         MPServer();
         MPClient(SERVER_IP); // host and do the thing
+    } else {
+        printf("joining \n");
+        MPClient(SERVER_IP);
     }
+
+    //printf("Reached after server client shit \n");
 
     u64 tick_timer = 0, render_timer = 0;
     u64 last_time = SDL_GetTicks64();
@@ -892,10 +889,6 @@ void init() {  // #INIT
     floorTexture2 = load_texture("Textures/floor2.png");
     ceilingTexture = load_texture("Textures/ceiling.png");
     ceilingLightTexture = load_texture("Textures/ceiling_light.png");
-
-    init_tilemap(&levelTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    init_tilemap(&floorTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    init_tilemap(&ceilingTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
 
     tanHalfFOV = tan(deg_to_rad(fov / 2));
     tanHalfStartFOV = tan(deg_to_rad(startFov / 2));
@@ -1075,6 +1068,8 @@ v2 get_key_vector(SDL_Keycode k1, SDL_Keycode k2, SDL_Keycode k3, SDL_Keycode k4
 
 void playerTick(double delta) {
 
+    static double update_pos_timer = 1.0 / CLIENT_UPDATE_RATE;
+
     if (player->collider == NULL) {
         exit(12);
     }
@@ -1089,7 +1084,7 @@ void playerTick(double delta) {
 
 
     player->height_vel -= 750 * delta;
-    player->height += player->height_vel;
+    player->height += player->height_vel * (delta * 144);
     if (player->height > get_max_height() - player->tallness * 0.2) {
         player->height_vel = 0;
     }
@@ -1169,19 +1164,26 @@ void playerTick(double delta) {
         player->pos = v2_add(player->pos, v2_mul(finalVel, to_vec(delta)));
     
     
-    struct player_pos_packet packet_data = {
-        .pos = player->pos,
-        .height = player->height,
-        .id = client_self_id
-    };
 
-    MPPacket packet = {
-        .type = PACKET_PLAYER_POS,
-        .len = sizeof(packet_data),
-        .is_broadcast = true
-    };
+    update_pos_timer -= delta;
+    if (update_pos_timer <= 0) {
+        update_pos_timer = 1.0 / CLIENT_UPDATE_RATE;
+        struct player_pos_packet packet_data = {
+            .pos = player->pos,
+            .height = player->height,
+            .id = client_self_id
+        };
 
-    MPClient_send(packet, &packet_data);
+        MPPacket packet = {
+            .type = PACKET_PLAYER_POS,
+            .len = sizeof(packet_data),
+            .is_broadcast = true
+        };
+
+        MPClient_send(packet, &packet_data);
+    }
+
+    
     
 
 }
@@ -1223,6 +1225,8 @@ void objectTick(void *obj, int type, double delta) {
 
 // #TICK
 void tick(double delta) {
+
+    //printf("tick start");
 
     if (loading_map) {
         init_loading_screen();
@@ -1901,6 +1905,8 @@ void render(double delta) {  // #RENDER
     if (loading_map) {
         return;
     }
+
+    //printf("render start \n");
 
     GPU_Clear(screen);
     GPU_Clear(hud);
@@ -2818,6 +2824,23 @@ BakedLightColor _lerp_baked_light_color(BakedLightColor a, BakedLightColor b, do
 
 void bake_lights() {
    
+    bool has_lights = false;
+
+    for (int i = 0; i < gameobjects->length; i++) {
+        obj *object = arraylist_get(gameobjects, i);
+
+        if (object->type == LIGHT_POINT) {
+            has_lights = true;
+            break;
+        }
+    }
+
+    if (!has_lights) {
+        return;
+    }
+
+
+
     init_loading_screen();
 
     const int CALC_RES = BAKED_LIGHT_CALC_RESOLUTION; // directly affects performance!
