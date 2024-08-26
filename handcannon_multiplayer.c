@@ -710,6 +710,9 @@ int main(int argc, char *argv[]) {
     gameobjects = create_arraylist(10);
 
     init_player(to_vec(500));
+    if (player->collider == NULL) {
+        exit(1934);
+    }
 
     add_game_object(player, PLAYER);
 
@@ -1072,6 +1075,10 @@ v2 get_key_vector(SDL_Keycode k1, SDL_Keycode k2, SDL_Keycode k3, SDL_Keycode k4
 
 void playerTick(double delta) {
 
+    if (player->collider == NULL) {
+        exit(12);
+    }
+
     //String height_str = String_from_double(player->height, 2);
 
     //write_to_debug_label(height_str);
@@ -1217,14 +1224,21 @@ void objectTick(void *obj, int type, double delta) {
 // #TICK
 void tick(double delta) {
 
-    // if (client_dungeon_seed == -1) {
-    //     client_dungeon_seed_request_timer -= delta;
-    //     if (client_dungeon_seed_request_timer <= 0) {
-    //         MPClient_send((MPPacket){.type = PACKET_REQUEST_DUNGEON_SEED, .len = 0, .is_broadcast = false}, NULL);
-    //         client_dungeon_seed_request_timer = 0.5;
-    //     }
-    //     return;
-    // }
+    if (loading_map) {
+        init_loading_screen();
+        generate_dungeon();
+        update_loading_progress(0.1);
+        load_dungeon();
+        loading_map = false;
+    }
+
+    if (client_dungeon_seed == -1) {
+        client_dungeon_seed_request_timer -= delta;
+        if (client_dungeon_seed_request_timer <= 0) {
+            MPClient_send((MPPacket){.type = PACKET_REQUEST_DUNGEON_SEED, .len = 0, .is_broadcast = false}, NULL);
+            client_dungeon_seed_request_timer = 0.5;
+        }
+    }
 
 
     if (game_speed_duration_timer <= 0) {
@@ -1884,6 +1898,10 @@ void drawSkybox() {
 
 void render(double delta) {  // #RENDER
 
+    if (loading_map) {
+        return;
+    }
+
     GPU_Clear(screen);
     GPU_Clear(hud);
 
@@ -1973,6 +1991,11 @@ void init_player(v2 pos) {
     player->collider = malloc(sizeof(CircleCollider));
     player->collider->radius = 5;
     player->collider->pos = player->pos;
+
+    if (player->collider == NULL) {
+        exit(-123456789);
+    }
+
     player->maxHealth = 10;
     player->health = player->maxHealth;
     player->tallness = 11000;
@@ -2226,14 +2249,15 @@ void reset_tilemap(int ***gridPtr, int cols, int rows) {
 
 void clearLevel() {
 
-    for (int i = 0; i < gameobjects->length; i++) {
+    for (int i = gameobjects->length - 1; i >= 0; i--) {
         obj *object = arraylist_get(gameobjects, i);
-        freeObject(object->val, object->type);
+
+        if (object->type == PLAYER) {
+            continue;
+        }
+
+        remove_game_object(object->val, object->type);
     }
-
-    arraylist_clear(gameobjects);
-
-    player = NULL;
 }
 
 void spawn_floor_light(v2 pos) {
@@ -2257,12 +2281,7 @@ void spawn_ceiling_light(v2 pos) {
 void place_entity(v2 pos, int type) {
     switch (type) {
         case (int)P_PLAYER:
-            if (player == NULL) {
-                init_player(pos);
-            } else {
-                player->pos = pos;
-            }
-            add_game_object(player, PLAYER);
+            player->pos = pos;
             break;
     }
 }
@@ -3677,6 +3696,8 @@ void generate_room_recursive(Room *room_ptr, bool visited[DUNGEON_SIZE][DUNGEON_
 
 void generate_dungeon() {
     
+    srand(client_dungeon_seed);
+
     bool visited[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
 
 
@@ -3727,7 +3748,6 @@ void load_room(Room *room_ptr) {
     int data[data_count];
 
     fread(data, sizeof(int), data_count, fh);
-
     int data_ptr = 0;
 
     int offset_r = room.room_idx.y * ROOM_HEIGHT;
@@ -4132,8 +4152,6 @@ void on_client_recv(MPPacket packet, void *data) {
 
         
     } else if (packet.type == PACKET_DUNGEON_SEED) {
-        
-        return;
 
         if (client_dungeon_seed != -1) {
             return;
@@ -4147,16 +4165,11 @@ void on_client_recv(MPPacket packet, void *data) {
 
         srand(client_dungeon_seed);
 
-        while (loading_map) {
-            SDL_Delay(10);
-        }
-
         loading_map = true;
-        init_loading_screen();
-        generate_dungeon();
-        update_loading_progress(0.1);
-        load_dungeon();
-        loading_map = false;
+        // init_loading_screen();
+        // generate_dungeon();
+        // update_loading_progress(0.1);
+        // load_dungeon();
     }
     
     
