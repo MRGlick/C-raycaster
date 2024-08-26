@@ -12,6 +12,7 @@
 
 int MP_SERVER_PORT = 1155;
 char *MP_SERVER_IP = "127.0.0.1";
+bool MP_is_server = false;
 
 typedef struct MPPacket { // 12 bytes
     int len;
@@ -219,6 +220,7 @@ DWORD WINAPI _MPServer(void *data) {
 }
 
 void MPServer() {
+    MP_is_server = true;
     HANDLE h = CreateThread(NULL, 0, _MPServer, NULL, 0, NULL);
     CloseHandle(h);
 }

@@ -48,8 +48,15 @@
 enum PacketTypes {
     PACKET_UPDATE_PLAYER_ID,
     PACKET_PLAYER_POS,
-    PACKET_PLAYER_JOINED
+    PACKET_PLAYER_JOINED,
+    PACKET_DUNGEON_SEED,
+    PACKET_REQUEST_DUNGEON_SEED
 };
+
+struct dungeon_seed_packet {
+    long seed;
+};
+
 struct player_pos_packet {
     v2 pos; // 16
     double height; // 8
@@ -337,6 +344,8 @@ typedef struct Room {
 
 // #FUNC
 
+void init_player(v2 pos);
+
 void on_client_recv(MPPacket packet, void *data);
 
 void on_server_recv(SOCKET socket, MPPacket packet, void *data);
@@ -576,7 +585,6 @@ GPU_Image *ceilingLightTexture;
 
 // #SPRITES
 Sprite *dash_anim_sprite;
-Sprite *animatedWallSprite;
 Sprite *leftHandSprite;
 
 // #SOUNDS
@@ -599,6 +607,13 @@ Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
 
 
 // #VAR
+
+double client_dungeon_seed_request_timer = 0;
+
+bool loading_map = false;
+
+long server_dungeon_seed = -1;
+long client_dungeon_seed = -1;
 
 int server_client_id_list[MP_MAX_CLIENTS] = {0};
 
@@ -690,6 +705,26 @@ int main(int argc, char *argv[]) {
     _MP_on_client_disconnected = on_player_disconnect;
     _MP_server_handle_recv = on_server_recv;
 
+    
+
+    gameobjects = create_arraylist(10);
+
+    init_player(to_vec(500));
+
+    add_game_object(player, PLAYER);
+
+    reset_tilemap(&levelTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    reset_tilemap(&floorTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    reset_tilemap(&ceilingTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    bake_lights();
+
+    init();
+    
+    // loading_map = true;
+    // generate_dungeon();
+    // load_dungeon();
+    // loading_map = false;
+
     if (!strcmp(argv[1], "join")) {
         printf("joining \n");
         MPClient(SERVER_IP);
@@ -699,10 +734,6 @@ int main(int argc, char *argv[]) {
         MPServer();
         MPClient(SERVER_IP); // host and do the thing
     }
-
-    gameobjects = create_arraylist(10);
-
-    init();
 
     u64 tick_timer = 0, render_timer = 0;
     u64 last_time = SDL_GetTicks64();
@@ -877,11 +908,6 @@ void init() {  // #INIT
 
     crosshair = load_texture("Textures/crosshair.png");
 
-    animatedWallSprite = createSprite(true, 1);
-    animatedWallSprite->animations[0] = create_animation(17, 0, wallFrames);
-    animatedWallSprite->animations[0].fps = 10;
-    spritePlayAnim(animatedWallSprite, 0);
-
     leftHandSprite = createSprite(true, 2);
     GPU_Image **default_hand = malloc(sizeof(GPU_Image *)); 
     default_hand[0] = load_texture("Textures/rightHandAnim/rightHandAnim6.png");
@@ -913,12 +939,6 @@ void init() {  // #INIT
     skybox_texture = load_texture("Textures/skybox.png");
 
     //SDL_RenderSetLogicalSize(SDL_GetRenderer(get_window()), WINDOW_WIDTH, WINDOW_HEIGHT);
-
-    init_loading_screen();
-    generate_dungeon();
-    update_loading_progress(0.1);
-    load_dungeon();
-
 
 }  // #INIT END
 
@@ -1197,6 +1217,16 @@ void objectTick(void *obj, int type, double delta) {
 // #TICK
 void tick(double delta) {
 
+    // if (client_dungeon_seed == -1) {
+    //     client_dungeon_seed_request_timer -= delta;
+    //     if (client_dungeon_seed_request_timer <= 0) {
+    //         MPClient_send((MPPacket){.type = PACKET_REQUEST_DUNGEON_SEED, .len = 0, .is_broadcast = false}, NULL);
+    //         client_dungeon_seed_request_timer = 0.5;
+    //     }
+    //     return;
+    // }
+
+
     if (game_speed_duration_timer <= 0) {
         game_speed = 1;
     } else {
@@ -1232,9 +1262,6 @@ void tick(double delta) {
     }
     cameraOffset = v2_lerp(cameraOffset, to_vec(0), 0.2);
 
-    
-
-    animationTick(&animatedWallSprite->animations[animatedWallSprite->currentAnimationIdx], delta);
     spriteTick(leftHandSprite, delta);
 
     for (int i = 0; i < gameobjects->length; i++) {
@@ -1281,7 +1308,8 @@ v2 getRayDirByIdx(int i) {
     v2 temp = (v2){1, idx};
 
     temp = v2_normalize(temp);
-    v2 rayDir = v2_dir((v2){0, 0}, v2_rotate(temp, deg_to_rad(player->angle)));
+    Player *pref = player;
+    v2 rayDir = v2_dir((v2){0, 0}, v2_rotate(temp, deg_to_rad(pref->angle)));
     return rayDir;
 }
 
@@ -2184,6 +2212,11 @@ void init_tilemap(int ***gridPtr, int cols, int rows) {
 }
 
 void reset_tilemap(int ***gridPtr, int cols, int rows) {
+
+    if (*gridPtr == NULL) {
+        init_tilemap(gridPtr, cols, rows);
+    }
+
     for (int r = 0; r < rows; r++) {
         for (int c = 0; c < cols; c++) {
             (*gridPtr)[r][c] = -1;
@@ -2201,7 +2234,6 @@ void clearLevel() {
     arraylist_clear(gameobjects);
 
     player = NULL;
-
 }
 
 void spawn_floor_light(v2 pos) {
@@ -2225,7 +2257,11 @@ void spawn_ceiling_light(v2 pos) {
 void place_entity(v2 pos, int type) {
     switch (type) {
         case (int)P_PLAYER:
-            init_player(pos);
+            if (player == NULL) {
+                init_player(pos);
+            } else {
+                player->pos = pos;
+            }
             add_game_object(player, PLAYER);
             break;
     }
@@ -3862,6 +3898,11 @@ void carve_room_paths() {
 }
 
 void load_dungeon() {
+
+    static int times_called = 0;
+    times_called += 1;
+    printf("times called: %d \n", times_called);
+
     clearLevel();
 
     reset_tilemap(&levelTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
@@ -3980,6 +4021,24 @@ void on_player_connect(SOCKET player_socket) {
 
         send(player_socket, bruh, sizeof(packet) + packet.len, 0);
     }
+
+
+    MPPacket seed_packet = {
+        .is_broadcast = false,
+        .len = sizeof(struct dungeon_seed_packet),
+        .type = PACKET_DUNGEON_SEED
+    };
+
+    if (server_dungeon_seed == -1) {
+        server_dungeon_seed = rand();
+    }
+
+    struct dungeon_seed_packet seed_packet_data = {
+        .seed = server_dungeon_seed
+    };
+
+    MPServer_send_to(seed_packet, &seed_packet_data, player_socket);
+    printf("Sent seed to client. \n");
 }
 
 void on_player_disconnect(SOCKET player_socket) {
@@ -3988,6 +4047,13 @@ void on_player_disconnect(SOCKET player_socket) {
 
 void on_server_recv(SOCKET socket, MPPacket packet, void *data) {
 
+    if (packet.type == PACKET_REQUEST_DUNGEON_SEED) {
+        struct dungeon_seed_packet packet_data = {.seed = server_dungeon_seed};
+        MPPacket seed_packet = {.type = PACKET_DUNGEON_SEED, .len = sizeof(packet_data), .is_broadcast = false};
+
+        MPServer_send_to(seed_packet, &packet_data, socket);
+        return;
+    }
 
     MPServer_send(packet, data);
 }
@@ -4010,6 +4076,7 @@ void client_add_player_entity(int id) {
 }
 
 void on_client_recv(MPPacket packet, void *data) {
+
     if (packet.type == PACKET_UPDATE_PLAYER_ID) {
 
         client_self_id = *(int *)(data);
@@ -4034,10 +4101,9 @@ void on_client_recv(MPPacket packet, void *data) {
                     return;
                 }
             }
-
-
         }
         
+        // player was not found
         client_add_player_entity(packet_data.id);
     
     } else if (packet.type == PACKET_PLAYER_JOINED) {
@@ -4065,6 +4131,32 @@ void on_client_recv(MPPacket packet, void *data) {
 
 
         
+    } else if (packet.type == PACKET_DUNGEON_SEED) {
+        
+        return;
+
+        if (client_dungeon_seed != -1) {
+            return;
+        }
+
+        printf("Received dungeon seed. \n");
+
+        struct dungeon_seed_packet *packet_data = data;
+
+        client_dungeon_seed = packet_data->seed;
+
+        srand(client_dungeon_seed);
+
+        while (loading_map) {
+            SDL_Delay(10);
+        }
+
+        loading_map = true;
+        init_loading_screen();
+        generate_dungeon();
+        update_loading_progress(0.1);
+        load_dungeon();
+        loading_map = false;
     }
     
     
