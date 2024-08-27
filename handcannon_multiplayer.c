@@ -11,6 +11,8 @@
 
 // #DEFINITIONS
 
+#define DEBUG_FLAG false
+
 #define SERVER_IP "84.95.67.205"
 #define SERVER_PORT 1155
 #define TPS 300
@@ -47,7 +49,14 @@ enum PacketTypes {
     PACKET_PLAYER_POS,
     PACKET_PLAYER_JOINED,
     PACKET_DUNGEON_SEED,
-    PACKET_REQUEST_DUNGEON_SEED
+    PACKET_REQUEST_DUNGEON_SEED,
+    PACKET_ABILITY_SHOOT
+};
+
+struct ability_shoot_packet {
+    int hit_id; // -1 if noone was hit
+    v2 hit_pos;
+    double hit_height;
 };
 
 struct dungeon_seed_packet {
@@ -225,6 +234,8 @@ typedef struct Entity {
 
 typedef struct PlayerEntity {
     Entity entity;
+    v2 desired_pos;
+    double desired_height;
     int id;
 } PlayerEntity;
 
@@ -340,6 +351,8 @@ typedef struct Room {
 } Room;
 
 // #FUNC
+
+void player_entity_tick(PlayerEntity *player_entity, double delta);
 
 void init_player(v2 pos);
 
@@ -723,7 +736,12 @@ int main(int argc, char *argv[]) {
     // load_dungeon();
     // loading_map = false;
 
-    if (argc == 2 && !strcmp(argv[1], "server")) {
+    bool is_server = argc == 2 && !strcmp(argv[1], "server");
+    if (DEBUG_FLAG) {
+        is_server = !is_server;
+    }
+
+    if (is_server) {
         printf("creating server \n");
         printf("'%s' \n", argv[1]);
         MPServer();
@@ -1145,12 +1163,14 @@ void playerTick(double delta) {
 
     double movement = v2_length(finalVel) * delta;
 
-    RayCollisionData ray = castRay(player->pos, playerForward);
+    v2 movement_dir = v2_normalize(finalVel);
+
+    RayCollisionData ray = castRay(player->pos, movement_dir);
     if (ray.hit) {
         double dist = v2_distance(ray.startpos, ray.collpos);
         if (dist < movement) {
             move_without_ray = false;
-            player->pos = v2_add(player->pos, v2_mul(playerForward, to_vec(dist - 10)));
+            player->pos = v2_add(player->pos, v2_mul(movement_dir, to_vec(dist - 10)));
         }
     }
     
@@ -1218,6 +1238,9 @@ void objectTick(void *obj, int type, double delta) {
             break;
         case (int)BULLET:
             bulletTick(obj, delta);
+            break;
+        case (int)PLAYER_ENTITY:
+            player_entity_tick(obj, delta);
             break;
         
     }
@@ -4111,6 +4134,8 @@ void client_add_player_entity(int id) {
     player_entity->entity.size = to_vec(10000);
     player_entity->entity.sprite = createSprite(false, 0);
     player_entity->entity.sprite->texture = entityTexture;
+    player_entity->desired_pos = V2_ZERO;
+    player_entity->desired_height = 0;
 
     printf("Player joined! ID: %d \n", player_entity->id);
     write_to_debug_label(String_from_int(player_entity->id));
@@ -4125,9 +4150,8 @@ void on_client_recv(MPPacket packet, void *data) {
         client_self_id = *(int *)(data);
         printf("received id: %d \n", client_self_id);
     } else if (packet.type == PACKET_PLAYER_POS) {
-        struct player_pos_packet packet_data = *(struct player_pos_packet *)data;
-
         
+        struct player_pos_packet packet_data = *(struct player_pos_packet *)data;
 
         if (packet_data.id == client_self_id) {
             return;
@@ -4139,8 +4163,8 @@ void on_client_recv(MPPacket packet, void *data) {
             if (object->type == PLAYER_ENTITY) {
                 PlayerEntity *player_entity = object->val;
                 if (player_entity->id == packet_data.id) {
-                    player_entity->entity.pos = packet_data.pos;
-                    player_entity->entity.height = packet_data.height + player_entity->entity.size.y / 2;
+                    player_entity->desired_pos = packet_data.pos;
+                    player_entity->desired_height = packet_data.height + player_entity->entity.size.y / 2;
                     return;
                 }
             }
@@ -4149,31 +4173,6 @@ void on_client_recv(MPPacket packet, void *data) {
         // player was not found
         client_add_player_entity(packet_data.id);
     
-    } else if (packet.type == PACKET_PLAYER_JOINED) {
-
-        struct player_joined_packet packet_data = *(struct player_joined_packet *)data;
-
-        printf("packet id: %d \n", packet_data.id);
-
-        if (!packet.is_broadcast) {
-            printf("Its the thing. \n");
-        }
-
-        if (packet_data.id == client_self_id) {
-            return;
-        }
-
-
-        for (int i = 0; i < gameobjects->length; i++) {
-            obj *game_object = arraylist_get(gameobjects, i);
-            if (game_object->type == PLAYER_ENTITY) {
-                if (((PlayerEntity *)game_object->val)->id == *(int *)data) return;
-            }
-        }
-
-
-
-        
     } else if (packet.type == PACKET_DUNGEON_SEED) {
 
         if (client_dungeon_seed != -1) {
@@ -4189,13 +4188,14 @@ void on_client_recv(MPPacket packet, void *data) {
         srand(client_dungeon_seed);
 
         loading_map = true;
-        // init_loading_screen();
-        // generate_dungeon();
-        // update_loading_progress(0.1);
-        // load_dungeon();
     }
     
     
+}
+
+void player_entity_tick(PlayerEntity *player_entity, double delta) {
+    player_entity->entity.pos = v2_lerp(player_entity->entity.pos, player_entity->desired_pos, 0.1 * (delta * 144));
+    player_entity->entity.height = lerp(player_entity->entity.height, player_entity->desired_height, 0.1 * (delta * 144));
 }
 
 
