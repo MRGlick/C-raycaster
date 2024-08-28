@@ -11,9 +11,9 @@
 
 // #DEFINITIONS
 
-#define DEBUG_FLAG false
+#define DEBUG_FLAG true
 
-#define SERVER_IP "84.95.67.205"
+#define SERVER_IP "127.0.0.1"
 #define SERVER_PORT 1155
 #define TPS 300
 #define WINDOW_WIDTH 1024
@@ -54,6 +54,7 @@ enum PacketTypes {
 };
 
 struct ability_shoot_packet {
+    int shooter_id;
     int hit_id; // -1 if noone was hit
     v2 hit_pos;
     double hit_height;
@@ -3315,58 +3316,39 @@ void ability_secondary_shoot_activate(Ability *ability) {
     player->vel = v2_mul(playerForward, to_vec(-5));
 }
 
-void _shoot(double spread) { // the sound isnt attacked bc shotgun makes eargasm
+void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
 
-    double pitch = player->pitch + randf_range(1000 * -spread, 1000 * spread);
+    double pitch = player->pitch;// + randf_range(1000 * -spread, 1000 * spread);
 
     
     shakeCamera(10, 4, true, 1);
     spritePlayAnim(leftHandSprite, 1);
 
-    v2 shoot_dir = v2_rotate(playerForward, randf_range(-PI * spread, PI * spread));
+    v2 shoot_dir = playerForward;
 
     v2 effect_size = to_vec(8000);
 
     RayCollisionData ray_data = castRayForAll(player->pos, shoot_dir);
 
-    double effect_height = get_max_height() * 0.5;
-    
-    double max_distance;
+    v2 hit_pos = screenToFloor((v2){RESOLUTION_X / 2, WINDOW_HEIGHT / 2 + pitch});
+    double distance_to_hit_pos = v2_distance(hit_pos, player->pos);
+    double distance_to_coll_pos = ray_data.hit? v2_distance(ray_data.collpos, player->pos) : 999999999999;
 
-    if (in_range(pitch, -0.01, 0.01)) {
-        max_distance = INFINITY;
+    v2 final_pos;
+    bool is_ceiling = pitch < 0;
+    double final_height = is_ceiling? get_max_height() * 1.5 : get_max_height() * 0.5;
+
+
+    if (distance_to_coll_pos < distance_to_hit_pos) {
+        final_pos = ray_data.collpos;
+        final_height = lerp(final_height, player->height + player->tallness * 0.8, inverse_lerp(distance_to_hit_pos, 0, distance_to_coll_pos));
     } else {
-        double p = abs(pitch); // for debugging
-        max_distance = (WALL_HEIGHT * WINDOW_HEIGHT * WALL_HEIGHT_MULTIPLIER / 2) / p;
+        final_pos = hit_pos;
     }
 
-    if (!ray_data.hit && max_distance == INFINITY) return;
 
-
-    bool hit_ground_or_ceiling = false;
-
-    double distance_to_collpos = v2_distance(player->pos, ray_data.collpos);
-
-    if (distance_to_collpos > max_distance) {
-        effect_height = pitch < 0? get_max_height() * 1.5 : get_max_height() / 2;
-        effect_height -= effect_size.y / 2;
-        hit_ground_or_ceiling = true;
-    }
-
-    if (!hit_ground_or_ceiling) {    
-        effect_height = get_max_height() * 0.625 + -pitch * distance_to_collpos - effect_size.y / 2; // an estimate. wouldnt work well with high spread, but hopefully hard to notice. nvm, works very well.
-    }
-    
-
-    v2 effectPos;
-
-    if (hit_ground_or_ceiling) {
-        effectPos = v2_add(player->pos, v2_mul(shoot_dir, to_vec(max_distance)));
-    } else {
-        effectPos = v2_add(ray_data.collpos, v2_mul(playerForward, to_vec(-4)));
-    }
-
-    Effect *hitEffect = createEffect(effectPos, to_vec(8000), createSprite(true, 1), 1);
+    Effect *hitEffect = createEffect(final_pos, to_vec(8000), createSprite(true, 1), 1);
+    hitEffect->entity.height = final_height - 4000;
 
     if (hitEffect == NULL) {
         printf("hit effect is null \n");
@@ -3377,7 +3359,6 @@ void _shoot(double spread) { // the sound isnt attacked bc shotgun makes eargasm
     
     hitEffect->entity.sprite->animations[0].fps = 12;
     hitEffect->entity.sprite->animations[0].loop = false;
-    hitEffect->entity.height = effect_height;
     hitEffect->entity.affected_by_light = false;
 
     spritePlayAnim(hitEffect->entity.sprite, 0);
@@ -4188,6 +4169,30 @@ void on_client_recv(MPPacket packet, void *data) {
         srand(client_dungeon_seed);
 
         loading_map = true;
+    } else if (packet.type == PACKET_ABILITY_SHOOT) {
+        struct ability_shoot_packet *packet_data = data;
+        
+        if (client_self_id == packet_data->shooter_id) return;
+
+        // create the effect at the pos and height
+        Effect *hitEffect = createEffect(packet_data->hit_pos, to_vec(8000), createSprite(true, 1), 1);
+
+        if (hitEffect == NULL) {
+            printf("hit effect is null \n");
+            return;
+        }
+
+        hitEffect->entity.sprite->animations[0] = create_animation(5, 0, shootHitEffectFrames);
+        
+        hitEffect->entity.sprite->animations[0].fps = 12;
+        hitEffect->entity.sprite->animations[0].loop = false;
+        hitEffect->entity.height = packet_data->hit_height;
+        hitEffect->entity.affected_by_light = false;
+
+        spritePlayAnim(hitEffect->entity.sprite, 0);
+
+        add_game_object(hitEffect, EFFECT);
+
     }
     
     
