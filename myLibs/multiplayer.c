@@ -116,6 +116,21 @@ DWORD WINAPI _MPClient_handle_received_data(void *data) {
     }
 }
 
+void _MPServer_disconnect_client(SOCKET client_socket) {
+    int idx = -1;
+    for (int i = 0; i < MP_clients_amount; i++) {
+        if (MP_clients[i] == client_socket) {
+            idx = i;
+            break;
+        }
+    }
+
+    SOCKET temp = MP_clients[idx];
+    MP_clients[idx] = MP_clients[MP_clients_amount - 1];
+    MP_clients[MP_clients_amount - 1] = temp;
+    MP_clients_amount--;
+}
+
 DWORD WINAPI _MPServer_handle_client(void *data) {
     SOCKET client_socket = (SOCKET)data;
 
@@ -142,6 +157,8 @@ DWORD WINAPI _MPServer_handle_client(void *data) {
                 exit(-12941);
             } else {
                 printf("Client disconnected! \n");
+                _MPServer_disconnect_client(client_socket);
+                
             }
 
             if (_MP_on_client_disconnected != NULL) {

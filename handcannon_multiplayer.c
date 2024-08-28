@@ -50,7 +50,13 @@ enum PacketTypes {
     PACKET_PLAYER_JOINED,
     PACKET_DUNGEON_SEED,
     PACKET_REQUEST_DUNGEON_SEED,
-    PACKET_ABILITY_SHOOT
+    PACKET_ABILITY_SHOOT,
+    PACKET_HOST_LEFT,
+    PACKET_PLAYER_LEFT
+};
+
+struct player_left_packet {
+    int id;
 };
 
 struct ability_shoot_packet {
@@ -73,7 +79,7 @@ struct player_pos_packet {
 
 struct player_joined_packet {
     int id;
-    // ... more stuff later
+    // ... more stuff later, maybe?
 };
 
 
@@ -619,6 +625,8 @@ Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
 
 // #VAR
 
+bool can_exit = false;
+
 double client_dungeon_seed_request_timer = 0;
 
 bool loading_map = false;
@@ -776,9 +784,15 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // SDL_DestroyRenderer(renderer);
+    struct player_left_packet packet_data = {.id = client_self_id};
 
-    // SDL_DestroyWindow(window);
+    MPPacket packet = {.type = PACKET_PLAYER_LEFT, .is_broadcast = true, .len = sizeof(packet_data)};
+
+    MPClient_send(packet, &packet_data);
+
+    while (!can_exit) {
+
+    }
 
     GPU_FreeImage(screen_image);
 
@@ -964,6 +978,7 @@ v2 get_player_forward() {
 void handle_input(SDL_Event event) {
     switch (event.type) {
         case SDL_QUIT:
+
             running = false;
             break;
         case SDL_KEYDOWN:
@@ -3369,7 +3384,7 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
 
     MPPacket packet = {.is_broadcast = true, .len = sizeof(packet_data), .type = PACKET_ABILITY_SHOOT};
 
-    MPServer_send(packet, &packet_data);
+    MPClient_send(packet, &packet_data);
 
 }
 
@@ -4199,6 +4214,35 @@ void on_client_recv(MPPacket packet, void *data) {
 
         add_game_object(hitEffect, EFFECT);
 
+    } else if (packet.type == PACKET_HOST_LEFT) {
+        exit(1);
+
+    } else if (packet.type == PACKET_PLAYER_LEFT) {
+        struct player_left_packet *packet_data = data;
+
+        if (packet_data->id == client_self_id) {
+            if (MP_is_server) {
+                shutdown(MPServer_socket, SD_BOTH);
+                closesocket(MPServer_socket);
+            }
+            shutdown(MPClient_socket, SD_BOTH);
+            closesocket(MPClient_socket);
+            can_exit = true;
+            return;
+        }
+
+        for (int i = 0; i < gameobjects->length; i++) {
+            obj *object = arraylist_get(gameobjects, i);
+
+            if (object->type != PLAYER_ENTITY) continue;
+
+            PlayerEntity *player_entity = object->val;
+
+            if (player_entity->id == packet_data->id) {
+                remove_game_object(player_entity, PLAYER_ENTITY);
+                return;
+            }
+        }
     }
     
     
