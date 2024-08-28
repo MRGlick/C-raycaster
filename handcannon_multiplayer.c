@@ -2517,7 +2517,7 @@ Effect *createEffect(v2 pos, v2 size, Sprite *sprite, double lifeTime) {
 // Todo: add shoot cooldown for base shooting
 void ability_shoot_activate(Ability *ability) {
     play_sound(player_default_shoot, 0.3);
-    _shoot(0.02);
+    _shoot(0);
 }
 
 void effectTick(Effect *effect, double delta) {
@@ -3318,13 +3318,13 @@ void ability_secondary_shoot_activate(Ability *ability) {
 
 void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
 
-    double pitch = player->pitch;// + randf_range(1000 * -spread, 1000 * spread);
+    double pitch = player->pitch + randf_range(1000 * -spread, 1000 * spread);
 
     
     shakeCamera(10, 4, true, 1);
     spritePlayAnim(leftHandSprite, 1);
 
-    v2 shoot_dir = playerForward;
+    v2 shoot_dir = v2_rotate(playerForward, randf_range(-PI * spread, PI * spread));
 
     v2 effect_size = to_vec(8000);
 
@@ -3341,19 +3341,14 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
 
     if (distance_to_coll_pos < distance_to_hit_pos) {
         final_pos = ray_data.collpos;
-        final_height = lerp(final_height, player->height + player->tallness * 0.8, inverse_lerp(distance_to_hit_pos, 0, distance_to_coll_pos));
+        final_height = lerp( get_max_height() * 0.5 + get_player_height(), final_height, inverse_lerp(0, distance_to_hit_pos, distance_to_coll_pos));
     } else {
         final_pos = hit_pos;
     }
 
-
-    Effect *hitEffect = createEffect(final_pos, to_vec(8000), createSprite(true, 1), 1);
-    hitEffect->entity.height = final_height - 4000;
-
-    if (hitEffect == NULL) {
-        printf("hit effect is null \n");
-        return;
-    }
+    double size = 8000;
+    Effect *hitEffect = createEffect(final_pos, to_vec(size), createSprite(true, 1), 1);
+    hitEffect->entity.height = final_height - size / 2;
 
     hitEffect->entity.sprite->animations[0] = create_animation(5, 0, shootHitEffectFrames);
     
