@@ -790,6 +790,12 @@ int main(int argc, char *argv[]) {
 
     MPClient_send(packet, &packet_data);
 
+
+    if (MP_is_server) {
+        MPPacket hl_packet = {.type = PACKET_HOST_LEFT, .len = 0, .is_broadcast = true};
+        MPServer_send(hl_packet, NULL);
+    }
+
     while (!can_exit) {
 
     }
