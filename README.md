@@ -1,4 +1,4 @@
-# C - raycaster
-This project is a traditional and simple raycaster made in C using the SDL2 library for input and graphics. 
-The aim for this project is to be a small shooter where you progress in the levels and defeat the enemies.
-This project is made purely for learning more about C.
+# C - Multiplayer raycaster
+This project was originally made as a simple raycaster with a small scope, but now due to scope creep it's becoming a multiplayer Free-For-All shooter with randomized abilities for me and my friends to play.
+
+This project is written entirely in C (except for the export python script) and it uses SDL2 with SDL_gpu for rendering, input and audio. It also uses SDL_ttf for rendering text, and winsock.h for networking.
