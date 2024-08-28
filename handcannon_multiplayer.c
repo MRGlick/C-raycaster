@@ -11,7 +11,7 @@
 
 // #DEFINITIONS
 
-#define DEBUG_FLAG true
+#define DEBUG_FLAG false
 
 #define SERVER_IP "127.0.0.1"
 #define SERVER_PORT 1155
@@ -770,8 +770,8 @@ int main(int argc, char *argv[]) {
         // render_timer += delta;
         if (tick_timer >= 1000 / TPS) {
             realFps = 1000.0 / tick_timer;
-            tick(paused? 0 : mili_to_sec(tick_timer) * game_speed);
-            render(mili_to_sec(tick_timer));
+            tick(mili_to_sec(tick_timer) * game_speed);
+            render(mili_to_sec(tick_timer) * game_speed);
             tick_timer = 0;
         }
     }
@@ -3360,6 +3360,17 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
 
     add_game_object(hitEffect, EFFECT);
     
+    struct ability_shoot_packet packet_data = {
+        .hit_pos = final_pos,
+        .hit_height = final_height,
+        .shooter_id = client_self_id,
+        .hit_id = -1
+    };
+
+    MPPacket packet = {.is_broadcast = true, .len = sizeof(packet_data), .type = PACKET_ABILITY_SHOOT};
+
+    MPServer_send(packet, &packet_data);
+
 }
 
 void draw_3d_line(v2 pos1, double h1, v2 pos2, double h2) {
