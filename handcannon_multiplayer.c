@@ -11,7 +11,7 @@
 
 // #DEFINITIONS
 
-#define DEBUG_FLAG true
+#define DEBUG_FLAG false
 
 #define SERVER_IP "127.0.0.1"
 #define SERVER_PORT 1155
@@ -52,7 +52,14 @@ enum PacketTypes {
     PACKET_REQUEST_DUNGEON_SEED,
     PACKET_ABILITY_SHOOT,
     PACKET_HOST_LEFT,
-    PACKET_PLAYER_LEFT
+    PACKET_PLAYER_LEFT,
+    PACKET_PLAYER_TOOK_DMG
+};
+
+struct player_took_dmg_packet {
+    int sender_id;
+    int id;
+    double dmg;
 };
 
 struct player_left_packet {
@@ -61,7 +68,6 @@ struct player_left_packet {
 
 struct ability_shoot_packet {
     int shooter_id;
-    int hit_id; // -1 if noone was hit
     v2 hit_pos;
     double hit_height;
 };
@@ -243,6 +249,7 @@ typedef struct PlayerEntity {
     Entity entity;
     v2 desired_pos;
     double desired_height;
+    CircleCollider collider;
     int id;
 } PlayerEntity;
 
@@ -358,6 +365,14 @@ typedef struct Room {
 } Room;
 
 // #FUNC
+
+void send_dmg_packet(int id, double dmg);
+
+void player_entity_take_dmg(PlayerEntity *player_entity, double dmg);
+
+PlayerEntity *find_or_add_player_entity_by_id(int id);
+
+PlayerEntity *find_player_entity_by_id(int id);
 
 void init_textures();
 
@@ -566,6 +581,7 @@ UIComponent *pause_menu;
 UILabel *debug_label;
 
 // #TEXTURES
+GPU_Image *blood_particle;
 GPU_Image **dash_screen_anim;
 GPU_Image *lightmap_image;
 GPU_Image *tilemap_image;
@@ -620,6 +636,7 @@ int bloom_shader;
 GPU_ShaderBlock bloom_shader_block;
 
 // #PARTICLES (the global ones)
+ParticleSpawner *player_hit_particles;
 
 // #ROOMGEN
 Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
@@ -815,7 +832,18 @@ void init() {  // #INIT
 
     //exit(1);
 
-    
+    player_hit_particles = malloc(sizeof(ParticleSpawner));
+    *player_hit_particles = create_particle_spawner(V2_ZERO, 0);
+    player_hit_particles->spread = 2;
+    player_hit_particles->dir = (v2){0.5, 1};
+    player_hit_particles->min_size = to_vec(1000);
+    player_hit_particles->max_size = to_vec(2000);
+    player_hit_particles->min_speed = 70;
+    player_hit_particles->max_speed = 160;
+    player_hit_particles->target = NULL;
+    player_hit_particles->sprite = (Sprite){.isAnimated = false, .texture = blood_particle};
+    player_hit_particles->height_dir = 1;
+
 
     rapidfire_sound = create_sound("Sounds/shotgun_ability.wav");
 
@@ -1400,7 +1428,7 @@ void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affe
 
     GPU_Rect dstRect = {
         screen_pos.x - final_size.x / 2,
-        screen_pos.y - final_size.y,
+        screen_pos.y - final_size.y / 2,
         final_size.x,
         final_size.y
     };
@@ -1927,21 +1955,33 @@ void init_player(v2 pos) {
 }
 
 // CLEAR
-RayCollisionData ray_object(Raycast ray, obj *object) {
+RayCollisionData  ray_object(Raycast ray, obj *object) {
+
+    RayCollisionData ray_data = {0};
 
     switch (object->type) {
         case (int)PLAYER:;
-            RayCollisionData playerRayData = ray_circle(ray, *player->collider);
-            if (playerRayData.hit) {
-                playerRayData.collider = player;
+            ray_data = ray_circle(ray, *player->collider);
+            if (ray_data.hit) {
+                ray_data.collider = player;
+                ray_data.colliderType = PLAYER;
             }
-            return playerRayData;
+            break;
+        case (int)PLAYER_ENTITY:;
+            PlayerEntity *player_entity = object->val;
+            ray_data = ray_circle(ray, player_entity->collider);
+            if (ray_data.hit) {
+                ray_data.collider = player_entity;
+                ray_data.colliderType = PLAYER_ENTITY;
+            }
+            break;
+        default:
+            ray_data.hit = false;
             break;
     }
 
-    RayCollisionData data;
-    data.hit = false;
-    return data;
+   
+    return ray_data;
 }
 
 RayCollisionData castRay(v2 pos, v2 dir) {
@@ -2967,6 +3007,11 @@ void player_take_dmg(double dmg) {
     play_sound(player_default_hurt, 0.5);
     shakeCamera(20, 10, true, 2);
 
+    player_hit_particles->pos = player->pos;
+    player_hit_particles->height = player->height;
+    player_hit_particles->target = NULL;
+    particle_spawner_explode(player_hit_particles);
+
     double progress_to_death = (double)(player->maxHealth - player->health) / player->maxHealth; // when it reaches 1, youre cooked
     vignette_color = (SDL_Color){255 * progress_to_death, 0, 0};
 
@@ -2982,7 +3027,9 @@ void player_die() {
 
 void _player_die() {
     
-    reset_level();
+    player->pos = to_vec(500);
+    player->health = player->maxHealth;
+
 }
 
 void init_loading_screen() {
@@ -3250,13 +3297,29 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
     struct ability_shoot_packet packet_data = {
         .hit_pos = final_pos,
         .hit_height = final_height,
-        .shooter_id = client_self_id,
-        .hit_id = -1
+        .shooter_id = client_self_id
     };
 
     MPPacket packet = {.is_broadcast = true, .len = sizeof(packet_data), .type = PACKET_ABILITY_SHOOT};
 
     MPClient_send(packet, &packet_data);
+
+
+
+    if (ray_data.hit) {
+        if (ray_data.colliderType == PLAYER_ENTITY) {
+
+            PlayerEntity *player_entity = ray_data.collider;
+
+            send_dmg_packet(player_entity->id, 1);
+
+            
+        }
+    }
+
+
+
+
 
 }
 
@@ -3333,7 +3396,7 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
     
     double vel_x = dir.x * speed;
     double vel_y = dir.y * speed;
-    double vel_z = height_dir * speed * 1000; // bc height is different like that
+    double vel_z = height_dir * speed * 3000; // bc height is different like that
 
     particle.vel = (v2){vel_x, vel_y};
     particle.h_vel = vel_z;
@@ -4010,6 +4073,7 @@ void client_add_player_entity(int id) {
     player_entity->entity.sprite->texture = entityTexture;
     player_entity->desired_pos = V2_ZERO;
     player_entity->desired_height = 0;
+    player_entity->collider = (CircleCollider){.radius = 5, .pos = V2_ZERO};
 
     printf("Player joined! ID: %d \n", player_entity->id);
     write_to_debug_label(String_from_int(player_entity->id));
@@ -4017,12 +4081,13 @@ void client_add_player_entity(int id) {
     add_game_object(player_entity, PLAYER_ENTITY);
 }
 
+// #CLIENT RECV
 void on_client_recv(MPPacket packet, void *data) {
 
     if (packet.type == PACKET_UPDATE_PLAYER_ID) {
 
         client_self_id = *(int *)(data);
-        printf("received id: %d \n", client_self_id);
+
     } else if (packet.type == PACKET_PLAYER_POS) {
         
         struct player_pos_packet packet_data = *(struct player_pos_packet *)data;
@@ -4031,21 +4096,10 @@ void on_client_recv(MPPacket packet, void *data) {
             return;
         }
 
-        for (int i = 0; i < gameobjects->length; i++) {
-            obj *object = arraylist_get(gameobjects, i);
+        PlayerEntity *player_entity = find_or_add_player_entity_by_id(packet_data.id);
 
-            if (object->type == PLAYER_ENTITY) {
-                PlayerEntity *player_entity = object->val;
-                if (player_entity->id == packet_data.id) {
-                    player_entity->desired_pos = packet_data.pos;
-                    player_entity->desired_height = packet_data.height + player_entity->entity.size.y / 2;
-                    return;
-                }
-            }
-        }
-        
-        // player was not found
-        client_add_player_entity(packet_data.id);
+        player_entity->desired_pos = packet_data.pos;
+        player_entity->desired_height = packet_data.height;
     
     } else if (packet.type == PACKET_DUNGEON_SEED) {
 
@@ -4062,6 +4116,7 @@ void on_client_recv(MPPacket packet, void *data) {
         srand(client_dungeon_seed);
 
         loading_map = true;
+
     } else if (packet.type == PACKET_ABILITY_SHOOT) {
         struct ability_shoot_packet *packet_data = data;
         
@@ -4092,6 +4147,7 @@ void on_client_recv(MPPacket packet, void *data) {
     } else if (packet.type == PACKET_PLAYER_LEFT) {
         struct player_left_packet *packet_data = data;
 
+
         if (packet_data->id == client_self_id) {
             if (MP_is_server) {
                 shutdown(MPServer_socket, SD_BOTH);
@@ -4115,6 +4171,22 @@ void on_client_recv(MPPacket packet, void *data) {
                 return;
             }
         }
+    } else if (packet.type == PACKET_PLAYER_TOOK_DMG) {
+        struct player_took_dmg_packet *packet_data = data;
+
+        if (packet_data->sender_id == client_self_id) {
+            return;
+        }
+
+        if (packet_data->id == client_self_id) {
+            player_take_dmg(packet_data->dmg);
+            return;
+        }
+
+        PlayerEntity *player_entity = find_or_add_player_entity_by_id(packet_data->id);
+
+        player_entity_take_dmg(player_entity, packet_data->dmg);
+
     }
     
     
@@ -4124,9 +4196,13 @@ void on_client_recv(MPPacket packet, void *data) {
 void player_entity_tick(PlayerEntity *player_entity, double delta) {
     player_entity->entity.pos = v2_lerp(player_entity->entity.pos, player_entity->desired_pos, 0.1 * (delta * 144));
     player_entity->entity.height = lerp(player_entity->entity.height, player_entity->desired_height, 0.1 * (delta * 144));
+    player_entity->collider.pos = player_entity->entity.pos;
 }
 
 void init_textures() {
+    
+    blood_particle = load_texture("Textures/BloodParticle.png");
+    
     int bloom_frag = GPU_LoadShader(GPU_FRAGMENT_SHADER, "Shaders/bloom_frag.glsl");
     int bloom_vert = GPU_LoadShader(GPU_VERTEX_SHADER, "Shaders/bloom_vert.glsl");
     
@@ -4269,6 +4345,54 @@ void init_textures() {
 
     skybox_texture = load_texture("Textures/skybox.png");
 
+}
+
+PlayerEntity *find_player_entity_by_id(int id) {
+    for (int i = 0; i < gameobjects->length; i++) {
+        obj *object = arraylist_get(gameobjects, i);
+
+        if (object->type == PLAYER_ENTITY) {
+            PlayerEntity *player_entity = object->val;
+            if (player_entity->id == id) {
+                return player_entity;
+            }
+        }
+    }
+
+    return NULL;
+}
+
+PlayerEntity *find_or_add_player_entity_by_id(int id) {
+
+    if (id == client_self_id) return NULL;
+
+    PlayerEntity *player_entity = find_player_entity_by_id(id);
+
+    if (player_entity != NULL) return player_entity;
+
+    client_add_player_entity(id);
+    return find_player_entity_by_id(id);
+}
+
+
+void player_entity_take_dmg(PlayerEntity *player_entity, double dmg) {
+    // actually damage the player
+
+    player_hit_particles->pos = player_entity->entity.pos;
+    player_hit_particles->height = player_entity->entity.height;
+    player_hit_particles->target = NULL;
+    particle_spawner_explode(player_hit_particles);
+
+}
+
+void send_dmg_packet(int id, double dmg) {
+    MPPacket dmg_packet = {.type = PACKET_PLAYER_TOOK_DMG, .len = sizeof(struct player_took_dmg_packet), .is_broadcast = true};
+            
+    struct player_took_dmg_packet dmg_packet_data = {.dmg = dmg, .id = id, .sender_id = client_self_id};
+
+    MPClient_send(dmg_packet, &dmg_packet_data);
+
+    player_entity_take_dmg(find_or_add_player_entity_by_id(id), dmg);
 }
 
 
