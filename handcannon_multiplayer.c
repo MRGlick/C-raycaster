@@ -11,7 +11,7 @@
 
 // #DEFINITIONS
 
-#define DEBUG_FLAG false
+#define DEBUG_FLAG true
 
 #define SERVER_IP "84.95.67.205"
 #define SERVER_PORT 1155
@@ -351,6 +351,8 @@ typedef struct Room {
 } Room;
 
 // #FUNC
+
+void init_textures();
 
 void player_entity_tick(PlayerEntity *player_entity, double delta);
 
@@ -719,6 +721,8 @@ int main(int argc, char *argv[]) {
 
     gameobjects = create_arraylist(10);
 
+    init_textures();
+
     init_player(to_vec(500));
 
     add_game_object(player, PLAYER);
@@ -790,169 +794,22 @@ void init() {  // #INIT
 
     //exit(1);
 
-    int bloom_frag = GPU_LoadShader(GPU_FRAGMENT_SHADER, "Shaders/bloom_frag.glsl");
-    int bloom_vert = GPU_LoadShader(GPU_VERTEX_SHADER, "Shaders/bloom_vert.glsl");
     
-    bloom_shader = GPU_LinkShaders(bloom_frag, bloom_vert);
-
-    bloom_shader_block = GPU_LoadShaderBlock(bloom_shader, "gpu_Vertex", "gpu_TexCoord", "gpu_Color", "gpu_ModelViewProjectionMatrix");
-
-    GPU_FreeShader(bloom_frag);
-    GPU_FreeShader(bloom_vert);
-
-
-    tilemap_image = GPU_CreateImage(TILEMAP_WIDTH, TILEMAP_HEIGHT, GPU_FORMAT_RGBA);
-
-    GPU_Target *image_target = GPU_LoadTarget(tilemap_image);
-
-    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
-        for (int c = 0; c < TILEMAP_WIDTH; c++) {
-            SDL_Color color = (SDL_Color){255, 255, 255, 255};
-            GPU_RectangleFilled2(image_target, (GPU_Rect){c, r, 1, 1}, color);
-        }
-    }
-
-    GPU_FreeTarget(image_target);
-
-    floor_and_ceiling_spritesheet = load_texture("Textures/floor_and_ceiling_spritesheet.png");
-
-    int frag = GPU_LoadShader(GPU_FRAGMENT_SHADER, "Shaders/floor_frag.glsl");
-    int vert = GPU_LoadShader(GPU_VERTEX_SHADER, "Shaders/floor_vert.glsl");
-
-    floor_shader = GPU_LinkShaders(frag, vert);
-
-    floor_shader_block = GPU_LoadShaderBlock(floor_shader, "gpu_Vertex", "gpu_TexCoord", "gpu_Color", "gpu_ModelViewProjectionMatrix");
-
-    GPU_FreeShader(frag);
-    GPU_FreeShader(vert);
-
-    dash_screen_anim = malloc(sizeof(GPU_Image *) * 6);
-    getTextureFiles("Textures/Abilities/Dash/screen_anim", 6, &dash_screen_anim);
-
-    dash_anim_sprite = createSprite(true, 1);
-    dash_anim_sprite->animations[0] = create_animation(6, 10, dash_screen_anim);
-    dash_anim_sprite->animations[0].loop = false;
-    dash_anim_sprite->animations[0].fps = 10;
-    dash_anim_sprite->animations[0].frame = 5;
-
-
-    dash_icon = load_texture("Textures/Abilities/Icons/dash_icon.png");
-
-    ability_icon_frame = load_texture("Textures/Abilities/Icons/icon_frame.png");
-
-    shotgun_icon = load_texture("Textures/Abilities/Icons/shotgun_icon.png");
-
-    shoot_icon = load_texture("Textures/Abilities/Icons/shoot_icon.png");
 
     rapidfire_sound = create_sound("Sounds/shotgun_ability.wav");
 
     exploder_explosion = create_sound("Sounds/exploder_explosion.wav");
 
-    exploder_hit = load_texture("Textures/ExploderEnemyAnim/exploder_hit.png");
-
-    exploder_explosion_texture = malloc(sizeof(GPU_Image *) * 12);
-    getTextureFiles("Textures/ExploderEnemyAnim/Explosion/explosion", 12, &exploder_explosion_texture);
-
-    shooter_dirs_textures = malloc(sizeof(GPU_Image *) * 16);
-
-    for (int i = 0; i < 16; i++) {
-        char *baseFileName = "Textures/ShooterEnemy/frame";
-        char num[get_num_digits(i + 1)];
-        sprintf(num, "%d", i + 1);
-        char *fileWithNum = concat(baseFileName, num);
-        char *fileWithExtension = concat(fileWithNum, ".png");
-
-        shooter_dirs_textures[i] = load_texture(fileWithExtension);
-    }
-
-    defualt_particle_texture = load_texture("Textures/base_particle.png");
-
-    shooter_bullet_default_frames = malloc(sizeof(GPU_Image *) * 4);
-    shooter_bullet_explode_frames = malloc(sizeof(GPU_Image *) * 4);
-
-    getTextureFiles("Textures/ShooterEnemy/Bullet/Default/Bullet", 4, &shooter_bullet_default_frames);
-    getTextureFiles("Textures/ShooterEnemy/Bullet/Explode/Bullet", 4, &shooter_bullet_explode_frames);
-
-    exploder_frames = malloc(sizeof(GPU_Image *) * 80);
-    getTextureFiles("Textures/ExploderEnemyAnim/exploderEnemyAnim", 80, &exploder_frames);
-
-
-    exclam_notice_anim = malloc(sizeof(GPU_Image *) * 6);
-    getTextureFiles("Textures/ExclamNoticeAnim/noticeAnim", 6, &exclam_notice_anim);
-
-    player_default_hurt = create_sound("Sounds/player_default_hurt.wav");
-    player_default_shoot = create_sound("Sounds/player_default_shoot.wav");
+    
 
     init_cd_print();
-
-    mimran_jumpscare = load_texture("Textures/scary_monster2.png");
-
-    shooter_hit_texture = load_texture("Textures/ShooterEnemy/hit_frame1.png");
-
-    healthbar_texture = load_texture("Textures/health_bar1.png");
-
-    vignette_texture = load_texture("Textures/vignette.png");
-
-    fenceTexture = load_texture("Textures/fence.png");
-    SDL_SetTextureBlendMode(fenceTexture, SDL_BLENDMODE_BLEND);
-
-    floorAndCeiling = GPU_CreateImage(RESOLUTION_X, RESOLUTION_Y, GPU_FORMAT_RGBA);
-    GPU_SetImageFilter(floorAndCeiling, GPU_FILTER_NEAREST);
-
-    floor_and_ceiling_target_image = GPU_CreateImage(RESOLUTION_X, RESOLUTION_Y, GPU_FORMAT_RGBA);
-    GPU_SetImageFilter(floor_and_ceiling_target_image, GPU_FILTER_NEAREST);
-
-    floorTexture = load_texture("Textures/floor.png");
-    floorLightTexture = load_texture("Textures/floor_light.png");
-    floorTexture2 = load_texture("Textures/floor2.png");
-    ceilingTexture = load_texture("Textures/ceiling.png");
-    ceilingLightTexture = load_texture("Textures/ceiling_light.png");
 
     tanHalfFOV = tan(deg_to_rad(fov / 2));
     tanHalfStartFOV = tan(deg_to_rad(startFov / 2));
 
     
 
-    wallTexture = load_texture("Textures/wall.png");
-     GPU_SetImageFilter(wallTexture, GPU_FILTER_NEAREST);
-
-
-    wallFrames = malloc(sizeof(GPU_Image *) * 17);
-    getTextureFiles("Textures/WallAnim/wallAnim", 17, &wallFrames);
-
-    crosshair = load_texture("Textures/crosshair.png");
-
-    leftHandSprite = createSprite(true, 2);
-    GPU_Image **default_hand = malloc(sizeof(GPU_Image *)); 
-    default_hand[0] = load_texture("Textures/rightHandAnim/rightHandAnim6.png");
-    leftHandSprite->animations[0] = create_animation(1, 0, default_hand);
-
-
-    leftHandSprite->animations[1] = create_animation(6, 0, NULL);
-    getTextureFiles("Textures/rightHandAnim/rightHandAnim", 6, &leftHandSprite->animations[1].frames);
-    leftHandSprite->animations[1].fps = 12;
-
-    leftHandSprite->animations[1].loop = false;
-    spritePlayAnim(leftHandSprite, 0);
-
-    shootHitEffectFrames = malloc(sizeof(GPU_Image *) * 5);
-
-    getTextureFiles("Textures/ShootEffectAnim/shootHitEffect", 5, &shootHitEffectFrames);
-
     for (int i = 0; i < 26; i++) keyPressArr[i] = false;
-
-    entityTexture = load_texture("Textures/scary_monster.png");
-
-    // if (isValidLevel(levelToLoad)) {
-    //     load_level(levelToLoad);
-
-    // } else {
-    //     load_level("Levels/default_level.hclevel");
-    // }
-
-    skybox_texture = load_texture("Textures/skybox.png");
-
-    //SDL_RenderSetLogicalSize(SDL_GetRenderer(get_window()), WINDOW_WIDTH, WINDOW_HEIGHT);
 
 }  // #INIT END
 
@@ -1858,6 +1715,8 @@ void render_ability_helper(v2 pos, Ability *ability) {
 
     if (ability->texture != NULL) {
         GPU_BlitRect(ability->texture, NULL, hud, &rect);
+    } else {
+        printf("What the hell. \n");
     }
     double primary_progress = ability->timer == ability->cooldown? 0 : ability->timer / ability->cooldown;
 
@@ -3249,6 +3108,13 @@ void dir_sprite_play_anim(DirectionalSprite *dir_sprite, int anim) {
 
 
 Ability ability_primary_shoot_create() {
+
+    if (shoot_icon == NULL) {
+        printf("Shoot icon is null at primary shoot create. \n");
+    } else {
+        printf("It's not null. \n");
+    }
+
     return (Ability) {
         .activate = ability_shoot_activate,
         .tick = default_ability_tick,
@@ -4191,11 +4057,157 @@ void on_client_recv(MPPacket packet, void *data) {
     }
     
     
+    
 }
 
 void player_entity_tick(PlayerEntity *player_entity, double delta) {
     player_entity->entity.pos = v2_lerp(player_entity->entity.pos, player_entity->desired_pos, 0.1 * (delta * 144));
     player_entity->entity.height = lerp(player_entity->entity.height, player_entity->desired_height, 0.1 * (delta * 144));
+}
+
+void init_textures() {
+    int bloom_frag = GPU_LoadShader(GPU_FRAGMENT_SHADER, "Shaders/bloom_frag.glsl");
+    int bloom_vert = GPU_LoadShader(GPU_VERTEX_SHADER, "Shaders/bloom_vert.glsl");
+    
+    bloom_shader = GPU_LinkShaders(bloom_frag, bloom_vert);
+
+    bloom_shader_block = GPU_LoadShaderBlock(bloom_shader, "gpu_Vertex", "gpu_TexCoord", "gpu_Color", "gpu_ModelViewProjectionMatrix");
+
+    GPU_FreeShader(bloom_frag);
+    GPU_FreeShader(bloom_vert);
+
+
+    tilemap_image = GPU_CreateImage(TILEMAP_WIDTH, TILEMAP_HEIGHT, GPU_FORMAT_RGBA);
+
+    GPU_Target *image_target = GPU_LoadTarget(tilemap_image);
+
+    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
+        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+            SDL_Color color = (SDL_Color){255, 255, 255, 255};
+            GPU_RectangleFilled2(image_target, (GPU_Rect){c, r, 1, 1}, color);
+        }
+    }
+
+    GPU_FreeTarget(image_target);
+
+    floor_and_ceiling_spritesheet = load_texture("Textures/floor_and_ceiling_spritesheet.png");
+
+    int frag = GPU_LoadShader(GPU_FRAGMENT_SHADER, "Shaders/floor_frag.glsl");
+    int vert = GPU_LoadShader(GPU_VERTEX_SHADER, "Shaders/floor_vert.glsl");
+
+    floor_shader = GPU_LinkShaders(frag, vert);
+
+    floor_shader_block = GPU_LoadShaderBlock(floor_shader, "gpu_Vertex", "gpu_TexCoord", "gpu_Color", "gpu_ModelViewProjectionMatrix");
+
+    GPU_FreeShader(frag);
+    GPU_FreeShader(vert);
+
+    dash_screen_anim = malloc(sizeof(GPU_Image *) * 6);
+    getTextureFiles("Textures/Abilities/Dash/screen_anim", 6, &dash_screen_anim);
+
+    dash_anim_sprite = createSprite(true, 1);
+    dash_anim_sprite->animations[0] = create_animation(6, 10, dash_screen_anim);
+    dash_anim_sprite->animations[0].loop = false;
+    dash_anim_sprite->animations[0].fps = 10;
+    dash_anim_sprite->animations[0].frame = 5;
+
+
+    dash_icon = load_texture("Textures/Abilities/Icons/dash_icon.png");
+
+    ability_icon_frame = load_texture("Textures/Abilities/Icons/icon_frame.png");
+
+    shotgun_icon = load_texture("Textures/Abilities/Icons/shotgun_icon.png");
+
+    shoot_icon = load_texture("Textures/Abilities/Icons/shoot_icon.png");
+
+    exploder_hit = load_texture("Textures/ExploderEnemyAnim/exploder_hit.png");
+
+    exploder_explosion_texture = malloc(sizeof(GPU_Image *) * 12);
+    getTextureFiles("Textures/ExploderEnemyAnim/Explosion/explosion", 12, &exploder_explosion_texture);
+
+    shooter_dirs_textures = malloc(sizeof(GPU_Image *) * 16);
+
+    for (int i = 0; i < 16; i++) {
+        char *baseFileName = "Textures/ShooterEnemy/frame";
+        char num[get_num_digits(i + 1)];
+        sprintf(num, "%d", i + 1);
+        char *fileWithNum = concat(baseFileName, num);
+        char *fileWithExtension = concat(fileWithNum, ".png");
+
+        shooter_dirs_textures[i] = load_texture(fileWithExtension);
+    }
+
+    defualt_particle_texture = load_texture("Textures/base_particle.png");
+
+    shooter_bullet_default_frames = malloc(sizeof(GPU_Image *) * 4);
+    shooter_bullet_explode_frames = malloc(sizeof(GPU_Image *) * 4);
+
+    getTextureFiles("Textures/ShooterEnemy/Bullet/Default/Bullet", 4, &shooter_bullet_default_frames);
+    getTextureFiles("Textures/ShooterEnemy/Bullet/Explode/Bullet", 4, &shooter_bullet_explode_frames);
+
+    exploder_frames = malloc(sizeof(GPU_Image *) * 80);
+    getTextureFiles("Textures/ExploderEnemyAnim/exploderEnemyAnim", 80, &exploder_frames);
+
+
+    exclam_notice_anim = malloc(sizeof(GPU_Image *) * 6);
+    getTextureFiles("Textures/ExclamNoticeAnim/noticeAnim", 6, &exclam_notice_anim);
+
+    player_default_hurt = create_sound("Sounds/player_default_hurt.wav");
+    player_default_shoot = create_sound("Sounds/player_default_shoot.wav");
+
+    mimran_jumpscare = load_texture("Textures/scary_monster2.png");
+
+    shooter_hit_texture = load_texture("Textures/ShooterEnemy/hit_frame1.png");
+
+    healthbar_texture = load_texture("Textures/health_bar1.png");
+
+    vignette_texture = load_texture("Textures/vignette.png");
+
+    fenceTexture = load_texture("Textures/fence.png");
+    SDL_SetTextureBlendMode(fenceTexture, SDL_BLENDMODE_BLEND);
+
+    floorAndCeiling = GPU_CreateImage(RESOLUTION_X, RESOLUTION_Y, GPU_FORMAT_RGBA);
+    GPU_SetImageFilter(floorAndCeiling, GPU_FILTER_NEAREST);
+
+    floor_and_ceiling_target_image = GPU_CreateImage(RESOLUTION_X, RESOLUTION_Y, GPU_FORMAT_RGBA);
+    GPU_SetImageFilter(floor_and_ceiling_target_image, GPU_FILTER_NEAREST);
+
+    floorTexture = load_texture("Textures/floor.png");
+    floorLightTexture = load_texture("Textures/floor_light.png");
+    floorTexture2 = load_texture("Textures/floor2.png");
+    ceilingTexture = load_texture("Textures/ceiling.png");
+    ceilingLightTexture = load_texture("Textures/ceiling_light.png");
+    wallTexture = load_texture("Textures/wall.png");
+     GPU_SetImageFilter(wallTexture, GPU_FILTER_NEAREST);
+
+
+    wallFrames = malloc(sizeof(GPU_Image *) * 17);
+    getTextureFiles("Textures/WallAnim/wallAnim", 17, &wallFrames);
+
+    crosshair = load_texture("Textures/crosshair.png");
+
+    leftHandSprite = createSprite(true, 2);
+    GPU_Image **default_hand = malloc(sizeof(GPU_Image *)); 
+    default_hand[0] = load_texture("Textures/rightHandAnim/rightHandAnim6.png");
+    leftHandSprite->animations[0] = create_animation(1, 0, default_hand);
+
+
+    leftHandSprite->animations[1] = create_animation(6, 0, NULL);
+    getTextureFiles("Textures/rightHandAnim/rightHandAnim", 6, &leftHandSprite->animations[1].frames);
+    leftHandSprite->animations[1].fps = 12;
+
+    leftHandSprite->animations[1].loop = false;
+    spritePlayAnim(leftHandSprite, 0);
+
+    shootHitEffectFrames = malloc(sizeof(GPU_Image *) * 5);
+
+    getTextureFiles("Textures/ShootEffectAnim/shootHitEffect", 5, &shootHitEffectFrames);
+
+
+    entityTexture = load_texture("Textures/scary_monster.png");
+
+    skybox_texture = load_texture("Textures/skybox.png");
+
 }
 
 
