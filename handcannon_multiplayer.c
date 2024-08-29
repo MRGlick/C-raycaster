@@ -13,7 +13,7 @@
 
 #define DEBUG_FLAG true
 
-#define SERVER_IP "84.95.67.205"
+#define SERVER_IP "127.0.0.1"
 #define SERVER_PORT 1155
 #define TPS 300
 #define WINDOW_WIDTH 1024
@@ -50,10 +50,17 @@ enum PacketTypes {
     PACKET_PLAYER_JOINED,
     PACKET_DUNGEON_SEED,
     PACKET_REQUEST_DUNGEON_SEED,
-    PACKET_ABILITY_SHOOT
+    PACKET_ABILITY_SHOOT,
+    PACKET_HOST_LEFT,
+    PACKET_PLAYER_LEFT
+};
+
+struct player_left_packet {
+    int id;
 };
 
 struct ability_shoot_packet {
+    int shooter_id;
     int hit_id; // -1 if noone was hit
     v2 hit_pos;
     double hit_height;
@@ -72,7 +79,7 @@ struct player_pos_packet {
 
 struct player_joined_packet {
     int id;
-    // ... more stuff later
+    // ... more stuff later, maybe?
 };
 
 
@@ -620,6 +627,8 @@ Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
 
 // #VAR
 
+bool can_exit = false;
+
 double client_dungeon_seed_request_timer = 0;
 
 bool loading_map = false;
@@ -773,15 +782,27 @@ int main(int argc, char *argv[]) {
         // render_timer += delta;
         if (tick_timer >= 1000 / TPS) {
             realFps = 1000.0 / tick_timer;
-            tick(paused? 0 : mili_to_sec(tick_timer) * game_speed);
-            render(mili_to_sec(tick_timer));
+            tick(mili_to_sec(tick_timer) * game_speed);
+            render(mili_to_sec(tick_timer) * game_speed);
             tick_timer = 0;
         }
     }
 
-    // SDL_DestroyRenderer(renderer);
+    struct player_left_packet packet_data = {.id = client_self_id};
 
-    // SDL_DestroyWindow(window);
+    MPPacket packet = {.type = PACKET_PLAYER_LEFT, .is_broadcast = true, .len = sizeof(packet_data)};
+
+    MPClient_send(packet, &packet_data);
+
+
+    if (MP_is_server) {
+        MPPacket hl_packet = {.type = PACKET_HOST_LEFT, .len = 0, .is_broadcast = true};
+        MPServer_send(hl_packet, NULL);
+    }
+
+    while (!can_exit) {
+
+    }
 
     GPU_FreeImage(screen_image);
 
@@ -820,6 +841,7 @@ v2 get_player_forward() {
 void handle_input(SDL_Event event) {
     switch (event.type) {
         case SDL_QUIT:
+
             running = false;
             break;
         case SDL_KEYDOWN:
@@ -2375,7 +2397,7 @@ Effect *createEffect(v2 pos, v2 size, Sprite *sprite, double lifeTime) {
 // Todo: add shoot cooldown for base shooting
 void ability_shoot_activate(Ability *ability) {
     play_sound(player_default_shoot, 0.3);
-    _shoot(0.02);
+    _shoot(0);
 }
 
 void effectTick(Effect *effect, double delta) {
@@ -3181,7 +3203,7 @@ void ability_secondary_shoot_activate(Ability *ability) {
     player->vel = v2_mul(playerForward, to_vec(-5));
 }
 
-void _shoot(double spread) { // the sound isnt attacked bc shotgun makes eargasm
+void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
 
     double pitch = player->pitch + randf_range(1000 * -spread, 1000 * spread);
 
@@ -3195,61 +3217,47 @@ void _shoot(double spread) { // the sound isnt attacked bc shotgun makes eargasm
 
     RayCollisionData ray_data = castRayForAll(player->pos, shoot_dir);
 
-    double effect_height = get_max_height() * 0.5;
-    
-    double max_distance;
+    v2 hit_pos = screenToFloor((v2){RESOLUTION_X / 2, WINDOW_HEIGHT / 2 + pitch});
+    double distance_to_hit_pos = v2_distance(hit_pos, player->pos);
+    double distance_to_coll_pos = ray_data.hit? v2_distance(ray_data.collpos, player->pos) : 999999999999;
 
-    if (in_range(pitch, -0.01, 0.01)) {
-        max_distance = INFINITY;
+    v2 final_pos;
+    bool is_ceiling = pitch < 0;
+    double final_height = is_ceiling? get_max_height() * 1.5 : get_max_height() * 0.5;
+
+
+    if (distance_to_coll_pos < distance_to_hit_pos) {
+        final_pos = ray_data.collpos;
+        final_height = lerp( get_max_height() * 0.5 + get_player_height(), final_height, inverse_lerp(0, distance_to_hit_pos, distance_to_coll_pos));
     } else {
-        double p = abs(pitch); // for debugging
-        max_distance = (WALL_HEIGHT * WINDOW_HEIGHT * WALL_HEIGHT_MULTIPLIER / 2) / p;
+        final_pos = hit_pos;
     }
 
-    if (!ray_data.hit && max_distance == INFINITY) return;
-
-
-    bool hit_ground_or_ceiling = false;
-
-    double distance_to_collpos = v2_distance(player->pos, ray_data.collpos);
-
-    if (distance_to_collpos > max_distance) {
-        effect_height = pitch < 0? get_max_height() * 1.5 : get_max_height() / 2;
-        effect_height -= effect_size.y / 2;
-        hit_ground_or_ceiling = true;
-    }
-
-    if (!hit_ground_or_ceiling) {    
-        effect_height = get_max_height() * 0.625 + -pitch * distance_to_collpos - effect_size.y / 2; // an estimate. wouldnt work well with high spread, but hopefully hard to notice. nvm, works very well.
-    }
-    
-
-    v2 effectPos;
-
-    if (hit_ground_or_ceiling) {
-        effectPos = v2_add(player->pos, v2_mul(shoot_dir, to_vec(max_distance)));
-    } else {
-        effectPos = v2_add(ray_data.collpos, v2_mul(playerForward, to_vec(-4)));
-    }
-
-    Effect *hitEffect = createEffect(effectPos, to_vec(8000), createSprite(true, 1), 1);
-
-    if (hitEffect == NULL) {
-        printf("hit effect is null \n");
-        return;
-    }
+    double size = 8000;
+    Effect *hitEffect = createEffect(final_pos, to_vec(size), createSprite(true, 1), 1);
+    hitEffect->entity.height = final_height - size / 2;
 
     hitEffect->entity.sprite->animations[0] = create_animation(5, 0, shootHitEffectFrames);
     
     hitEffect->entity.sprite->animations[0].fps = 12;
     hitEffect->entity.sprite->animations[0].loop = false;
-    hitEffect->entity.height = effect_height;
     hitEffect->entity.affected_by_light = false;
 
     spritePlayAnim(hitEffect->entity.sprite, 0);
 
     add_game_object(hitEffect, EFFECT);
     
+    struct ability_shoot_packet packet_data = {
+        .hit_pos = final_pos,
+        .hit_height = final_height,
+        .shooter_id = client_self_id,
+        .hit_id = -1
+    };
+
+    MPPacket packet = {.is_broadcast = true, .len = sizeof(packet_data), .type = PACKET_ABILITY_SHOOT};
+
+    MPClient_send(packet, &packet_data);
+
 }
 
 void draw_3d_line(v2 pos1, double h1, v2 pos2, double h2) {
@@ -4054,6 +4062,59 @@ void on_client_recv(MPPacket packet, void *data) {
         srand(client_dungeon_seed);
 
         loading_map = true;
+    } else if (packet.type == PACKET_ABILITY_SHOOT) {
+        struct ability_shoot_packet *packet_data = data;
+        
+        if (client_self_id == packet_data->shooter_id) return;
+
+        // create the effect at the pos and height
+        Effect *hitEffect = createEffect(packet_data->hit_pos, to_vec(8000), createSprite(true, 1), 1);
+
+        if (hitEffect == NULL) {
+            printf("hit effect is null \n");
+            return;
+        }
+
+        hitEffect->entity.sprite->animations[0] = create_animation(5, 0, shootHitEffectFrames);
+        
+        hitEffect->entity.sprite->animations[0].fps = 12;
+        hitEffect->entity.sprite->animations[0].loop = false;
+        hitEffect->entity.height = packet_data->hit_height;
+        hitEffect->entity.affected_by_light = false;
+
+        spritePlayAnim(hitEffect->entity.sprite, 0);
+
+        add_game_object(hitEffect, EFFECT);
+
+    } else if (packet.type == PACKET_HOST_LEFT) {
+        exit(1);
+
+    } else if (packet.type == PACKET_PLAYER_LEFT) {
+        struct player_left_packet *packet_data = data;
+
+        if (packet_data->id == client_self_id) {
+            if (MP_is_server) {
+                shutdown(MPServer_socket, SD_BOTH);
+                closesocket(MPServer_socket);
+            }
+            shutdown(MPClient_socket, SD_BOTH);
+            closesocket(MPClient_socket);
+            can_exit = true;
+            return;
+        }
+
+        for (int i = 0; i < gameobjects->length; i++) {
+            obj *object = arraylist_get(gameobjects, i);
+
+            if (object->type != PLAYER_ENTITY) continue;
+
+            PlayerEntity *player_entity = object->val;
+
+            if (player_entity->id == packet_data->id) {
+                remove_game_object(player_entity, PLAYER_ENTITY);
+                return;
+            }
+        }
     }
     
     
