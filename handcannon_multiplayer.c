@@ -13,7 +13,7 @@
 
 #define DEBUG_FLAG false
 
-#define SERVER_IP "127.0.0.1"
+#define SERVER_IP "84.95.65.201"
 #define SERVER_PORT 1155
 #define TPS 300
 #define WINDOW_WIDTH 1024
@@ -33,6 +33,8 @@
 #define BAKED_LIGHT_RESOLUTION 36
 #define BAKED_LIGHT_CALC_RESOLUTION 8
 #define CLIENT_UPDATE_RATE 20
+#define PLAYER_COLLIDER_RADIUS 10
+
 
 #define PARTICLE_GRAVITY -50000
 
@@ -52,14 +54,7 @@ enum PacketTypes {
     PACKET_REQUEST_DUNGEON_SEED,
     PACKET_ABILITY_SHOOT,
     PACKET_HOST_LEFT,
-    PACKET_PLAYER_LEFT,
-    PACKET_PLAYER_TOOK_DMG
-};
-
-struct player_took_dmg_packet {
-    int sender_id;
-    int id;
-    double dmg;
+    PACKET_PLAYER_LEFT
 };
 
 struct player_left_packet {
@@ -68,6 +63,7 @@ struct player_left_packet {
 
 struct ability_shoot_packet {
     int shooter_id;
+    int hit_id;
     v2 hit_pos;
     double hit_height;
 };
@@ -773,13 +769,11 @@ int main(int argc, char *argv[]) {
 
     if (is_server) {
         printf("creating server \n");
-        printf("'%s' \n", argv[1]);
         MPServer();
-        MPClient(SERVER_IP); // host and do the thing
-    } else {
-        printf("joining \n");
-        MPClient(SERVER_IP);
     }
+    MPClient(SERVER_IP);
+
+    
 
     //printf("Reached after server client shit \n");
 
@@ -843,6 +837,9 @@ void init() {  // #INIT
     player_hit_particles->target = NULL;
     player_hit_particles->sprite = (Sprite){.isAnimated = false, .texture = blood_particle};
     player_hit_particles->height_dir = 1;
+    player_hit_particles->particle_lifetime = 2;
+    player_hit_particles->bounciness = 0.1;
+    player_hit_particles->floor_drag = 0.4;
 
 
     rapidfire_sound = create_sound("Sounds/shotgun_ability.wav");
@@ -1927,7 +1924,7 @@ void init_player(v2 pos) {
     player->pendingShots = 0;
     player->max_pending_shots = 10;
     player->collider = malloc(sizeof(CircleCollider));
-    player->collider->radius = 5;
+    player->collider->radius = PLAYER_COLLIDER_RADIUS;
     player->collider->pos = player->pos;
 
     if (player->collider == NULL) {
@@ -3238,7 +3235,7 @@ Rapidfire ability_secondary_shoot_create() {
 void ability_secondary_shoot_activate(Ability *ability) {
 
     shakeCamera(35, 15, true, 10);
-    play_sound(rapidfire_sound, 0.8);
+    play_sound(rapidfire_sound, 0.5);
 
     Rapidfire *rapid_fire = (Rapidfire *)ability;
     rapid_fire->shots_left = rapid_fire->shot_amount;
@@ -3293,12 +3290,24 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
     spritePlayAnim(hitEffect->entity.sprite, 0);
 
     add_game_object(hitEffect, EFFECT);
+
     
     struct ability_shoot_packet packet_data = {
         .hit_pos = final_pos,
         .hit_height = final_height,
-        .shooter_id = client_self_id
+        .shooter_id = client_self_id,
+        .hit_id = -1
     };
+    if (ray_data.hit) {
+        if (ray_data.colliderType == PLAYER_ENTITY) {
+
+            PlayerEntity *player_entity = ray_data.collider;
+
+            
+            packet_data.hit_id = player_entity->id;
+            
+        }
+    }
 
     MPPacket packet = {.is_broadcast = true, .len = sizeof(packet_data), .type = PACKET_ABILITY_SHOOT};
 
@@ -3306,16 +3315,6 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
 
 
 
-    if (ray_data.hit) {
-        if (ray_data.colliderType == PLAYER_ENTITY) {
-
-            PlayerEntity *player_entity = ray_data.collider;
-
-            send_dmg_packet(player_entity->id, 1);
-
-            
-        }
-    }
 
 
 
@@ -4073,7 +4072,7 @@ void client_add_player_entity(int id) {
     player_entity->entity.sprite->texture = entityTexture;
     player_entity->desired_pos = V2_ZERO;
     player_entity->desired_height = 0;
-    player_entity->collider = (CircleCollider){.radius = 5, .pos = V2_ZERO};
+    player_entity->collider = (CircleCollider){.radius = PLAYER_COLLIDER_RADIUS, .pos = V2_ZERO};
 
     printf("Player joined! ID: %d \n", player_entity->id);
     write_to_debug_label(String_from_int(player_entity->id));
@@ -4120,7 +4119,16 @@ void on_client_recv(MPPacket packet, void *data) {
     } else if (packet.type == PACKET_ABILITY_SHOOT) {
         struct ability_shoot_packet *packet_data = data;
         
-        if (client_self_id == packet_data->shooter_id) return;
+        if (client_self_id == packet_data->shooter_id) {
+            
+            if (packet_data->hit_id != -1) {
+                player_entity_take_dmg(find_or_add_player_entity_by_id(packet_data->hit_id), 1);
+            }
+            
+            return;
+        }
+            
+            
 
         // create the effect at the pos and height
         Effect *hitEffect = createEffect(packet_data->hit_pos, to_vec(8000), createSprite(true, 1), 1);
@@ -4140,6 +4148,18 @@ void on_client_recv(MPPacket packet, void *data) {
         spritePlayAnim(hitEffect->entity.sprite, 0);
 
         add_game_object(hitEffect, EFFECT);
+
+
+        if (packet_data->hit_id != -1) {
+
+            if (packet_data->hit_id == client_self_id) {
+                player_take_dmg(1);
+                return;
+            }
+
+            PlayerEntity *player_entity = find_or_add_player_entity_by_id(packet_data->hit_id);
+            player_entity_take_dmg(player_entity, 1);
+        }
 
     } else if (packet.type == PACKET_HOST_LEFT) {
         exit(1);
@@ -4171,31 +4191,15 @@ void on_client_recv(MPPacket packet, void *data) {
                 return;
             }
         }
-    } else if (packet.type == PACKET_PLAYER_TOOK_DMG) {
-        struct player_took_dmg_packet *packet_data = data;
-
-        if (packet_data->sender_id == client_self_id) {
-            return;
-        }
-
-        if (packet_data->id == client_self_id) {
-            player_take_dmg(packet_data->dmg);
-            return;
-        }
-
-        PlayerEntity *player_entity = find_or_add_player_entity_by_id(packet_data->id);
-
-        player_entity_take_dmg(player_entity, packet_data->dmg);
-
     }
-    
-    
-    
 }
 
 void player_entity_tick(PlayerEntity *player_entity, double delta) {
+
+    double real_desired_height = player_entity->desired_height + get_max_height() * 0.5 - player_entity->entity.size.y / 2;
+
     player_entity->entity.pos = v2_lerp(player_entity->entity.pos, player_entity->desired_pos, 0.1 * (delta * 144));
-    player_entity->entity.height = lerp(player_entity->entity.height, player_entity->desired_height, 0.1 * (delta * 144));
+    player_entity->entity.height = lerp(player_entity->entity.height, real_desired_height, 0.1 * (delta * 144));
     player_entity->collider.pos = player_entity->entity.pos;
 }
 
@@ -4383,16 +4387,6 @@ void player_entity_take_dmg(PlayerEntity *player_entity, double dmg) {
     player_hit_particles->target = NULL;
     particle_spawner_explode(player_hit_particles);
 
-}
-
-void send_dmg_packet(int id, double dmg) {
-    MPPacket dmg_packet = {.type = PACKET_PLAYER_TOOK_DMG, .len = sizeof(struct player_took_dmg_packet), .is_broadcast = true};
-            
-    struct player_took_dmg_packet dmg_packet_data = {.dmg = dmg, .id = id, .sender_id = client_self_id};
-
-    MPClient_send(dmg_packet, &dmg_packet_data);
-
-    player_entity_take_dmg(find_or_add_player_entity_by_id(id), dmg);
 }
 
 

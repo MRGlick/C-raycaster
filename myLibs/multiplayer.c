@@ -101,15 +101,24 @@ DWORD WINAPI _MPClient_handle_received_data(void *data) {
     while (TRUE) {
         
         char receive_buffer[MP_DEFAULT_BUFFER_SIZE] = {0};
+        char *data_ptr = receive_buffer;
 
         int bytes_received = recv(client_socket, receive_buffer, MP_DEFAULT_BUFFER_SIZE, 0);
+        int bytes_left = bytes_received;
 
-        if (bytes_received > 0) {
-            MPPacket *packet = receive_buffer;
+        while (bytes_left > 0) {
+            MPPacket *packet = data_ptr;
+            // if (sizeof(MPPacket) + packet->len != bytes_received) {
+            //     printf("Nagle might have cooked with this one. \n");
+            //     printf("Predicted size: %d \n", sizeof(MPPacket) + packet->len);
+            //     printf("Got size: %d \n", bytes_received);
+            // }
             // process packet from server...
             if (_MP_client_handle_recv != NULL) {
-                _MP_client_handle_recv(*packet, receive_buffer + sizeof(MPPacket));
+                _MP_client_handle_recv(*packet, data_ptr + sizeof(MPPacket));
             }
+            bytes_left -= sizeof(MPPacket) + packet->len;
+            data_ptr += sizeof(MPPacket) + packet->len;
         }
 
         
@@ -148,10 +157,10 @@ DWORD WINAPI _MPServer_handle_client(void *data) {
         
         char receive_buffer[MP_DEFAULT_BUFFER_SIZE] = {0};
         
-        int result = recv(client_socket, receive_buffer, MP_DEFAULT_BUFFER_SIZE, 0);
+        int bytes_received = recv(client_socket, receive_buffer, MP_DEFAULT_BUFFER_SIZE, 0);
 
-        if (result <= 0) {
-            if (result == SOCKET_ERROR) {
+        if (bytes_received <= 0) {
+            if (bytes_received == SOCKET_ERROR) {
                 printf("SOCKET ERROR! \n");
                 printf("err number: %d \n", WSAGetLastError());
                 exit(-12941);
@@ -165,19 +174,25 @@ DWORD WINAPI _MPServer_handle_client(void *data) {
                 _MP_on_client_disconnected(client_socket);
             }
 
-            return result; 
+            return bytes_received; 
         }
 
-        MPPacket *packet = receive_buffer;
+        int bytes_left = bytes_received;
+        char *data_ptr = receive_buffer;
 
-        if (packet->len > MP_DEFAULT_BUFFER_SIZE - sizeof(int)) {
-            fprintf(stderr, "The packet is too big! packet size: %d \n", packet->len);
-            exit(-1);
-        }
-
-        // do stuff with the client's message...
-        if (_MP_server_handle_recv != NULL) {
-            _MP_server_handle_recv(client_socket, *packet, receive_buffer + sizeof(MPPacket));
+        while (bytes_left > 0) {
+            MPPacket *packet = data_ptr;
+            // if (sizeof(MPPacket) + packet->len != bytes_received) {
+            //     printf("Nagle might have cooked with this one. \n");
+            //     printf("Predicted size: %d \n", sizeof(MPPacket) + packet->len);
+            //     printf("Got size: %d \n", bytes_received);
+            // }
+            // process packet from server...
+            if (_MP_client_handle_recv != NULL) {
+                _MP_server_handle_recv(client_socket, *packet, data_ptr + sizeof(MPPacket));
+            }
+            bytes_left -= sizeof(MPPacket) + packet->len;
+            data_ptr += sizeof(MPPacket) + packet->len;
         }
     }
 }
