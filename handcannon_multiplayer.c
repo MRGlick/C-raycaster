@@ -640,6 +640,8 @@ Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
 
 // #VAR
 
+v2 spawn_point = {500, 500};
+
 bool can_exit = false;
 
 double client_dungeon_seed_request_timer = 0;
@@ -2229,6 +2231,7 @@ void place_entity(v2 pos, int type) {
     switch (type) {
         case (int)P_PLAYER:
             player->pos = pos;
+            spawn_point = pos;
             break;
     }
 }
@@ -3024,7 +3027,7 @@ void player_die() {
 
 void _player_die() {
     
-    player->pos = to_vec(500);
+    player->pos = spawn_point;
     player->health = player->maxHealth;
 
 }
