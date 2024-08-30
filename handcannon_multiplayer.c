@@ -11,9 +11,9 @@
 
 // #DEFINITIONS
 
-#define DEBUG_FLAG false
+#define DEBUG_FLAG true
 
-#define SERVER_IP "84.95.65.201"
+#define SERVER_IP "127.0.0.1"
 #define SERVER_PORT 1155
 #define TPS 300
 #define WINDOW_WIDTH 1024
@@ -107,6 +107,10 @@ enum Types {
         BULLET,
 
         PLAYER_ENTITY,
+
+        PROJECTILE_START,
+            PROJETILE,
+        PROJECTILE_END,
 
         EFFECT_START,
 
@@ -241,6 +245,19 @@ typedef struct Entity {
     bool affected_by_light;
 } Entity;
 
+typedef struct Projectile {
+    Entity entity;
+    v2 vel;
+    double height_vel;
+    double life_time, life_timer;
+    bool bounciness;
+    bool destroy_on_floor;
+    void (*on_create)(struct Projectile *);
+    void (*on_tick)(struct Projectile *, double);
+    void (*on_destruction)(struct Projectile *);
+
+} Projectile;
+
 typedef struct PlayerEntity {
     Entity entity;
     v2 desired_pos;
@@ -361,6 +378,10 @@ typedef struct Room {
 } Room;
 
 // #FUNC
+
+void ability_bomb_activate();
+
+Ability ability_bomb_create();
 
 void send_dmg_packet(int id, double dmg);
 
@@ -939,8 +960,9 @@ void key_pressed(SDL_Keycode key) {
     }
 
     if (key == SDLK_r) {
-
-        reset_level();
+        if (player->special != NULL) {
+            activate_ability(player->special);
+        }
     }
 
     if (key == SDLK_SPACE) {
@@ -1431,6 +1453,8 @@ void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affe
         final_size.x,
         final_size.y
     };
+
+    
 
     int rgb[3] = {255, 255, 255};
     if (affected_by_light) {
@@ -1943,14 +1967,16 @@ void init_player(v2 pos) {
     Ability *default_primary = malloc(sizeof(Ability));
     Rapidfire *default_secondary = malloc(sizeof(Rapidfire));
     Ability *default_utility = malloc(sizeof(Ability));
+    Ability *default_special = malloc(sizeof(Ability));
     *default_primary = ability_primary_shoot_create();
     *default_secondary = ability_secondary_shoot_create();
     *default_utility = ability_dash_create();
+    *default_special = ability_bomb_create();
 
     player->primary = default_primary;
     player->secondary = default_secondary;
     player->utility = default_utility;
-    player->special = NULL;
+    player->special = default_special;
 }
 
 // CLEAR
@@ -4390,6 +4416,27 @@ void player_entity_take_dmg(PlayerEntity *player_entity, double dmg) {
     player_hit_particles->target = NULL;
     particle_spawner_explode(player_hit_particles);
 
+}
+
+void ability_bomb_activate() {
+    printf("Bomb! \n");
+}
+
+Ability ability_bomb_create() {
+    Ability ability = {
+        .activate = ability_bomb_activate,
+        .before_activate = NULL,
+        .can_use = false,
+        .cooldown = 10,
+        .delay = 0,
+        .delay_timer = 0,
+        .texture = entityTexture,
+        .tick = default_ability_tick,
+        .timer = 10,
+        .type = A_SPECIAL
+    };
+
+    return ability;
 }
 
 
