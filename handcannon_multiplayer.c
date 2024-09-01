@@ -37,6 +37,7 @@
 
 
 #define PARTICLE_GRAVITY -50000
+#define PROJECTILE_GRAVITY -2000
 
 #define OUT_OF_SCREEN_POS \
     (v2) { WINDOW_WIDTH * 100, WINDOW_HEIGHT * 100 }
@@ -109,7 +110,7 @@ enum Types {
         PLAYER_ENTITY,
 
         PROJECTILE_START,
-            PROJETILE,
+            PROJECTILE,
         PROJECTILE_END,
 
         EFFECT_START,
@@ -249,9 +250,12 @@ typedef struct Projectile {
     Entity entity;
     v2 vel;
     double height_vel;
+    v2 accel;
+    double height_accel;
     double life_time, life_timer;
-    bool bounciness;
+    double bounciness;
     bool destroy_on_floor;
+    bool _created;
     void (*on_create)(struct Projectile *);
     void (*on_tick)(struct Projectile *, double);
     void (*on_destruction)(struct Projectile *);
@@ -378,6 +382,16 @@ typedef struct Room {
 } Room;
 
 // #FUNC
+
+Projectile create_bomb_projectile(v2 pos, v2 start_vel);
+
+Projectile create_default_projectile(double life_time);
+
+void projectile_destroy(Projectile *projectile);
+
+void projectile_tick(Projectile *projectile, double delta);
+
+bool is_projectile_type(int type);
 
 void ability_bomb_activate();
 
@@ -1148,6 +1162,11 @@ void objectTick(void *obj, int type, double delta) {
     
     update_entity_collisions(obj, type);
     
+    if (is_projectile_type(type)) {
+        projectile_tick(obj, delta);
+        return;
+    }
+
     switch (type) {
         case (int)PLAYER:
             playerTick(delta);
@@ -1169,8 +1188,7 @@ void objectTick(void *obj, int type, double delta) {
             break;
         case (int)PLAYER_ENTITY:
             player_entity_tick(obj, delta);
-            break;
-        
+            break; 
     }
 }
 
@@ -1595,6 +1613,10 @@ RenderObject *getRenderList() {
         v2 pos = V2_ZERO;
         
         if (is_entity_type(object->type)) {
+
+            if (is_projectile_type(object->type)) {
+                cd_print(true, "detected \n");
+            }
 
             currentRObj = (RenderObject){.isnull = false};
 
@@ -4420,6 +4442,12 @@ void player_entity_take_dmg(PlayerEntity *player_entity, double dmg) {
 
 void ability_bomb_activate() {
     printf("Bomb! \n");
+    Projectile *bomb = malloc(sizeof(Projectile));
+    *bomb = create_bomb_projectile(player->pos, v2_mul(playerForward, to_vec(1.4)));
+    bomb->height_vel = 700;
+    bomb->entity.height = get_max_height() / 2 + get_player_height();
+
+    add_game_object(bomb, PROJECTILE);
 }
 
 Ability ability_bomb_create() {
@@ -4427,16 +4455,91 @@ Ability ability_bomb_create() {
         .activate = ability_bomb_activate,
         .before_activate = NULL,
         .can_use = false,
-        .cooldown = 10,
+        .cooldown = 2,
         .delay = 0,
         .delay_timer = 0,
         .texture = entityTexture,
         .tick = default_ability_tick,
-        .timer = 10,
+        .timer = 2,
         .type = A_SPECIAL
     };
 
     return ability;
+}
+
+bool is_projectile_type(int type) {
+    return in_range(type, PROJECTILE_START, PROJECTILE_END);
+}
+
+void projectile_tick(Projectile *projectile, double delta) {
+
+    cd_print(true, "bruh \n");
+
+    if (!projectile->_created && projectile->on_create != NULL) {
+        projectile->on_create(projectile);
+        projectile->_created = true;
+    }
+
+    projectile->vel = v2_add(projectile->vel, v2_mul(projectile->accel, to_vec(delta * 144)));
+    projectile->height_vel += projectile->height_accel * delta;
+
+    projectile->entity.pos = v2_add(projectile->entity.pos, v2_mul(projectile->vel, to_vec(delta * 144)));
+    projectile->entity.height += projectile->height_vel * delta * 144;
+
+    if (projectile->entity.height <= get_max_height() / 2) {
+        if (projectile->destroy_on_floor) {
+            printf("Projectile destroyed on floor. \n");
+            projectile_destroy(projectile);
+            return;
+        }
+
+        projectile->height_vel *= -projectile->bounciness;
+        projectile->entity.height = get_max_height() / 2;
+    }
+
+    projectile->life_timer -= delta;
+    if (projectile->life_timer <= 0) {
+        printf("Projectile time ran out. \n");
+        projectile_destroy(projectile);
+        return;
+    }
+    
+    if (projectile->on_tick != NULL) {
+        projectile->on_tick(projectile, delta);
+    }
+}
+
+void projectile_destroy(Projectile *projectile) {
+    if (projectile->on_destruction != NULL) {
+        projectile->on_destruction(projectile);
+    }
+
+    remove_game_object(projectile, PROJECTILE);
+}
+
+Projectile create_default_projectile(double life_time) {
+    Projectile projectile = {0};
+
+    projectile.life_time = life_time;
+    projectile.life_timer = life_time;
+    
+    return projectile;
+}
+
+Projectile create_bomb_projectile(v2 pos, v2 start_vel) {
+    Projectile projectile = create_default_projectile(1.6);
+
+    projectile.height_accel = PROJECTILE_GRAVITY;
+    projectile.bounciness = 0.5;
+    projectile.destroy_on_floor = false;
+    projectile.entity.pos = pos;
+    projectile.vel = start_vel;
+    projectile.entity.sprite = createSprite(false, 0);
+    projectile.entity.sprite->texture = entityTexture;
+    projectile.entity.size = to_vec(8000);
+    
+    
+    return projectile;
 }
 
 
