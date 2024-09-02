@@ -11,9 +11,9 @@
 
 // #DEFINITIONS
 
-#define DEBUG_FLAG true
+#define DEBUG_FLAG false
 
-#define SERVER_IP "127.0.0.1"
+#define SERVER_IP "84.95.65.201"
 #define SERVER_PORT 1155
 #define TPS 300
 #define WINDOW_WIDTH 1024
@@ -55,7 +55,16 @@ enum PacketTypes {
     PACKET_REQUEST_DUNGEON_SEED,
     PACKET_ABILITY_SHOOT,
     PACKET_HOST_LEFT,
-    PACKET_PLAYER_LEFT
+    PACKET_PLAYER_LEFT,
+    PACKET_ABILITY_BOMB
+};
+
+struct ability_bomb_packet {
+    v2 pos;
+    double height;
+    v2 vel;
+    double height_vel;
+    int sender_id;
 };
 
 struct player_left_packet {
@@ -76,7 +85,9 @@ struct dungeon_seed_packet {
 struct player_pos_packet {
     v2 pos; // 16
     double height; // 8
+    v2 dir;
     int id; // 4
+    SDL_Color color;
     // 4 padding
 };
 
@@ -262,7 +273,9 @@ typedef struct PlayerEntity {
     v2 desired_pos;
     double desired_height;
     CircleCollider collider;
+    v2 dir;
     int id;
+    Entity *direction_indicator;
 } PlayerEntity;
 
 typedef struct LightPoint {
@@ -630,7 +643,7 @@ GPU_Image *shotgun_icon;
 GPU_Image *exploder_hit;
 GPU_Image **exploder_explosion_texture;
 GPU_Image **shooter_dirs_textures;
-GPU_Image *defualt_particle_texture;
+GPU_Image *default_particle_texture;
 GPU_Image *mimran_jumpscare;
 GPU_Image *shooter_hit_texture;
 GPU_Image *healthbar_texture;
@@ -681,6 +694,8 @@ Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
 
 
 // #VAR
+
+SDL_Color client_self_color = {0};
 
 v2 spawn_point = {500, 500};
 
@@ -868,6 +883,12 @@ int main(int argc, char *argv[]) {
 
 void init() {  // #INIT
 
+    randomize();
+    client_self_color.r = randi_range(125, 255);
+    client_self_color.g = randi_range(125, 255);
+    client_self_color.b = randi_range(125, 255);
+    client_self_color.a = 255;
+
     GPU_SetBlendMode(screen_image, GPU_BLEND_NORMAL);
 
 
@@ -886,6 +907,8 @@ void init() {  // #INIT
     player_hit_particles->max_speed = 160;
     player_hit_particles->target = NULL;
     player_hit_particles->sprite = (Sprite){.isAnimated = false, .texture = blood_particle};
+    player_hit_particles->start_color = (SDL_Color){255, 0, 0, 255};
+    player_hit_particles->end_color = (SDL_Color){180, 0, 0, 255};
     player_hit_particles->height_dir = 1;
     player_hit_particles->particle_lifetime = 2;
     player_hit_particles->bounciness = 0.1;
@@ -1146,6 +1169,7 @@ void playerTick(double delta) {
         struct player_pos_packet packet_data = {
             .pos = player->pos,
             .height = player->height,
+            .dir = playerForward,
             .id = client_self_id
         };
 
@@ -3281,7 +3305,7 @@ Ability ability_secondary_shoot_create() {
         .tick = default_ability_tick,
         .before_activate = NULL,
         .can_use = false,
-        .cooldown = 8,
+        .cooldown = 5,
         .delay = 0,
         .delay_timer = -1000,
         .timer = 0,
@@ -3421,7 +3445,7 @@ ParticleSpawner create_particle_spawner(v2 pos, double height) {
     sprite.animations = NULL;
     sprite.currentAnimationIdx = 0;
     sprite.isAnimated = false;
-    sprite.texture = defualt_particle_texture;
+    sprite.texture = default_particle_texture;
 
     spawner.sprite = sprite;
 
@@ -3497,7 +3521,7 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
     *particle_object = particle;
 
     if (particle.effect.entity.sprite->texture == NULL) {
-        particle.effect.entity.sprite->texture = defualt_particle_texture;
+        particle.effect.entity.sprite->texture = default_particle_texture;
         particle.effect.entity.sprite->isAnimated = false;
         printf("Error! switching to default texture! \n");
     }
@@ -3526,7 +3550,6 @@ void particle_tick(Particle *particle, double delta) {
     }
 
     particle->effect.entity.color = current_color;
-    printf("r: %d g: %d, b: %d, a: %d \n", r, g, b, a);
 
     particle->vel = v2_add(particle->vel, v2_mul(particle->accel, to_vec(delta)));
     particle->h_vel += particle->h_accel * delta;
@@ -4162,6 +4185,18 @@ void client_add_player_entity(int id) {
     player_entity->desired_height = 0;
     player_entity->collider = (CircleCollider){.radius = PLAYER_COLLIDER_RADIUS, .pos = V2_ZERO};
 
+    player_entity->direction_indicator = malloc(sizeof(Entity));
+    player_entity->direction_indicator->affected_by_light = true;
+    player_entity->direction_indicator->color = GPU_MakeColor(255, 255, 255, 255);
+    player_entity->direction_indicator->sprite = createSprite(false, 0);
+    player_entity->direction_indicator->sprite->texture = default_particle_texture;
+    player_entity->direction_indicator->height = get_max_height() / 2 + player->tallness / 2;
+    player_entity->direction_indicator->pos = V2_ZERO;
+    player_entity->direction_indicator->size = to_vec(1600);
+    
+
+    add_game_object(player_entity->direction_indicator, ENTITY);
+
     printf("Player joined! ID: %d \n", player_entity->id);
     write_to_debug_label(String_from_int(player_entity->id));
 
@@ -4187,6 +4222,7 @@ void on_client_recv(MPPacket packet, void *data) {
 
         player_entity->desired_pos = packet_data.pos;
         player_entity->desired_height = packet_data.height;
+        player_entity->dir = packet_data.dir;
     
     } else if (packet.type == PACKET_DUNGEON_SEED) {
 
@@ -4277,6 +4313,17 @@ void on_client_recv(MPPacket packet, void *data) {
                 return;
             }
         }
+    } else if (packet.type == PACKET_ABILITY_BOMB) {
+        struct ability_bomb_packet *packet_data = data;
+
+        if (packet_data->sender_id == client_self_id) return;
+
+        Projectile *bomb = malloc(sizeof(Projectile));
+        *bomb = create_bomb_projectile(packet_data->pos, packet_data->vel);
+        bomb->entity.height = packet_data->height;
+        bomb->height_vel = packet_data->height_vel;
+
+        add_game_object(bomb, PROJECTILE);
     }
 }
 
@@ -4287,6 +4334,7 @@ void player_entity_tick(PlayerEntity *player_entity, double delta) {
     player_entity->entity.pos = v2_lerp(player_entity->entity.pos, player_entity->desired_pos, 0.1 * (delta * 144));
     player_entity->entity.height = lerp(player_entity->entity.height, real_desired_height, 0.1 * (delta * 144));
     player_entity->collider.pos = player_entity->entity.pos;
+    player_entity->direction_indicator->pos = v2_add(player_entity->entity.pos, v2_mul(player_entity->dir, to_vec(20)));
 }
 
 void init_textures() {
@@ -4364,7 +4412,7 @@ void init_textures() {
         shooter_dirs_textures[i] = load_texture(fileWithExtension);
     }
 
-    defualt_particle_texture = load_texture("Textures/base_particle.png");
+    default_particle_texture = load_texture("Textures/base_particle.png");
 
     shooter_bullet_default_frames = malloc(sizeof(GPU_Image *) * 4);
     shooter_bullet_explode_frames = malloc(sizeof(GPU_Image *) * 4);
@@ -4482,6 +4530,14 @@ void ability_bomb_activate() {
     bomb->entity.height = get_max_height() / 2 + get_player_height();
 
     add_game_object(bomb, PROJECTILE);
+
+    MPPacket packet = {.type = PACKET_ABILITY_BOMB, .len = sizeof(struct ability_bomb_packet), .is_broadcast = true};
+
+    struct ability_bomb_packet packet_data = {.pos = bomb->entity.pos, .height = bomb->entity.height, .vel = bomb->vel, .height_vel = bomb->height_vel, .sender_id = client_self_id};
+
+    MPClient_send(packet, &packet_data);
+
+
 }
 
 Ability ability_bomb_create() {
@@ -4489,7 +4545,7 @@ Ability ability_bomb_create() {
         .activate = ability_bomb_activate,
         .before_activate = NULL,
         .can_use = false,
-        .cooldown = 2,
+        .cooldown = 5,
         .delay = 0,
         .delay_timer = 0,
         .texture = entityTexture,
