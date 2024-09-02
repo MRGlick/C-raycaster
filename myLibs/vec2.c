@@ -248,6 +248,10 @@ v2 v2_get_random_dir() {
     return v2_rotate((v2){1, 0}, random * 2 * PI);
 }
 
+v2 v2_reflect(v2 vector, v2 normal) {
+    return v2_sub(vector, v2_mul(to_vec(2 * v2_dot(vector, normal)), normal));
+}
+
 // #END
 
 #endif // VEC2

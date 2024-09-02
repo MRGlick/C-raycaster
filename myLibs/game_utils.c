@@ -12,7 +12,7 @@
 #include "color.c"
 #include "sounds.c"
 #include <SDL_gpu.h>
-
+#include <sys/time.h>
 
 #define RENDERER_FLAGS (SDL_RENDERER_ACCELERATED)
 #define EPSILON 0.001
@@ -70,6 +70,17 @@ v2 get_screen_size() {
 
 void init_cd_print() {
     last_print_time = SDL_GetTicks64();
+}
+
+u64 get_systime_mili() {
+	struct timeval tp;
+
+	gettimeofday(&tp, NULL);
+	return tp.tv_sec * 1000 + tp.tv_usec / 1000;
+}
+
+void randomize() {
+    srand(get_systime_mili());
 }
 
 Pixel TextureData_get_pixel(TextureData *data, int x, int y) {

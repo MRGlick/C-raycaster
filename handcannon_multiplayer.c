@@ -209,13 +209,6 @@ typedef struct Ability {
 
 } Ability;
 
-typedef struct Rapidfire {
-    Ability ability;
-    double shot_timer;
-    double shot_amount;
-    double shots_left;
-} Rapidfire;
-
 typedef struct Player {
     v2 pos, vel;
     double speed, angle, torque, collSize;
@@ -244,6 +237,7 @@ typedef struct Entity {
     Sprite *sprite;
     double height;
     bool affected_by_light;
+    SDL_Color color;
 } Entity;
 
 typedef struct Projectile {
@@ -251,6 +245,7 @@ typedef struct Projectile {
     v2 vel;
     double height_vel;
     v2 accel;
+    CircleCollider collider;
     double height_accel;
     double life_time, life_timer;
     double bounciness;
@@ -294,6 +289,7 @@ typedef struct Particle {
     v2 initial_size;
     bool fade;
     bool fade_scale;
+    SDL_Color start_color, end_color;
 } Particle;
 
 typedef struct ParticleSpawner {
@@ -331,6 +327,12 @@ typedef struct ParticleSpawner {
     bool fade;
 
     bool fade_scale;
+
+    bool affected_by_light;
+
+    int explode_particle_amount;
+
+    SDL_Color start_color, end_color;
 
 } ParticleSpawner;
 
@@ -382,6 +384,10 @@ typedef struct Room {
 } Room;
 
 // #FUNC
+
+void randomize_player_abilities();
+
+void bomb_on_destroy(Projectile *projectile);
 
 Projectile create_bomb_projectile(v2 pos, v2 start_vel);
 
@@ -471,7 +477,7 @@ void ability_secondary_shoot_activate(Ability *ability);
 
 Ability ability_dash_create();
 
-Rapidfire ability_secondary_shoot_create();
+Ability ability_secondary_shoot_create();
 
 Ability ability_primary_shoot_create();
 
@@ -585,7 +591,7 @@ void spritePlayAnim(Sprite *sprite, int idx);
 
 void ability_shoot_activate(Ability *ability);
 
-void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affected_by_light);
+void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affected_by_light, SDL_Color custom_color);
 
 void renderDirSprite(DirectionalSprite *dSprite, v2 pos, v2 size, double height);
 
@@ -668,6 +674,7 @@ GPU_ShaderBlock bloom_shader_block;
 
 // #PARTICLES (the global ones)
 ParticleSpawner *player_hit_particles;
+ParticleSpawner *bomb_explode_particles;
 
 // #ROOMGEN
 Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
@@ -861,7 +868,13 @@ int main(int argc, char *argv[]) {
 
 void init() {  // #INIT
 
+    GPU_SetBlendMode(screen_image, GPU_BLEND_NORMAL);
+
+
     //exit(1);
+
+    bomb_explode_particles = malloc(sizeof(ParticleSpawner));
+    *bomb_explode_particles = create_particle_spawner(V2_ZERO, 0);
 
     player_hit_particles = malloc(sizeof(ParticleSpawner));
     *player_hit_particles = create_particle_spawner(V2_ZERO, 0);
@@ -1447,7 +1460,7 @@ void render_floor_and_ceiling() {
     GPU_DeactivateShaderProgram();
 }
 
-void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affected_by_light) {
+void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affected_by_light, SDL_Color custom_color) {
     
 
     v2 screen_pos = worldToScreen(pos, height, false);
@@ -1472,8 +1485,6 @@ void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affe
         final_size.y
     };
 
-    
-
     int rgb[3] = {255, 255, 255};
     if (affected_by_light) {
         double light;
@@ -1495,9 +1506,15 @@ void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affe
 
         clampColors(rgb);
     }
+
+    rgb[0] *= (double)(custom_color.r) / 255;
+    rgb[1] *= (double)(custom_color.g) / 255;
+    rgb[2] *= (double)(custom_color.b) / 255;
     
 
     GPU_SetRGB(texture, rgb[0], rgb[1], rgb[2]);
+
+    
     GPU_BlitRect(texture, NULL, screen, &dstRect);
     GPU_SetRGB(texture, 255, 255, 255);
 }
@@ -1505,13 +1522,15 @@ void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affe
 void renderDirSprite(DirectionalSprite *dSprite, v2 pos, v2 size, double height) {
     GPU_Image *texture = getSpriteCurrentTexture(dir_sprite_current_sprite(dSprite, pos));
 
-    renderTexture(texture, pos, size, height, true);
+    renderTexture(texture, pos, size, height, true, (SDL_Color){255, 255, 255, 255});
 }
 
 void renderEntity(Entity entity) {  // RENDER ENTITY
     GPU_Image *texture = getSpriteCurrentTexture(entity.sprite);
 
-    renderTexture(texture, entity.pos, entity.size, entity.height, entity.affected_by_light);
+    GPU_SetRGBA(texture, entity.color.r, entity.color.g, entity.color.b, 20);
+
+    renderTexture(texture, entity.pos, entity.size, entity.height, entity.affected_by_light, entity.color);
 }
 
 typedef struct WallStripe {
@@ -1986,19 +2005,7 @@ void init_player(v2 pos) {
     player->height_vel = 0;
     player->crouching = false;
 
-    Ability *default_primary = malloc(sizeof(Ability));
-    Rapidfire *default_secondary = malloc(sizeof(Rapidfire));
-    Ability *default_utility = malloc(sizeof(Ability));
-    Ability *default_special = malloc(sizeof(Ability));
-    *default_primary = ability_primary_shoot_create();
-    *default_secondary = ability_secondary_shoot_create();
-    *default_utility = ability_dash_create();
-    *default_special = ability_bomb_create();
-
-    player->primary = default_primary;
-    player->secondary = default_secondary;
-    player->utility = default_utility;
-    player->special = default_special;
+    randomize_player_abilities();
 }
 
 // CLEAR
@@ -2195,6 +2202,7 @@ void freeObject(void *val, int type) {
             break;
     }
 }
+
 
 void shakeCamera(double strength, int ticks, bool fade, int priority) {
     if (priority < camerashake_current_priority && isCameraShaking) return;
@@ -2475,7 +2483,8 @@ Effect *createEffect(v2 pos, v2 size, Sprite *sprite, double lifeTime) {
     effect->entity.pos = pos;
     effect->entity.size = size;
     effect->entity.sprite = sprite;
-    effect->entity.height = get_max_height() * 0.75;  // idk it works
+    effect->entity.color = (SDL_Color){255, 255, 255, 255};
+    effect->entity.height = get_max_height() * 0.5;
     effect->life_time = lifeTime;
     effect->life_timer = effect->life_time;
 
@@ -2759,13 +2768,14 @@ CollisionData getCircleTileMapCollision(CircleCollider circle) {
 
 void update_entity_collisions(void *val, int type) {
     switch (type) {
-        case (int)PLAYER:;
-            
-            break;
-        case (int)BULLET: ;
-            Bullet *b = val;
-            
-            break;
+        case (int)PROJECTILE:;
+            Projectile *projectile = val;
+            CollisionData coll_data = getCircleTileMapCollision(projectile->collider);
+            if (coll_data.didCollide) {
+                projectile->entity.pos = v2_add(projectile->entity.pos, coll_data.offset);
+                projectile->vel = v2_reflect(projectile->vel, v2_normalize(coll_data.offset));
+                projectile->vel = v2_mul(to_vec(projectile->bounciness), projectile->vel);
+            }
     }
 }
 
@@ -3265,21 +3275,21 @@ void default_ability_tick(Ability *ability, double delta) {
     }
 }
 
-Rapidfire ability_secondary_shoot_create() {
-    return (Rapidfire) {
-        .ability.activate = ability_secondary_shoot_activate,
-        .ability.tick = default_ability_tick,
-        .ability.before_activate = NULL,
-        .ability.can_use = false,
-        .ability.cooldown = 8,
-        .ability.delay = 0,
-        .ability.delay_timer = -1000,
-        .ability.timer = 0,
-        .ability.type = A_SECONDARY,
-        .ability.texture = shotgun_icon,
-        .shot_amount = 16,
-        .shot_timer = 0.06,
-        .shots_left = 0
+Ability ability_secondary_shoot_create() {
+    return (Ability) {
+        .activate = ability_secondary_shoot_activate,
+        .tick = default_ability_tick,
+        .before_activate = NULL,
+        .can_use = false,
+        .cooldown = 8,
+        .delay = 0,
+        .delay_timer = -1000,
+        .timer = 0,
+        .type = A_SECONDARY,
+        .texture = shotgun_icon,
+        // .shot_amount = 6,
+        // .shot_timer = 0.06,
+        // .shots_left = 0
     };
 }
 
@@ -3288,10 +3298,11 @@ void ability_secondary_shoot_activate(Ability *ability) {
     shakeCamera(35, 15, true, 10);
     play_sound(rapidfire_sound, 0.5);
 
-    Rapidfire *rapid_fire = (Rapidfire *)ability;
-    rapid_fire->shots_left = rapid_fire->shot_amount;
+    Ability *rapid_fire = (Ability *)ability;
+    int shots = 6;
 
-    while (rapid_fire->shots_left-- > 0) _shoot(0.05);
+
+    while (shots-- > 0) _shoot(0.05);
     
 
     player->height_vel = -1;
@@ -3400,7 +3411,9 @@ ParticleSpawner create_particle_spawner(v2 pos, double height) {
         .active = true,
         .target = NULL,
         .fade = true,
-        .fade_scale = true
+        .fade_scale = true,
+        .affected_by_light = true,
+        .explode_particle_amount = 20
     };
 
     Sprite sprite;
@@ -3451,18 +3464,22 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
     particle.vel = (v2){vel_x, vel_y};
     particle.h_vel = vel_z;
 
+    particle.effect.entity.affected_by_light = spawner->affected_by_light;
+
     particle.accel = spawner->accel;
     particle.h_accel = spawner->height_accel;
 
     particle.effect.life_time = spawner->particle_lifetime;
     particle.effect.life_timer = particle.effect.life_time;
 
+    particle.start_color = spawner->start_color;
+    particle.end_color = spawner->end_color;
+
     particle.bounciness = spawner->bounciness;
     particle.floor_drag = spawner->floor_drag;
 
     particle.effect.entity.pos = pos; // change later with emission
     particle.effect.entity.height = spawner->height;
-    particle.effect.entity.affected_by_light = true;
     
     particle.fade = spawner->fade;
     particle.fade_scale = spawner->fade_scale;
@@ -3491,6 +3508,25 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
 
 
 void particle_tick(Particle *particle, double delta) {
+
+    SDL_Color current_color;
+
+    double prog = inverse_lerp(particle->effect.life_time, 0, particle->effect.life_timer);
+
+    int r = lerp(particle->start_color.r, particle->end_color.r, prog);
+    int g = lerp(particle->start_color.g, particle->end_color.g, prog);
+    int b = lerp(particle->start_color.b, particle->end_color.b, prog);
+    int a = lerp(particle->start_color.a, particle->end_color.a, prog);
+
+    if (particle->end_color.a == 0) {
+        current_color = particle->start_color;
+        current_color.a = a;
+    } else {
+        current_color = (SDL_Color){r, g, b, a};
+    }
+
+    particle->effect.entity.color = current_color;
+    printf("r: %d g: %d, b: %d, a: %d \n", r, g, b, a);
 
     particle->vel = v2_add(particle->vel, v2_mul(particle->accel, to_vec(delta)));
     particle->h_vel += particle->h_accel * delta;
@@ -3650,7 +3686,7 @@ void toggle_pause() {
 }
 
 void particle_spawner_explode(ParticleSpawner *spawner) {
-    for (int i = 0; i < 20; i++) {
+    for (int i = 0; i < spawner->explode_particle_amount; i++) {
         particle_spawner_spawn(spawner);
     }
 }
@@ -4121,6 +4157,7 @@ void client_add_player_entity(int id) {
     player_entity->entity.size = to_vec(10000);
     player_entity->entity.sprite = createSprite(false, 0);
     player_entity->entity.sprite->texture = entityTexture;
+    player_entity->entity.color = (SDL_Color){255, 255, 255,  255};
     player_entity->desired_pos = V2_ZERO;
     player_entity->desired_height = 0;
     player_entity->collider = (CircleCollider){.radius = PLAYER_COLLIDER_RADIUS, .pos = V2_ZERO};
@@ -4162,8 +4199,6 @@ void on_client_recv(MPPacket packet, void *data) {
         struct dungeon_seed_packet *packet_data = data;
 
         client_dungeon_seed = packet_data->seed;
-
-        srand(client_dungeon_seed);
 
         loading_map = true;
 
@@ -4444,7 +4479,6 @@ void ability_bomb_activate() {
     printf("Bomb! \n");
     Projectile *bomb = malloc(sizeof(Projectile));
     *bomb = create_bomb_projectile(player->pos, v2_mul(playerForward, to_vec(1.4)));
-    bomb->height_vel = 700;
     bomb->entity.height = get_max_height() / 2 + get_player_height();
 
     add_game_object(bomb, PROJECTILE);
@@ -4504,6 +4538,8 @@ void projectile_tick(Projectile *projectile, double delta) {
         return;
     }
     
+    projectile->collider.pos = projectile->entity.pos;
+
     if (projectile->on_tick != NULL) {
         projectile->on_tick(projectile, delta);
     }
@@ -4522,7 +4558,9 @@ Projectile create_default_projectile(double life_time) {
 
     projectile.life_time = life_time;
     projectile.life_timer = life_time;
-    
+    projectile.entity.color = (SDL_Color){255, 255, 255, 255};
+    projectile.collider.radius = 15;
+
     return projectile;
 }
 
@@ -4533,13 +4571,93 @@ Projectile create_bomb_projectile(v2 pos, v2 start_vel) {
     projectile.bounciness = 0.5;
     projectile.destroy_on_floor = false;
     projectile.entity.pos = pos;
-    projectile.vel = start_vel;
+    projectile.destroy_on_floor = true;
+    projectile.vel = v2_add(start_vel, v2_mul(player->vel, to_vec(0.2)));
+    projectile.height_vel = player->pitch * -3;
     projectile.entity.sprite = createSprite(false, 0);
     projectile.entity.sprite->texture = entityTexture;
     projectile.entity.size = to_vec(8000);
+    projectile.on_destruction = bomb_on_destroy;
     
     
     return projectile;
+}
+
+void bomb_on_destroy(Projectile *projectile) {
+    shakeCamera(30, 15, true, 10);
+    bomb_explode_particles->min_size = to_vec(15000);
+    bomb_explode_particles->max_size = to_vec(28000);
+    bomb_explode_particles->height_accel = -PARTICLE_GRAVITY * 0.1;
+    bomb_explode_particles->fade_scale = true;
+    bomb_explode_particles->affected_by_light = false;
+    bomb_explode_particles->min_speed = 30;
+    bomb_explode_particles->max_speed = 80;
+    bomb_explode_particles->spread = 2;
+    bomb_explode_particles->height_dir = 0.2;
+    bomb_explode_particles->explode_particle_amount = 20;
+    bomb_explode_particles->particle_lifetime = 1.3;
+    bomb_explode_particles->floor_drag = 0.3;
+    
+    bomb_explode_particles->start_color = GPU_MakeColor(255, 230, 120, 255);
+    bomb_explode_particles->end_color = GPU_MakeColor(255, 230, 120, 255);
+
+    bomb_explode_particles->pos = projectile->entity.pos;
+    bomb_explode_particles->height = get_max_height() / 2;
+    particle_spawner_explode(bomb_explode_particles);
+
+    bomb_explode_particles->particle_lifetime = 2.5;
+    bomb_explode_particles->start_color = GPU_MakeColor(120, 120, 120, 255);
+    bomb_explode_particles->end_color = GPU_MakeColor(0, 0, 0, 0);
+    bomb_explode_particles->min_size = to_vec(15000);
+    bomb_explode_particles->max_size = to_vec(19000);
+    bomb_explode_particles->min_speed = 100;
+    bomb_explode_particles->max_speed = 150;
+
+    particle_spawner_explode(bomb_explode_particles);
+}
+
+Ability pick_random_ability_from_array(Ability arr[], int size) {
+    return arr[randi_range(0, size - 1)];
+}
+
+void randomize_player_abilities() {
+
+    randomize();
+
+    Ability *default_primary = malloc(sizeof(Ability));
+    Ability *default_secondary = malloc(sizeof(Ability));
+    Ability *default_utility = malloc(sizeof(Ability));
+    //Ability *default_special = malloc(sizeof(Ability));
+
+    Ability primary_choices[] = {ability_primary_shoot_create()};
+    Ability secondary_choices[] = {ability_secondary_shoot_create(), ability_bomb_create()};
+    Ability utility_choices[] = {ability_dash_create()};
+    //Ability speical_choices[] = {};
+
+    *default_primary = pick_random_ability_from_array(primary_choices, sizeof(primary_choices) / sizeof(Ability));
+    *default_secondary = pick_random_ability_from_array(secondary_choices, sizeof(secondary_choices) / sizeof(Ability));
+    *default_utility = pick_random_ability_from_array(utility_choices, sizeof(utility_choices) / sizeof(Ability));
+    //*default_special = ability_bomb_create();
+
+    
+    if (player->primary != NULL) {
+        free(player->primary);
+    }
+    if (player->secondary != NULL) {
+        free(player->secondary);
+    }
+    if (player->utility != NULL) {
+        free(player->utility);
+    }
+    // if (player->special != NULL) {
+    //     free(player->special);
+    // }
+    
+
+    player->primary = default_primary;
+    player->secondary = default_secondary;
+    player->utility = default_utility;
+    player->special = NULL;
 }
 
 
