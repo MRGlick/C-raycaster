@@ -56,7 +56,8 @@ enum PacketTypes {
     PACKET_ABILITY_SHOOT,
     PACKET_HOST_LEFT,
     PACKET_PLAYER_LEFT,
-    PACKET_ABILITY_BOMB
+    PACKET_ABILITY_BOMB,
+    PACKET_PLAYER_TOOK_DAMAGE
 };
 
 struct ability_bomb_packet {
@@ -631,6 +632,8 @@ UIComponent *pause_menu;
 UILabel *debug_label;
 
 // #TEXTURES
+GPU_Image *bomb_icon;
+GPU_Image **bomb_anim;
 GPU_Image *blood_particle;
 GPU_Image **dash_screen_anim;
 GPU_Image *lightmap_image;
@@ -673,6 +676,7 @@ Sprite *dash_anim_sprite;
 Sprite *leftHandSprite;
 
 // #SOUNDS
+Sound *bomb_explosion;
 Sound *rapidfire_sound;
 Sound *exploder_explosion;
 Sound *player_default_shoot;
@@ -883,6 +887,8 @@ int main(int argc, char *argv[]) {
 
 void init() {  // #INIT
 
+    bomb_explosion = create_sound("Sounds/explosion.wav");
+
     randomize();
     client_self_color.r = randi_range(25, 255);
     client_self_color.g = randi_range(25, 255);
@@ -910,7 +916,7 @@ void init() {  // #INIT
     player_hit_particles->start_color = (SDL_Color){255, 0, 0, 255};
     player_hit_particles->end_color = (SDL_Color){180, 0, 0, 255};
     player_hit_particles->height_dir = 1;
-    player_hit_particles->particle_lifetime = 2;
+    player_hit_particles->particle_lifetime = 4;
     player_hit_particles->bounciness = 0.1;
     player_hit_particles->floor_drag = 0.4;
 
@@ -2518,7 +2524,7 @@ Effect *createEffect(v2 pos, v2 size, Sprite *sprite, double lifeTime) {
 
 // Todo: add shoot cooldown for base shooting
 void ability_shoot_activate(Ability *ability) {
-    play_sound(player_default_shoot, 0.3);
+    play_sound(player_default_shoot, 0.1);
     _shoot(0);
 }
 
@@ -3087,7 +3093,7 @@ void player_take_dmg(double dmg) {
     player->health -= dmg;
 
     // play some effect or animation
-    play_sound(player_default_hurt, 0.5);
+    play_sound(player_default_hurt, 0.1);
     shakeCamera(20, 10, true, 2);
 
     player_hit_particles->pos = player->pos;
@@ -3096,7 +3102,7 @@ void player_take_dmg(double dmg) {
     particle_spawner_explode(player_hit_particles);
 
     double progress_to_death = (double)(player->maxHealth - player->health) / player->maxHealth; // when it reaches 1, youre cooked
-    vignette_color = (SDL_Color){255 * progress_to_death, 0, 0};
+    vignette_color = (SDL_Color){255 * progress_to_death, 0, 0, 255};
 
     if (player->health <= 0) {
         player_die();
@@ -3321,7 +3327,7 @@ Ability ability_secondary_shoot_create() {
 void ability_secondary_shoot_activate(Ability *ability) {
 
     shakeCamera(35, 15, true, 10);
-    play_sound(rapidfire_sound, 0.5);
+    play_sound(rapidfire_sound, 0.2);
 
     Ability *rapid_fire = (Ability *)ability;
     int shots = 6;
@@ -3366,7 +3372,7 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
 
     double size = 8000;
     Effect *hitEffect = createEffect(final_pos, to_vec(size), createSprite(true, 1), 1);
-    hitEffect->entity.height = final_height - size / 2;
+    hitEffect->entity.height = final_height;
 
     hitEffect->entity.sprite->animations[0] = create_animation(5, 0, shootHitEffectFrames);
     
@@ -4320,10 +4326,12 @@ void on_client_recv(MPPacket packet, void *data) {
 
         if (packet_data->sender_id == client_self_id) return;
 
-        Projectile *bomb = malloc(sizeof(Projectile));
+         Projectile *bomb = malloc(sizeof(Projectile));
         *bomb = create_bomb_projectile(packet_data->pos, packet_data->vel);
         bomb->entity.height = packet_data->height;
         bomb->height_vel = packet_data->height_vel;
+
+        spritePlayAnim(bomb->entity.sprite, 0);
 
         add_game_object(bomb, PROJECTILE);
     }
@@ -4339,8 +4347,15 @@ void player_entity_tick(PlayerEntity *player_entity, double delta) {
     player_entity->direction_indicator->pos = v2_add(player_entity->entity.pos, v2_mul(player_entity->dir, to_vec(20)));
 }
 
+
+// #TEXTURES INIT
 void init_textures() {
     
+    bomb_icon = load_texture("Textures/Abilities/Icons/bomb_icon.png");
+
+    bomb_anim = malloc(sizeof(GPU_Image *) * 2);
+    getTextureFiles("Textures/Abilities/Bomb/bomb", 2, &bomb_anim);
+
     blood_particle = load_texture("Textures/BloodParticle.png");
     
     int bloom_frag = GPU_LoadShader(GPU_FRAGMENT_SHADER, "Shaders/bloom_frag.glsl");
@@ -4530,6 +4545,7 @@ void ability_bomb_activate() {
     Projectile *bomb = malloc(sizeof(Projectile));
     *bomb = create_bomb_projectile(player->pos, v2_mul(playerForward, to_vec(1.4)));
     bomb->entity.height = get_max_height() / 2 + get_player_height();
+    spritePlayAnim(bomb->entity.sprite, 0);
 
     add_game_object(bomb, PROJECTILE);
 
@@ -4550,7 +4566,7 @@ Ability ability_bomb_create() {
         .cooldown = 5,
         .delay = 0,
         .delay_timer = 0,
-        .texture = entityTexture,
+        .texture = bomb_icon,
         .tick = default_ability_tick,
         .timer = 2,
         .type = A_SPECIAL
@@ -4578,7 +4594,7 @@ void projectile_tick(Projectile *projectile, double delta) {
     projectile->entity.pos = v2_add(projectile->entity.pos, v2_mul(projectile->vel, to_vec(delta * 144)));
     projectile->entity.height += projectile->height_vel * delta * 144;
 
-    if (projectile->entity.height <= get_max_height() / 2) {
+    if (projectile->entity.height - projectile->entity.size.y / 2 <= get_max_height() / 2) {
         if (projectile->destroy_on_floor) {
             printf("Projectile destroyed on floor. \n");
             projectile_destroy(projectile);
@@ -4586,7 +4602,11 @@ void projectile_tick(Projectile *projectile, double delta) {
         }
 
         projectile->height_vel *= -projectile->bounciness;
-        projectile->entity.height = get_max_height() / 2;
+        projectile->entity.height = get_max_height() / 2 + projectile->entity.size.y / 2;
+    }
+    if (projectile->entity.height + projectile->entity.size.y / 2 >= get_max_height() * 1.5) {
+        projectile->height_vel *= -projectile->bounciness;
+        projectile->entity.height = get_max_height() * 1.5 - projectile->entity.size.y / 2;
     }
 
     projectile->life_timer -= delta;
@@ -4617,7 +4637,7 @@ Projectile create_default_projectile(double life_time) {
     projectile.life_time = life_time;
     projectile.life_timer = life_time;
     projectile.entity.color = (SDL_Color){255, 255, 255, 255};
-    projectile.collider.radius = 15;
+    projectile.collider.radius = 5;
 
     return projectile;
 }
@@ -4626,14 +4646,14 @@ Projectile create_bomb_projectile(v2 pos, v2 start_vel) {
     Projectile projectile = create_default_projectile(1.6);
 
     projectile.height_accel = PROJECTILE_GRAVITY;
-    projectile.bounciness = 0.5;
-    projectile.destroy_on_floor = false;
-    projectile.entity.pos = pos;
+    projectile.bounciness = 1.0;
     projectile.destroy_on_floor = true;
-    projectile.vel = v2_add(start_vel, v2_mul(player->vel, to_vec(0.2)));
-    projectile.height_vel = player->pitch * -3;
-    projectile.entity.sprite = createSprite(false, 0);
-    projectile.entity.sprite->texture = entityTexture;
+    projectile.entity.pos = pos;
+    projectile.vel = v2_add(start_vel, v2_mul(player->vel, to_vec(0.5)));
+    projectile.height_vel = (is_player_on_floor()? 0 : player->height_vel * 0.5) + player->pitch * -3;
+    projectile.entity.sprite = createSprite(true, 1);
+    projectile.entity.sprite->animations[0] = create_animation(2, 1, bomb_anim);
+    projectile.entity.sprite->animations[0].loop = true;
     projectile.entity.size = to_vec(8000);
     projectile.on_destruction = bomb_on_destroy;
     
@@ -4642,6 +4662,9 @@ Projectile create_bomb_projectile(v2 pos, v2 start_vel) {
 }
 
 void bomb_on_destroy(Projectile *projectile) {
+
+    static const int MAX_DIST = 50;
+
     shakeCamera(30, 15, true, 10);
     bomb_explode_particles->min_size = to_vec(15000);
     bomb_explode_particles->max_size = to_vec(28000);
@@ -4672,6 +4695,32 @@ void bomb_on_destroy(Projectile *projectile) {
     bomb_explode_particles->max_speed = 150;
 
     particle_spawner_explode(bomb_explode_particles);
+
+    play_spatial_sound(bomb_explosion, 0.5, player->pos, projectile->entity.pos, 500);
+
+
+    double dist_sqr_to_player = v2_distance_squared(projectile->entity.pos, player->pos);
+
+    if (dist_sqr_to_player < MAX_DIST * MAX_DIST) {
+        double dmg = inverse_lerp(MAX_DIST * MAX_DIST, 0, dist_sqr_to_player) * 8;
+        player_take_dmg(dmg);
+    }
+
+    for (int i = 0; i < gameobjects->length; i++) {
+        obj *object = arraylist_get(gameobjects, i);
+        if (object->type != PLAYER_ENTITY) continue;
+
+        PlayerEntity *player_entity = object->val;
+        
+        double dist_sqr = v2_distance(projectile->entity.pos, player_entity->entity.pos);
+        
+        
+
+        if (dist_sqr_to_player < MAX_DIST * MAX_DIST) {
+            double dmg = inverse_lerp(MAX_DIST * MAX_DIST, 0, dist_sqr_to_player) * 8;
+            player_entity_take_dmg(player_entity, dmg);
+        }
+    }
 }
 
 Ability pick_random_ability_from_array(Ability arr[], int size) {
