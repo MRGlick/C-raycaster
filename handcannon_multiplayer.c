@@ -884,9 +884,9 @@ int main(int argc, char *argv[]) {
 void init() {  // #INIT
 
     randomize();
-    client_self_color.r = randi_range(125, 255);
-    client_self_color.g = randi_range(125, 255);
-    client_self_color.b = randi_range(125, 255);
+    client_self_color.r = randi_range(25, 255);
+    client_self_color.g = randi_range(25, 255);
+    client_self_color.b = randi_range(25, 255);
     client_self_color.a = 255;
 
     GPU_SetBlendMode(screen_image, GPU_BLEND_NORMAL);
@@ -1170,7 +1170,8 @@ void playerTick(double delta) {
             .pos = player->pos,
             .height = player->height,
             .dir = playerForward,
-            .id = client_self_id
+            .id = client_self_id,
+            .color = client_self_color
         };
 
         MPPacket packet = {
@@ -4223,6 +4224,7 @@ void on_client_recv(MPPacket packet, void *data) {
         player_entity->desired_pos = packet_data.pos;
         player_entity->desired_height = packet_data.height;
         player_entity->dir = packet_data.dir;
+        player_entity->entity.color = packet_data.color;
     
     } else if (packet.type == PACKET_DUNGEON_SEED) {
 
