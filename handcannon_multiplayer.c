@@ -254,6 +254,7 @@ typedef struct Entity {
 
 typedef struct Projectile {
     Entity entity;
+    int type;
     v2 vel;
     double height_vel;
     v2 accel;
@@ -269,6 +270,10 @@ typedef struct Projectile {
 
 } Projectile;
 
+enum ProjectileTypes {
+    BOMB
+};
+
 typedef struct PlayerEntity {
     Entity entity;
     v2 desired_pos;
@@ -277,6 +282,7 @@ typedef struct PlayerEntity {
     v2 dir;
     int id;
     Entity *direction_indicator;
+    DirectionalSprite *dir_sprite;
 } PlayerEntity;
 
 typedef struct LightPoint {
@@ -398,6 +404,12 @@ typedef struct Room {
 } Room;
 
 // #FUNC
+
+CollisionData get_circle_collision(CircleCollider col1, CircleCollider col2);
+
+void bomb_on_tick(Projectile *projectile, double delta);
+
+void entity_tick(Entity *entity, double delta);
 
 void randomize_player_abilities();
 
@@ -632,6 +644,7 @@ UIComponent *pause_menu;
 UILabel *debug_label;
 
 // #TEXTURES
+GPU_Image **player_textures;
 GPU_Image *bomb_icon;
 GPU_Image **bomb_anim;
 GPU_Image *blood_particle;
@@ -913,10 +926,10 @@ void init() {  // #INIT
     player_hit_particles->max_speed = 160;
     player_hit_particles->target = NULL;
     player_hit_particles->sprite = (Sprite){.isAnimated = false, .texture = blood_particle};
-    player_hit_particles->start_color = (SDL_Color){255, 0, 0, 255};
-    player_hit_particles->end_color = (SDL_Color){180, 0, 0, 255};
+    player_hit_particles->start_color = (SDL_Color){255, 255, 255, 255};
+    player_hit_particles->end_color = (SDL_Color){255, 180, 180, 255};
     player_hit_particles->height_dir = 1;
-    player_hit_particles->particle_lifetime = 4;
+    player_hit_particles->particle_lifetime = 1.5;
     player_hit_particles->bounciness = 0.1;
     player_hit_particles->floor_drag = 0.4;
 
@@ -1232,7 +1245,10 @@ void objectTick(void *obj, int type, double delta) {
             break;
         case (int)PLAYER_ENTITY:
             player_entity_tick(obj, delta);
-            break; 
+            break;
+        case (int)ENTITY:
+            entity_tick(obj, delta);
+            break;
     }
 }
 
@@ -1552,7 +1568,8 @@ void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affe
 
 void renderDirSprite(DirectionalSprite *dSprite, v2 pos, v2 size, double height) {
     GPU_Image *texture = getSpriteCurrentTexture(dir_sprite_current_sprite(dSprite, pos));
-
+    
+    cd_print(true, "Rendering dir sprite; \n");
     renderTexture(texture, pos, size, height, true, (SDL_Color){255, 255, 255, 255});
 }
 
@@ -1673,6 +1690,11 @@ RenderObject *getRenderList() {
 
             currentRObj.val = object->val;
             currentRObj.type = ENTITY;
+
+            if (object->type == PLAYER_ENTITY) {
+                currentRObj.type = PLAYER_ENTITY;
+            }
+
             pos = ((Entity *)object->val)->pos;
 
         } else {
@@ -1976,6 +1998,10 @@ void render(double delta) {  // #RENDER
                     renderEntity(bullet->entity);
                 }
                 break;
+            case (int)PLAYER_ENTITY: ;
+                PlayerEntity *player_entity = rObj.val;
+                renderDirSprite(player_entity->dir_sprite, player_entity->entity.pos, player_entity->entity.size, player_entity->entity.height);
+                break;
         }
     }
 
@@ -2226,6 +2252,12 @@ void freeObject(void *val, int type) {
             }
 
             free(bullet);
+            break;
+        case (int)PLAYER_ENTITY:;
+            PlayerEntity *player_entity = val;
+            remove_game_object(player_entity->dir_sprite, DIR_SPRITE);
+            remove_game_object(player_entity->direction_indicator, ENTITY);
+            free(val);
             break;
 
         default:
@@ -3327,7 +3359,7 @@ Ability ability_secondary_shoot_create() {
 void ability_secondary_shoot_activate(Ability *ability) {
 
     shakeCamera(35, 15, true, 10);
-    play_sound(rapidfire_sound, 0.2);
+    play_sound(rapidfire_sound, 0.1);
 
     Ability *rapid_fire = (Ability *)ability;
     int shots = 6;
@@ -4204,6 +4236,13 @@ void client_add_player_entity(int id) {
 
     add_game_object(player_entity->direction_indicator, ENTITY);
 
+    player_entity->dir_sprite = createDirSprite(16);
+    for (int i = 0; i < 16; i++) {
+        Sprite *sprite = createSprite(false, 0);
+        sprite->texture = player_textures[i];
+        player_entity->dir_sprite->sprites[i] = sprite;
+    }
+
     printf("Player joined! ID: %d \n", player_entity->id);
     write_to_debug_label(String_from_int(player_entity->id));
 
@@ -4345,12 +4384,19 @@ void player_entity_tick(PlayerEntity *player_entity, double delta) {
     player_entity->entity.height = lerp(player_entity->entity.height, real_desired_height, 0.1 * (delta * 144));
     player_entity->collider.pos = player_entity->entity.pos;
     player_entity->direction_indicator->pos = v2_add(player_entity->entity.pos, v2_mul(player_entity->dir, to_vec(20)));
+    player_entity->direction_indicator->height = player_entity->entity.height + player->tallness * .25;
+    player_entity->dir_sprite->dir = player_entity->dir;
+
+    dSpriteTick(player_entity->dir_sprite, player_entity->entity.pos, delta);
 }
 
 
 // #TEXTURES INIT
 void init_textures() {
     
+    player_textures = malloc(sizeof(GPU_Image *) * 16);
+    getTextureFiles("Textures/Player/player", 16, &player_textures);
+
     bomb_icon = load_texture("Textures/Abilities/Icons/bomb_icon.png");
 
     bomb_anim = malloc(sizeof(GPU_Image *) * 2);
@@ -4543,7 +4589,7 @@ void player_entity_take_dmg(PlayerEntity *player_entity, double dmg) {
 void ability_bomb_activate() {
     printf("Bomb! \n");
     Projectile *bomb = malloc(sizeof(Projectile));
-    *bomb = create_bomb_projectile(player->pos, v2_mul(playerForward, to_vec(1.4)));
+    *bomb = create_bomb_projectile(v2_add(player->pos, v2_mul(playerForward, to_vec(15))), v2_mul(playerForward, to_vec(1.4)));
     bomb->entity.height = get_max_height() / 2 + get_player_height();
     spritePlayAnim(bomb->entity.sprite, 0);
 
@@ -4618,9 +4664,13 @@ void projectile_tick(Projectile *projectile, double delta) {
     
     projectile->collider.pos = projectile->entity.pos;
 
+    spriteTick(projectile->entity.sprite, delta);
+
     if (projectile->on_tick != NULL) {
         projectile->on_tick(projectile, delta);
     }
+
+
 }
 
 void projectile_destroy(Projectile *projectile) {
@@ -4644,10 +4694,12 @@ Projectile create_default_projectile(double life_time) {
 
 Projectile create_bomb_projectile(v2 pos, v2 start_vel) {
     Projectile projectile = create_default_projectile(1.6);
+    
+    projectile.type = BOMB;
 
     projectile.height_accel = PROJECTILE_GRAVITY;
     projectile.bounciness = 1.0;
-    projectile.destroy_on_floor = true;
+    projectile.destroy_on_floor = false;
     projectile.entity.pos = pos;
     projectile.vel = v2_add(start_vel, v2_mul(player->vel, to_vec(0.5)));
     projectile.height_vel = (is_player_on_floor()? 0 : player->height_vel * 0.5) + player->pitch * -3;
@@ -4656,14 +4708,14 @@ Projectile create_bomb_projectile(v2 pos, v2 start_vel) {
     projectile.entity.sprite->animations[0].loop = true;
     projectile.entity.size = to_vec(8000);
     projectile.on_destruction = bomb_on_destroy;
-    
+    projectile.on_tick = bomb_on_tick;
     
     return projectile;
 }
 
 void bomb_on_destroy(Projectile *projectile) {
 
-    static const int MAX_DIST = 50;
+    static const int MAX_DIST = 80;
 
     shakeCamera(30, 15, true, 10);
     bomb_explode_particles->min_size = to_vec(15000);
@@ -4765,6 +4817,44 @@ void randomize_player_abilities() {
     player->secondary = default_secondary;
     player->utility = default_utility;
     player->special = NULL;
+}
+
+void entity_tick(Entity *entity, double delta) {
+    spriteTick(entity->sprite, delta);
+}
+
+void bomb_on_tick(Projectile *projectile, double delta) {
+
+
+    if (get_circle_collision(projectile->collider, *player->collider).didCollide) {
+        projectile_destroy(projectile);
+        return;
+    }
+
+    for (int i = 0; i < gameobjects->length; i++) {
+        obj *object = arraylist_get(gameobjects, i);
+        if (object->type != PLAYER_ENTITY) continue;
+
+        PlayerEntity *player_entity = object->val;
+
+        if (get_circle_collision(projectile->collider, player_entity->collider).didCollide) {
+            projectile_destroy(projectile);
+            return;
+        }
+    }
+}
+
+CollisionData get_circle_collision(CircleCollider col1, CircleCollider col2) {
+    double dist_sqr = v2_distance_squared(col1.pos, col2.pos);
+
+    CollisionData data = {0};
+
+    if (dist_sqr < (col1.radius * col1.radius + col2.radius + col2.radius)) {
+        data.didCollide = true;
+    }
+
+
+    return data;
 }
 
 
