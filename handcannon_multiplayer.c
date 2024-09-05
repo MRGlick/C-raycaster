@@ -405,6 +405,8 @@ typedef struct Room {
 
 // #FUNC
 
+void actually_remove_game_object(void *val, int type);
+
 CollisionData get_circle_collision(CircleCollider col1, CircleCollider col2);
 
 void bomb_on_tick(Projectile *projectile, double delta);
@@ -712,6 +714,8 @@ Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
 
 // #VAR
 
+obj *game_objects_deletion_queue;
+
 SDL_Color client_self_color = {0};
 
 v2 spawn_point = {500, 500};
@@ -899,6 +903,8 @@ int main(int argc, char *argv[]) {
 }
 
 void init() {  // #INIT
+
+    game_objects_deletion_queue = array(obj, 10);
 
     bomb_explosion = create_sound("Sounds/explosion.wav");
 
@@ -1321,6 +1327,12 @@ void tick(double delta) {
         queued_player_death = false;
         _player_die();
     }
+
+
+    for (int i = array_length(game_objects_deletion_queue) - 1; i >= 0; i--) {
+        actually_remove_game_object(game_objects_deletion_queue[i].val, game_objects_deletion_queue[i].type);
+        array_remove(game_objects_deletion_queue, i);
+    }
 }
 
 // for slower decay, make 'a' smaller.
@@ -1568,8 +1580,6 @@ void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affe
 
 void renderDirSprite(DirectionalSprite *dSprite, v2 pos, v2 size, double height) {
     GPU_Image *texture = getSpriteCurrentTexture(dir_sprite_current_sprite(dSprite, pos));
-    
-    cd_print(true, "Rendering dir sprite; \n");
     renderTexture(texture, pos, size, height, true, (SDL_Color){255, 255, 255, 255});
 }
 
@@ -1680,10 +1690,6 @@ RenderObject *getRenderList() {
         v2 pos = V2_ZERO;
         
         if (is_entity_type(object->type)) {
-
-            if (is_projectile_type(object->type)) {
-                cd_print(true, "detected \n");
-            }
 
             currentRObj = (RenderObject){.isnull = false};
 
@@ -2286,10 +2292,10 @@ void add_game_object(void *val, int type) {
     }
 }
 
-// Frees and removes the game object.
+// Queues the game object for deletion.
 void remove_game_object(void *val, int type) {
-    arraylist_remove(gameobjects, arraylist_find(gameobjects, val));
-    freeObject(val, type);
+    obj object = {val, type};
+    array_append(game_objects_deletion_queue, object);
 }
 
 void init_tilemap(int ***gridPtr, int cols, int rows) {
@@ -4587,7 +4593,6 @@ void player_entity_take_dmg(PlayerEntity *player_entity, double dmg) {
 }
 
 void ability_bomb_activate() {
-    printf("Bomb! \n");
     Projectile *bomb = malloc(sizeof(Projectile));
     *bomb = create_bomb_projectile(v2_add(player->pos, v2_mul(playerForward, to_vec(15))), v2_mul(playerForward, to_vec(1.4)));
     bomb->entity.height = get_max_height() / 2 + get_player_height();
@@ -4627,8 +4632,6 @@ bool is_projectile_type(int type) {
 
 void projectile_tick(Projectile *projectile, double delta) {
 
-    cd_print(true, "bruh \n");
-
     if (!projectile->_created && projectile->on_create != NULL) {
         projectile->on_create(projectile);
         projectile->_created = true;
@@ -4642,7 +4645,6 @@ void projectile_tick(Projectile *projectile, double delta) {
 
     if (projectile->entity.height - projectile->entity.size.y / 2 <= get_max_height() / 2) {
         if (projectile->destroy_on_floor) {
-            printf("Projectile destroyed on floor. \n");
             projectile_destroy(projectile);
             return;
         }
@@ -4657,7 +4659,6 @@ void projectile_tick(Projectile *projectile, double delta) {
 
     projectile->life_timer -= delta;
     if (projectile->life_timer <= 0) {
-        printf("Projectile time ran out. \n");
         projectile_destroy(projectile);
         return;
     }
@@ -4855,6 +4856,12 @@ CollisionData get_circle_collision(CircleCollider col1, CircleCollider col2) {
 
 
     return data;
+}
+
+// Frees and removes the game object.
+void actually_remove_game_object(void *val, int type) {
+    arraylist_remove(gameobjects, arraylist_find(gameobjects, val));
+    freeObject(val, type);
 }
 
 
