@@ -11,11 +11,12 @@
 
 // #DEFINITIONS
 
-#define DEBUG_FLAG false
+#define DEBUG_FLAG true
 
-#define SERVER_IP "84.95.65.201"
+#define SERVER_IP "127.0.0.1"
 #define SERVER_PORT 1155
-#define TPS 300
+#define TPS 60
+#define FPS 60
 #define WINDOW_WIDTH 1024
 #define WINDOW_HEIGHT 580
 #define RESOLUTION_X 720
@@ -145,6 +146,25 @@ enum Types {
 
 enum Tiles { WALL1 = 1, WALL2 = 2 };
 
+
+typedef struct Node {
+
+    void (*on_render)(struct Node *);
+    void (*on_tick)(struct Node *, double);
+    void (*on_ready)(struct Node *);
+    void (*on_delete)(struct Node *);
+
+    int type;
+
+
+    struct Node *parent;
+    struct Node **children;
+} Node;
+
+#define new(type) type##_new()
+#define alloc(type) ({type *ptr; ptr = malloc(sizeof(type)); (*ptr) = new(type); ptr;})
+
+
 typedef enum AbilityType {
     A_PRIMARY,
     A_SECONDARY,
@@ -222,6 +242,9 @@ typedef struct Ability {
 } Ability;
 
 typedef struct Player {
+
+    Node node;
+
     v2 pos, vel;
     double speed, angle, torque, collSize;
     double pitch_angle;
@@ -268,10 +291,13 @@ typedef struct Projectile {
     void (*on_tick)(struct Projectile *, double);
     void (*on_destruction)(struct Projectile *);
 
+    void *extra_data;
+
 } Projectile;
 
 enum ProjectileTypes {
-    BOMB
+    PROJ_BOMB,
+    PROJ_FORCEFIELD
 };
 
 typedef struct PlayerEntity {
@@ -403,7 +429,35 @@ typedef struct Room {
     bool initialized;
 } Room;
 
+typedef struct Tilemap {
+    Node node;
+    int level_tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH];
+    int floor_tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH];
+    int ceiling_tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH];
+} Tilemap;
+
 // #FUNC
+
+Tilemap Tilemap_new();
+
+
+void Node_render(Node *node);
+
+void Node_tick(Node *node, double delta);
+
+void Node_add_child(Node *parent, Node *child);
+
+void Node_remove_child(Node *parent, Node *child);
+
+void Node_delete(Node *node);
+
+Node Node_new();
+
+void projectile_forcefield_on_tick(Projectile *projectile, double delta);
+
+Projectile projectile_forcefield_create();
+
+void ability_forcefield_activate();
 
 void actually_remove_game_object(void *val, int type);
 
@@ -430,6 +484,7 @@ bool is_projectile_type(int type);
 void ability_bomb_activate();
 
 Ability ability_bomb_create();
+Ability ability_forcefield_create();
 
 void send_dmg_packet(int id, double dmg);
 
@@ -599,7 +654,7 @@ Sprite *dir_sprite_current_sprite(DirectionalSprite *dSprite, v2 spritePos);
 
 void objectTick(void *obj, int type, double delta);
 
-void playerTick(double delta);
+void player_tick(Node *node, double delta);
 
 void dSpriteTick(DirectionalSprite *dSprite, v2 spritePos, double delta);
 
@@ -646,6 +701,7 @@ UIComponent *pause_menu;
 UILabel *debug_label;
 
 // #TEXTURES
+GPU_Image **forcefield_anim;
 GPU_Image **player_textures;
 GPU_Image *bomb_icon;
 GPU_Image **bomb_anim;
@@ -714,6 +770,10 @@ Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
 
 // #VAR
 
+
+Node *root_node;
+
+
 obj *game_objects_deletion_queue;
 
 SDL_Color client_self_color = {0};
@@ -750,8 +810,12 @@ double loading_progress = 0;
 BakedLightColor baked_light_grid[TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION][TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION];
 bool fullscreen = false;
 bool running = true;
-arraylist *gameobjects = NULL;
+arraylist *game_objects = NULL;
+
 Player *player = NULL;
+
+Tilemap *tilemap = NULL;
+
 bool keyPressArr[26];
 bool render_debug = false;
 
@@ -766,9 +830,6 @@ double tanHalfFOV;
 double tanHalfStartFOV;
 double ambient_light = 0.5;
 int floorRenderStart;
-int **levelTileMap = NULL;
-int **floorTileMap = NULL;
-int **ceilingTileMap = NULL;
 const int tileSize = WINDOW_WIDTH / 30;
 double realFps;
 bool isCameraShaking = false;
@@ -821,18 +882,24 @@ int main(int argc, char *argv[]) {
 
     
 
-    gameobjects = create_arraylist(10);
+    game_objects = NULL;
+
+    root_node = alloc(Node);
 
     init_textures();
 
     init_player(to_vec(500));
 
-    add_game_object(player, PLAYER);
+    Node_add_child(root_node, player);
 
-    reset_tilemap(&levelTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    reset_tilemap(&floorTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    reset_tilemap(&ceilingTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    bake_lights();
+    tilemap = alloc(Tilemap);
+
+    Node_add_child(root_node, tilemap);
+
+    // reset_tilemap(&tilemap->level_tilemap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    // reset_tilemap(&tilemap->floor_tilemap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    // reset_tilemap(&tilemap->ceiling_tilemap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    // bake_lights();
 
     init();
     
@@ -857,6 +924,7 @@ int main(int argc, char *argv[]) {
 
     //printf("Reached after server client shit \n");
 
+    bool ran_first_tick = false;
     u64 tick_timer = 0, render_timer = 0;
     u64 last_time = SDL_GetTicks64();
     while (running) {  // #GAME LOOP
@@ -870,12 +938,17 @@ int main(int argc, char *argv[]) {
         u64 delta = now - last_time;
         last_time = now;
         tick_timer += delta;
-        // render_timer += delta;
+        render_timer += delta;
         if (tick_timer >= 1000 / TPS) {
-            realFps = 1000.0 / tick_timer;
             tick(mili_to_sec(tick_timer) * game_speed);
-            render(mili_to_sec(tick_timer) * game_speed);
+            ran_first_tick = true;
             tick_timer = 0;
+        }
+
+        if (render_timer >= 1000 / FPS && ran_first_tick) {
+            realFps = 1000.0 / render_timer;
+            render(mili_to_sec(render_timer) * game_speed);
+            render_timer = 0;
         }
     }
 
@@ -1087,7 +1160,9 @@ v2 get_key_vector(SDL_Keycode k1, SDL_Keycode k2, SDL_Keycode k3, SDL_Keycode k4
 
 
 
-void playerTick(double delta) {
+void player_tick(Node *node, double delta) {
+
+    // why use the node when the player is global :p
 
     static double update_pos_timer = 1.0 / CLIENT_UPDATE_RATE;
 
@@ -1180,7 +1255,7 @@ void playerTick(double delta) {
     CollisionData player_coldata = getCircleTileMapCollision(*player->collider);
     if (player_coldata.didCollide) {
         player->pos = v2_add(player->pos, player_coldata.offset);
-        //player->vel = v2_slide(player->vel, player_coldata.offset);
+        player->vel = v2_slide(player->vel, v2_normalize(player_coldata.offset));
     }
 
     if (move_without_ray) 
@@ -1232,7 +1307,7 @@ void objectTick(void *obj, int type, double delta) {
 
     switch (type) {
         case (int)PLAYER:
-            playerTick(delta);
+            //playerTick(delta);
             break;
         case (int)PARTICLE:
             particle_tick(obj, delta);
@@ -1260,79 +1335,82 @@ void objectTick(void *obj, int type, double delta) {
 
 // #TICK
 void tick(double delta) {
+    
+    Node_tick(root_node, delta);
 
     //printf("tick start");
 
-    if (loading_map) {
-        init_loading_screen();
-        generate_dungeon();
-        update_loading_progress(0.1);
-        load_dungeon();
-        loading_map = false;
-    }
+    // if (loading_map) {
+    //     init_loading_screen();
+    //     generate_dungeon();
+    //     update_loading_progress(0.1);
+    //     load_dungeon();
+    //     loading_map = false;
+    // }
 
-    if (client_dungeon_seed == -1) {
-        client_dungeon_seed_request_timer -= delta;
-        if (client_dungeon_seed_request_timer <= 0) {
-            MPClient_send((MPPacket){.type = PACKET_REQUEST_DUNGEON_SEED, .len = 0, .is_broadcast = false}, NULL);
-            client_dungeon_seed_request_timer = 0.5;
-        }
-    }
+    // if (client_dungeon_seed == -1) {
+    //     client_dungeon_seed_request_timer -= delta;
+    //     if (client_dungeon_seed_request_timer <= 0) {
+    //         MPClient_send((MPPacket){.type = PACKET_REQUEST_DUNGEON_SEED, .len = 0, .is_broadcast = false}, NULL);
+    //         client_dungeon_seed_request_timer = 0.5;
+    //     }
+    // }
 
 
-    if (game_speed_duration_timer <= 0) {
-        game_speed = 1;
-    } else {
-        game_speed_duration_timer -= delta / game_speed; // so it counts by real time instead of scaled time
-    }
+    // if (game_speed_duration_timer <= 0) {
+    //     game_speed = 1;
+    // } else {
+    //     game_speed_duration_timer -= delta / game_speed; // so it counts by real time instead of scaled time
+    // }
 
-    vignette_color = lerp_color(vignette_color, (SDL_Color){0, 0, 0}, delta);
+    // vignette_color = lerp_color(vignette_color, (SDL_Color){0, 0, 0}, delta);
 
-    playerForward = get_player_forward();
-
-    
-
-    tanHalfFOV = tan(deg_to_rad(fov / 2));
-
-    SDL_SetRelativeMouseMode(lock_and_hide_mouse); // bro this function was made for me
+    // playerForward = get_player_forward();
 
     
 
-    if (isCameraShaking) {
-        cameraShakeTimeToNextTick -= delta;
-        if (cameraShakeTimeToNextTick <= 0) {
-            cameraShakeTicksLeft -= 1;
-            cameraShakeTimeToNextTick = 0.02;
-            if (cameraShakeTicksLeft <= 0) {
-                isCameraShaking = false;
-                camerashake_current_priority = -9999;
-            } else {
-                v2 rawShake = {randf_range(-cameraShakeCurrentStrength, cameraShakeCurrentStrength), randf_range(-cameraShakeCurrentStrength, cameraShakeCurrentStrength)};
-                double fade_factor = cameraShakeFadeActive? (double)cameraShakeTicksLeft / cameraShakeTicks : 1;
-                cameraOffset = v2_mul(rawShake, to_vec(fade_factor));
-            }
-        }
-    }
-    cameraOffset = v2_lerp(cameraOffset, to_vec(0), 0.2);
+    // tanHalfFOV = tan(deg_to_rad(fov / 2));
 
-    spriteTick(leftHandSprite, delta);
+    // SDL_SetRelativeMouseMode(lock_and_hide_mouse); // bro this function was made for me
 
-    for (int i = 0; i < gameobjects->length; i++) {
-        obj *object = arraylist_get(gameobjects, i);
-        objectTick(object->val, object->type, delta);
-    }
+    
 
-
-    if (queued_player_death) {
-        queued_player_death = false;
-        _player_die();
-    }
+    // if (isCameraShaking) {
+    //     cameraShakeTimeToNextTick -= delta;
+    //     if (cameraShakeTimeToNextTick <= 0) {
+    //         cameraShakeTicksLeft -= 1;
+    //         cameraShakeTimeToNextTick = 0.02;
+    //         if (cameraShakeTicksLeft <= 0) {
+    //             isCameraShaking = false;
+    //             camerashake_current_priority = -9999;
+    //         } else {
+    //             v2 rawShake = {randf_range(-cameraShakeCurrentStrength, cameraShakeCurrentStrength), randf_range(-cameraShakeCurrentStrength, cameraShakeCurrentStrength)};
+    //             double fade_factor = cameraShakeFadeActive? (double)cameraShakeTicksLeft / cameraShakeTicks : 1;
+    //             cameraOffset = v2_mul(rawShake, to_vec(fade_factor));
+    //         }
+    //     }
+    // }
+    // cameraOffset = v2_lerp(cameraOffset, to_vec(0), 0.2);
 
 
-    for (int i = array_length(game_objects_deletion_queue) - 1; i >= 0; i--) {
-        actually_remove_game_object(game_objects_deletion_queue[i].val, game_objects_deletion_queue[i].type);
-        array_remove(game_objects_deletion_queue, i);
-    }
+    // spriteTick(leftHandSprite, delta);
+
+    // for (int i = 0; i < game_objects->length; i++) {
+    //     obj *object = arraylist_get(game_objects, i);
+    //     objectTick(object->val, object->type, delta);
+    // }
+
+
+    // if (queued_player_death) {
+    //     queued_player_death = false;
+    //     _player_die();
+    // }
+
+
+    // for (int i = array_length(game_objects_deletion_queue) - 1; i >= 0; i--) {
+    //     actually_remove_game_object(game_objects_deletion_queue[i].val, game_objects_deletion_queue[i].type);
+    //     array_remove(game_objects_deletion_queue, i);
+    // }
 }
 
 // for slower decay, make 'a' smaller.
@@ -1345,8 +1423,8 @@ void renderDebug() {  // #DEBUG
 
     for (int r = 0; r < ROOM_HEIGHT * DUNGEON_SIZE; r++) {
         for (int c = 0; c < ROOM_WIDTH * DUNGEON_SIZE; c++) {
-            bool is_wall = levelTileMap[r][c] == -1? 0 : 1;
-            bool is_floor_light = floorTileMap[r][c] == P_FLOOR_LIGHT? true : false;
+            bool is_wall = tilemap->level_tilemap[r][c] == -1? 0 : 1;
+            bool is_floor_light = tilemap->floor_tilemap[r][c] == P_FLOOR_LIGHT? true : false;
 
             if (is_wall) {
                 GPU_RectangleFilled2(screen, (GPU_Rect){c * tile_size / 2, r * tile_size / 2, tile_size / 2, tile_size / 2}, GPU_MakeColor(255 * is_floor_light, 255, 255, 255));
@@ -1660,7 +1738,7 @@ int _cmp(const void *a, const void *b) {
 }
 
 RenderObject *getRenderList() {
-    RenderObject *renderList = array(RenderObject, RESOLUTION_X + gameobjects->length - 1);
+    RenderObject *renderList = array(RenderObject, RESOLUTION_X + game_objects->length - 1);
 
     if (NUM_WALL_THREADS == 1) {
         int i = 0;
@@ -1683,8 +1761,8 @@ RenderObject *getRenderList() {
         array_append(renderList, wallStripesToRender[i]);
     }
 
-    for (int i = 0; i < gameobjects->length; i++) {
-        obj *object = arraylist_get(gameobjects, i);
+    for (int i = 0; i < game_objects->length; i++) {
+        obj *object = arraylist_get(game_objects, i);
 
         RenderObject currentRObj = (RenderObject){.isnull = true};
         v2 pos = V2_ZERO;
@@ -1961,79 +2039,81 @@ void render(double delta) {  // #RENDER
         return;
     }
 
-    //printf("render start \n");
+    Node_render(root_node);
 
-    GPU_Clear(screen);
-    GPU_Clear(hud);
+    // //printf("render start \n");
 
-    String title = String("FPS: ");
-    String fps_text = String_new(20);
-    decimal_to_text(realFps, fps_text.data);
-    String final = String_concat(title, fps_text);
+    // GPU_Clear(screen);
+    // GPU_Clear(hud);
 
-    SDL_SetWindowTitle(get_window(), final.data);
+    // String title = String("FPS: ");
+    // String fps_text = String_new(20);
+    // decimal_to_text(realFps, fps_text.data);
+    // String final = String_concat(title, fps_text);
 
-    String_delete(&final);
-    String_delete(&fps_text);
-    String_delete(&title);
+    // SDL_SetWindowTitle(get_window(), final.data);
 
-    // SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    // String_delete(&final);
+    // String_delete(&fps_text);
+    // String_delete(&title);
 
-    RenderObject *renderList = getRenderList();
+    // // SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
-    render_floor_and_ceiling();
+    // RenderObject *renderList = getRenderList();
 
-    for (int i = 0; i < array_length(renderList); i++) {
-        RenderObject rObj = renderList[i];
-        if (rObj.isnull) {
-            continue;
-        }
+    // render_floor_and_ceiling();
 
-        switch (rObj.type) {
-            case (int)ENTITY:
-                renderEntity(*(Entity *)rObj.val);
-                break;
-            case (int)WALL_STRIPE:
-                renderWallStripe((WallStripe *)rObj.val);
-                break;
-            case (int)BULLET:;
-                Bullet *bullet = rObj.val;
-                if (bullet->dirSprite != NULL) {
-                    renderDirSprite(bullet->dirSprite, bullet->entity.pos, bullet->entity.size, bullet->entity.height);
-                } else {
-                    renderEntity(bullet->entity);
-                }
-                break;
-            case (int)PLAYER_ENTITY: ;
-                PlayerEntity *player_entity = rObj.val;
-                renderDirSprite(player_entity->dir_sprite, player_entity->entity.pos, player_entity->entity.size, player_entity->entity.height);
-                break;
-        }
-    }
+    // for (int i = 0; i < array_length(renderList); i++) {
+    //     RenderObject rObj = renderList[i];
+    //     if (rObj.isnull) {
+    //         continue;
+    //     }
 
-    array_free(renderList);
+    //     switch (rObj.type) {
+    //         case (int)ENTITY:
+    //             renderEntity(*(Entity *)rObj.val);
+    //             break;
+    //         case (int)WALL_STRIPE:
+    //             renderWallStripe((WallStripe *)rObj.val);
+    //             break;
+    //         case (int)BULLET:;
+    //             Bullet *bullet = rObj.val;
+    //             if (bullet->dirSprite != NULL) {
+    //                 renderDirSprite(bullet->dirSprite, bullet->entity.pos, bullet->entity.size, bullet->entity.height);
+    //             } else {
+    //                 renderEntity(bullet->entity);
+    //             }
+    //             break;
+    //         case (int)PLAYER_ENTITY: ;
+    //             PlayerEntity *player_entity = rObj.val;
+    //             renderDirSprite(player_entity->dir_sprite, player_entity->entity.pos, player_entity->entity.size, player_entity->entity.height);
+    //             break;
+    //     }
+    // }
 
-    if (render_debug) renderDebug();
+    // array_free(renderList);
 
-    renderHUD(delta);
+    // if (render_debug) renderDebug();
 
-    screen_modulate_r = lerp(screen_modulate_r, 1, delta / 2);
-    screen_modulate_g = lerp(screen_modulate_g, 1, delta / 2);
-    screen_modulate_b = lerp(screen_modulate_b, 1, delta / 2);
+    // renderHUD(delta);
 
-    GPU_ActivateShaderProgram(bloom_shader, &bloom_shader_block);
+    // screen_modulate_r = lerp(screen_modulate_r, 1, delta / 2);
+    // screen_modulate_g = lerp(screen_modulate_g, 1, delta / 2);
+    // screen_modulate_b = lerp(screen_modulate_b, 1, delta / 2);
 
-    GPU_SetShaderImage(screen_image, GPU_GetUniformLocation(bloom_shader, "tex"), 1);
+    // GPU_ActivateShaderProgram(bloom_shader, &bloom_shader_block);
+
+    // GPU_SetShaderImage(screen_image, GPU_GetUniformLocation(bloom_shader, "tex"), 1);
     
-    float res[2] = {WINDOW_WIDTH, WINDOW_HEIGHT};
+    // float res[2] = {WINDOW_WIDTH, WINDOW_HEIGHT};
 
-    GPU_SetUniformfv(GPU_GetUniformLocation(bloom_shader, "texResolution"), 2, 1, res);
+    // GPU_SetUniformfv(GPU_GetUniformLocation(bloom_shader, "texResolution"), 2, 1, res);
 
-    GPU_Blit(screen_image, NULL, actual_screen, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
+    // GPU_Blit(screen_image, NULL, actual_screen, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
 
-    GPU_DeactivateShaderProgram();
+    // GPU_DeactivateShaderProgram();
 
-    GPU_Blit(hud_image, NULL, actual_screen, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
+    // GPU_Blit(hud_image, NULL, actual_screen, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
 
     GPU_Flip(actual_screen);
 } // #RENDER END
@@ -2041,6 +2121,10 @@ void render(double delta) {  // #RENDER
 // #PLAYER INIT
 void init_player(v2 pos) {
     if (player == NULL) player = malloc(sizeof(Player));
+
+    player->node = new(Node);
+    player->node.on_tick = player_tick;
+
     player->angle = 0;
     player->pos = pos;
     player->vel = V2_ZERO;
@@ -2149,7 +2233,7 @@ RayCollisionData castRay(v2 pos, v2 dir) {
         }
 
         if (in_range((int)currentCell.y, 0, TILEMAP_HEIGHT - 1) && in_range((int)currentCell.x, 0, TILEMAP_WIDTH - 1)) {
-            int t = levelTileMap[(int)currentCell.y][(int)currentCell.x];
+            int t = tilemap->level_tilemap[(int)currentCell.y][(int)currentCell.x];
 
             if (t != -1) {
                 found = true;
@@ -2265,6 +2349,12 @@ void freeObject(void *val, int type) {
             remove_game_object(player_entity->direction_indicator, ENTITY);
             free(val);
             break;
+        case (int)PROJECTILE:;
+            Projectile *projectile = val;
+            if (projectile->type == PROJ_FORCEFIELD) {
+                remove_game_object(projectile->extra_data, PARTICLE_SPAWNER);
+            }
+            free(val);
 
         default:
             free(val);
@@ -2287,7 +2377,7 @@ void shakeCamera(double strength, int ticks, bool fade, int priority) {
 void add_game_object(void *val, int type) {
     switch (type) {
         default:
-            arraylist_add(gameobjects, val, type);
+            arraylist_add(game_objects, val, type);
             break;
     }
 }
@@ -2323,8 +2413,8 @@ void reset_tilemap(int ***gridPtr, int cols, int rows) {
 
 void clearLevel() {
 
-    for (int i = gameobjects->length - 1; i >= 0; i--) {
-        obj *object = arraylist_get(gameobjects, i);
+    for (int i = game_objects->length - 1; i >= 0; i--) {
+        obj *object = arraylist_get(game_objects, i);
 
         if (object->type == PLAYER) {
             continue;
@@ -2364,9 +2454,9 @@ void place_entity(v2 pos, int type) {
 void load_level(char *file) {
     clearLevel();
 
-    reset_tilemap(&levelTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    reset_tilemap(&floorTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    reset_tilemap(&ceilingTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    reset_tilemap(&tilemap->level_tilemap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    reset_tilemap(&tilemap->floor_tilemap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    reset_tilemap(&tilemap->ceiling_tilemap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
 
     FILE *fh = fopen(file, "r");
     if (fh == NULL) {
@@ -2392,8 +2482,8 @@ void load_level(char *file) {
 
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
-            floorTileMap[r][c] = data[data_ptr++];
-            if (floorTileMap[r][c] == P_FLOOR_LIGHT) {
+            tilemap->floor_tilemap[r][c] = data[data_ptr++];
+            if (tilemap->floor_tilemap[r][c] == P_FLOOR_LIGHT) {
                 v2 tile_mid = (v2){(c + 0.5) * tileSize, (r + 0.5) * tileSize};
                 spawn_floor_light(tile_mid);
             }
@@ -2402,16 +2492,16 @@ void load_level(char *file) {
 
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
-            levelTileMap[r][c] = data[data_ptr++];
+            tilemap->level_tilemap[r][c] = data[data_ptr++];
         }
     }
 
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
-            ceilingTileMap[r][c] = data[data_ptr++];
+            tilemap->ceiling_tilemap[r][c] = data[data_ptr++];
 
 
-            if (ceilingTileMap[r][c] == P_CEILING_LIGHT) {
+            if (tilemap->ceiling_tilemap[r][c] == P_CEILING_LIGHT) {
                 v2 tile_mid = (v2){(c + 0.5) * tileSize, (r + 0.5) * tileSize};
                 spawn_ceiling_light(tile_mid);
             }
@@ -2441,8 +2531,8 @@ void load_level(char *file) {
     for (int row = 0; row < TILEMAP_HEIGHT; row++) {
         for (int col = 0; col < TILEMAP_WIDTH; col++) {
 
-            int floorTile = floorTileMap[row][col] == -1? 0 : floorTileMap[row][col];
-            int ceilingTile = ceilingTileMap[row][col] == -1? 0 : ceilingTileMap[row][col];
+            int floorTile = tilemap->floor_tilemap[row][col] == -1? 0 : tilemap->floor_tilemap[row][col];
+            int ceilingTile = tilemap->ceiling_tilemap[row][col] == -1? 0 : tilemap->ceiling_tilemap[row][col];
 
             SDL_Color color = {
                 SDL_clamp(ceilingTile * 10, 0, 255),
@@ -2562,7 +2652,7 @@ Effect *createEffect(v2 pos, v2 size, Sprite *sprite, double lifeTime) {
 
 // Todo: add shoot cooldown for base shooting
 void ability_shoot_activate(Ability *ability) {
-    play_sound(player_default_shoot, 0.1);
+    play_sound(player_default_shoot, 0.4);
     _shoot(0);
 }
 
@@ -2582,8 +2672,8 @@ RayCollisionData castRayForEntities(v2 pos, v2 dir) {
     RayCollisionData data;
     double minSquaredDist = INFINITY;
 
-    for (int i = 0; i < gameobjects->length; i++) {
-        RayCollisionData newData = ray_object(ray, arraylist_get(gameobjects, i));
+    for (int i = 0; i < game_objects->length; i++) {
+        RayCollisionData newData = ray_object(ray, arraylist_get(game_objects, i));
         if (!newData.hit) continue;
 
         double currentSquaredDist = v2_distance_squared(pos, newData.collpos);
@@ -2773,7 +2863,7 @@ bool pos_in_tile(v2 pos) {
 
     if (!in_range(row, 0, TILEMAP_HEIGHT - 1) || !in_range(col, 0, TILEMAP_WIDTH - 1)) return false;
 
-    return levelTileMap[row][col] == P_WALL;
+    return tilemap->level_tilemap[row][col] == P_WALL;
 }
 
 CollisionData getCircleTileCollision(CircleCollider circle, v2 tilePos) {
@@ -2823,7 +2913,7 @@ CollisionData getCircleTileMapCollision(CircleCollider circle) {
     for (int row = gridCheckStart.y; row < gridCheckEnd.y; row++) {
         for (int col = gridCheckStart.x; col < gridCheckEnd.x; col++) {
             if (!in_range(row, 0, TILEMAP_HEIGHT - 1) || !in_range(col, 0, TILEMAP_WIDTH - 1)) continue;
-            if (levelTileMap[row][col] == -1) continue;
+            if (tilemap->level_tilemap[row][col] == -1) continue;
             CollisionData data = getCircleTileCollision(circle, (v2){col * tileSize, row * tileSize});
             if (data.didCollide) {
                 result.didCollide = true;
@@ -2894,11 +2984,13 @@ BakedLightColor _lerp_baked_light_color(BakedLightColor a, BakedLightColor b, do
 }
 
 void bake_lights() {
-   
+    
+    return;
+    
     bool has_lights = false;
 
-    for (int i = 0; i < gameobjects->length; i++) {
-        obj *object = arraylist_get(gameobjects, i);
+    for (int i = 0; i < game_objects->length; i++) {
+        obj *object = arraylist_get(game_objects, i);
 
         if (object->type == LIGHT_POINT) {
             has_lights = true;
@@ -2934,7 +3026,7 @@ void bake_lights() {
 
             bool is_in_wall = in_range(tilemap_row, 0, TILEMAP_HEIGHT - 1)
             && in_range(tilemap_col, 0, TILEMAP_WIDTH - 1)
-            && levelTileMap[tilemap_row][tilemap_col] == P_WALL;
+            && tilemap->level_tilemap[tilemap_row][tilemap_col] == P_WALL;
 
             if (is_in_wall) continue;
 
@@ -2952,8 +3044,8 @@ void bake_lights() {
 
             
 
-            for (int i = 0; i < gameobjects->length; i++) {
-                obj *current = arraylist_get(gameobjects, i);
+            for (int i = 0; i < game_objects->length; i++) {
+                obj *current = arraylist_get(game_objects, i);
                 if (current->type != LIGHT_POINT) continue;
                 
                 LightPoint *point = current->val;
@@ -3155,6 +3247,8 @@ void player_die() {
 void _player_die() {
     
     player->pos = spawn_point;
+    player->vel = V2_ZERO;
+    player->height_vel = 0;
     player->health = player->maxHealth;
 
 }
@@ -3334,11 +3428,11 @@ void default_ability_tick(Ability *ability, double delta) {
         }
     }
 
-    bool waiting_delay = ability->delay_timer > -999;
+    bool waiting_delay = ability->delay_timer > 0;
     if (waiting_delay) {
         ability->delay_timer -= delta;
         if (ability->delay_timer <= 0) {
-            ability->delay_timer = -1000;
+            ability->delay_timer = 0;
             ability->activate(ability);
         }
     }
@@ -3901,8 +3995,8 @@ void load_room(Room *room_ptr) {
 
     for (int r = 0; r < ROOM_HEIGHT; r++) {
         for (int c = 0; c < ROOM_WIDTH; c++) {
-            floorTileMap[offset_r + r][offset_c + c ] = data[data_ptr++];
-            if (floorTileMap[offset_r + r][offset_c + c ] == P_FLOOR_LIGHT) {
+            tilemap->floor_tilemap[offset_r + r][offset_c + c ] = data[data_ptr++];
+            if (tilemap->floor_tilemap[offset_r + r][offset_c + c ] == P_FLOOR_LIGHT) {
                 v2 tile_mid = (v2){(offset_c + c + 0.5) * tileSize, (offset_r + r + 0.5) * tileSize};
                 spawn_floor_light(tile_mid);
             }
@@ -3929,9 +4023,9 @@ void load_room(Room *room_ptr) {
                     room_ptr->top_entrance_pos = entrance_pos;
                 }
 
-                levelTileMap[offset_r + r][offset_c + c] = P_WALL;
+                tilemap->level_tilemap[offset_r + r][offset_c + c] = P_WALL;
             } else {
-                levelTileMap[offset_r + r][offset_c + c] = tile;
+                tilemap->level_tilemap[offset_r + r][offset_c + c] = tile;
             }
 
 
@@ -3941,10 +4035,10 @@ void load_room(Room *room_ptr) {
 
     for (int r = 0; r < ROOM_HEIGHT; r++) {
         for (int c = 0; c < ROOM_WIDTH; c++) {
-            ceilingTileMap[offset_r + r][offset_c + c ] = data[data_ptr++];
+            tilemap->ceiling_tilemap[offset_r + r][offset_c + c ] = data[data_ptr++];
 
 
-            if (ceilingTileMap[offset_r + r][offset_c + c ] == P_CEILING_LIGHT) {
+            if (tilemap->ceiling_tilemap[offset_r + r][offset_c + c ] == P_CEILING_LIGHT) {
                 v2 tile_mid = (v2){(offset_c + c + 0.5) * tileSize, (offset_r + r + 0.5) * tileSize};
                 spawn_ceiling_light(tile_mid);
             }
@@ -3989,34 +4083,34 @@ void _carve_path(v2 pos1, v2 pos2, bool vertical) {
 
         for (int c = current_col; c != start_col + col_dist / 2; c += dir_c) {
             current_col = c;
-            levelTileMap[current_row][current_col] = -1;
+            tilemap->level_tilemap[current_row][current_col] = -1;
         }
         for (int r = current_row; r != start_row + row_dist * dir_r; r += dir_r) {
             current_row = r;
-            levelTileMap[current_row][current_col] = -1;
+            tilemap->level_tilemap[current_row][current_col] = -1;
             
         }
         for (int c = current_col; c != start_col + (col_dist + 1) * dir_c; c += dir_c) {
             current_col = c;
-            levelTileMap[current_row][current_col] = -1;
+            tilemap->level_tilemap[current_row][current_col] = -1;
         }
 
     } else {
         for (int r = current_row; r != start_row + row_dist / 2; r += dir_r) {
             current_row = r;
-            levelTileMap[current_row][current_col] = -1;
+            tilemap->level_tilemap[current_row][current_col] = -1;
         }
         for (int c = current_col; c != start_col + col_dist * dir_c; c += dir_c) {
             current_col = c;
-            levelTileMap[current_row][current_col] = -1;
+            tilemap->level_tilemap[current_row][current_col] = -1;
         }
         for (int r = current_row; r != start_row + (row_dist + 1) * dir_r; r += dir_r) {
             current_row = r;
-            levelTileMap[current_row][current_col] = -1;
+            tilemap->level_tilemap[current_row][current_col] = -1;
         }
     }
 
-    levelTileMap[current_row][current_col] = -1;
+    tilemap->level_tilemap[current_row][current_col] = -1;
 }
 
 void carve_room_paths() {
@@ -4062,9 +4156,9 @@ void load_dungeon() {
 
     clearLevel();
 
-    reset_tilemap(&levelTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    reset_tilemap(&floorTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    reset_tilemap(&ceilingTileMap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    reset_tilemap(&tilemap->level_tilemap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    reset_tilemap(&tilemap->floor_tilemap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    reset_tilemap(&tilemap->ceiling_tilemap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
 
     double prog = 0.1;
 
@@ -4090,8 +4184,8 @@ void load_dungeon() {
     for (int row = 0; row < TILEMAP_HEIGHT; row++) {
         for (int col = 0; col < TILEMAP_WIDTH; col++) {
 
-            int floorTile = floorTileMap[row][col] == -1? 0 : floorTileMap[row][col];
-            int ceilingTile = ceilingTileMap[row][col] == -1? 0 : ceilingTileMap[row][col];
+            int floorTile = tilemap->floor_tilemap[row][col] == -1? 0 : tilemap->floor_tilemap[row][col];
+            int ceilingTile = tilemap->ceiling_tilemap[row][col] == -1? 0 : tilemap->ceiling_tilemap[row][col];
 
             SDL_Color color = {
                 SDL_clamp(ceilingTile * 10, 0, 255),
@@ -4354,8 +4448,8 @@ void on_client_recv(MPPacket packet, void *data) {
             return;
         }
 
-        for (int i = 0; i < gameobjects->length; i++) {
-            obj *object = arraylist_get(gameobjects, i);
+        for (int i = 0; i < game_objects->length; i++) {
+            obj *object = arraylist_get(game_objects, i);
 
             if (object->type != PLAYER_ENTITY) continue;
 
@@ -4400,6 +4494,9 @@ void player_entity_tick(PlayerEntity *player_entity, double delta) {
 // #TEXTURES INIT
 void init_textures() {
     
+    forcefield_anim = malloc(sizeof(GPU_Image *) * 3);
+    getTextureFiles("Textures/Abilities/Forcefield/forcefield", 3, &forcefield_anim);
+
     player_textures = malloc(sizeof(GPU_Image *) * 16);
     getTextureFiles("Textures/Player/player", 16, &player_textures);
 
@@ -4555,8 +4652,8 @@ void init_textures() {
 }
 
 PlayerEntity *find_player_entity_by_id(int id) {
-    for (int i = 0; i < gameobjects->length; i++) {
-        obj *object = arraylist_get(gameobjects, i);
+    for (int i = 0; i < game_objects->length; i++) {
+        obj *object = arraylist_get(game_objects, i);
 
         if (object->type == PLAYER_ENTITY) {
             PlayerEntity *player_entity = object->val;
@@ -4689,6 +4786,7 @@ Projectile create_default_projectile(double life_time) {
     projectile.life_timer = life_time;
     projectile.entity.color = (SDL_Color){255, 255, 255, 255};
     projectile.collider.radius = 5;
+    projectile.entity.size = to_vec(8000);
 
     return projectile;
 }
@@ -4696,7 +4794,7 @@ Projectile create_default_projectile(double life_time) {
 Projectile create_bomb_projectile(v2 pos, v2 start_vel) {
     Projectile projectile = create_default_projectile(1.6);
     
-    projectile.type = BOMB;
+    projectile.type = PROJ_BOMB;
 
     projectile.height_accel = PROJECTILE_GRAVITY;
     projectile.bounciness = 1.0;
@@ -4755,17 +4853,29 @@ void bomb_on_destroy(Projectile *projectile) {
     double dist_sqr_to_player = v2_distance_squared(projectile->entity.pos, player->pos);
 
     if (dist_sqr_to_player < MAX_DIST * MAX_DIST) {
-        double dmg = inverse_lerp(MAX_DIST * MAX_DIST, 0, dist_sqr_to_player) * 8;
+
+        double w = inverse_lerp(MAX_DIST * MAX_DIST, 0, dist_sqr_to_player);
+
+        double dmg = w * 8;
         player_take_dmg(dmg);
+
+        v2 full_kb = v2_mul(v2_dir(projectile->entity.pos, player->pos), to_vec(5));
+        double height_full_kb = 500;
+
+        v2 kb = v2_lerp(full_kb, V2_ZERO, 1 - w);
+        double height_kb = lerp(height_full_kb, 0, 1 - w);
+
+        player->vel = v2_add(player->vel, kb);
+        player->height_vel = max(height_kb, player->height_vel + height_kb);
     }
 
-    for (int i = 0; i < gameobjects->length; i++) {
-        obj *object = arraylist_get(gameobjects, i);
+    for (int i = 0; i < game_objects->length; i++) {
+        obj *object = arraylist_get(game_objects, i);
         if (object->type != PLAYER_ENTITY) continue;
 
         PlayerEntity *player_entity = object->val;
         
-        double dist_sqr = v2_distance(projectile->entity.pos, player_entity->entity.pos);
+        double dist_sqr = v2_distance_squared(projectile->entity.pos, player_entity->entity.pos);
         
         
 
@@ -4791,7 +4901,7 @@ void randomize_player_abilities() {
 
     Ability primary_choices[] = {ability_primary_shoot_create()};
     Ability secondary_choices[] = {ability_secondary_shoot_create(), ability_bomb_create()};
-    Ability utility_choices[] = {ability_dash_create()};
+    Ability utility_choices[] = {ability_dash_create(), ability_forcefield_create()};
     //Ability speical_choices[] = {};
 
     *default_primary = pick_random_ability_from_array(primary_choices, sizeof(primary_choices) / sizeof(Ability));
@@ -4832,8 +4942,8 @@ void bomb_on_tick(Projectile *projectile, double delta) {
         return;
     }
 
-    for (int i = 0; i < gameobjects->length; i++) {
-        obj *object = arraylist_get(gameobjects, i);
+    for (int i = 0; i < game_objects->length; i++) {
+        obj *object = arraylist_get(game_objects, i);
         if (object->type != PLAYER_ENTITY) continue;
 
         PlayerEntity *player_entity = object->val;
@@ -4860,8 +4970,179 @@ CollisionData get_circle_collision(CircleCollider col1, CircleCollider col2) {
 
 // Frees and removes the game object.
 void actually_remove_game_object(void *val, int type) {
-    arraylist_remove(gameobjects, arraylist_find(gameobjects, val));
+    arraylist_remove(game_objects, arraylist_find(game_objects, val));
     freeObject(val, type);
+}
+
+
+Ability ability_forcefield_create() {
+    Ability ability = {
+        .activate = ability_forcefield_activate,
+        .before_activate = NULL,
+        .can_use = false,
+        .cooldown = 10,
+        .timer = 10,
+        .delay_timer = 0,
+        .delay = 0,
+        .texture = entityTexture,
+        .tick = default_ability_tick,
+        .type = A_UTILITY
+    };
+
+    return ability;
+}
+
+void ability_forcefield_activate() {
+    printf("Forcefield! \n");
+
+    Projectile *proj = malloc(sizeof(Projectile));
+
+    *proj = projectile_forcefield_create();
+
+    ((ParticleSpawner *)proj->extra_data)->target = proj;
+
+    proj->entity.pos = player->pos;
+    proj->entity.height = get_max_height() / 2 + get_player_height();
+    ((ParticleSpawner *)proj->extra_data)->height = proj->entity.height;
+    proj->vel = playerForward;
+    add_game_object(proj, PROJECTILE);
+}
+
+Projectile projectile_forcefield_create() {
+    Projectile projectile = create_default_projectile(10);
+    projectile.type = PROJ_FORCEFIELD;
+    projectile.on_tick = projectile_forcefield_on_tick;
+    projectile.entity.sprite = createSprite(true, 1);
+    projectile.entity.sprite->animations[0] = create_animation(2, 1, forcefield_anim);
+    projectile.entity.sprite->animations[0].loop = true;
+    projectile.entity.size = to_vec(8000);
+
+    ParticleSpawner *particle_spawner = malloc(sizeof(ParticleSpawner));
+    *particle_spawner = create_particle_spawner(V2_ZERO, 0);
+    particle_spawner->spread = 2;
+    particle_spawner->min_size = to_vec(4000);
+    particle_spawner->max_size = to_vec(7000);
+    particle_spawner->height_dir = 1;
+    particle_spawner->start_color = Color(200, 255, 255, 255);
+    particle_spawner->end_color = Color(255, 255, 255, 255);
+    particle_spawner->active = true;
+    particle_spawner->height_accel = 0;
+    particle_spawner->particle_lifetime = 0.8;
+    particle_spawner->bounciness = 1;
+    particle_spawner->dir = (v2){10, 0};
+    particle_spawner->affected_by_light = false;
+    // particle_spawner->min_speed = 90;
+    // particle_spawner->min_speed = 290;
+    // set the target later
+
+    projectile.extra_data = particle_spawner;
+
+    add_game_object(particle_spawner, PARTICLE_SPAWNER);
+
+    return projectile;
+}
+
+void projectile_forcefield_on_tick(Projectile *projectile, double delta) {
+
+    projectile->vel = v2_lerp(projectile->vel, V2_ZERO, 0.01 * delta * 144);
+
+    for (int i = 0; i < game_objects->length; i++) {
+        obj *gameobject = arraylist_get(game_objects, i);
+        if (gameobject->type != PROJECTILE) continue;
+
+        Projectile *proj = gameobject->val;
+        if (proj == projectile) continue;
+
+        double dist_sqr = v2_distance_squared(projectile->entity.pos, proj->entity.pos);
+        if (dist_sqr < 50 * 50) {
+            proj->vel = v2_add(proj->vel, v2_dir(projectile->entity.pos, proj->entity.pos));
+            printf("Pushed! \n");
+        }
+    }
+}
+
+Node Node_new() {
+    Node node = {0};
+    node.parent = NULL;
+    node.children = array(Node *, 2);
+    node.type = -1;
+
+    return node;
+}
+
+void Node_delete(Node *node) {
+
+    if (node == NULL) return;
+
+    for (int i = array_length(node->children) - 1; i >= 0 ; i--) {
+
+        if (node->children[i]->on_delete != NULL) {
+            node->children[i]->on_delete(node->children[i]);
+        }
+
+        Node_delete(node->children[i]);
+        array_remove(node->children, i);
+    }
+
+    if (node->parent != NULL) {
+        Node_remove_child(node->parent, node);
+    }
+    
+
+    free(node->children);
+    node->children = NULL;
+    free(node);
+}
+
+void Node_add_child(Node *parent, Node *child) {
+    if (parent == NULL || child == NULL) return;
+
+
+    child->parent = parent;
+    array_append(parent->children, child);
+}
+
+
+void Node_tick(Node *node, double delta) {
+    if (node->on_tick != NULL) {
+        node->on_tick(node, delta);
+    }
+
+    for (int i = 0; i < array_length(node->children); i++) {
+        if (node->children[i]->on_tick != NULL) {
+            node->children[i]->on_tick(node->children[i], delta);
+        }
+    }
+}
+
+
+void Node_render(Node *node) {
+    if (node->on_render != NULL) {
+        node->on_render(node);
+    }
+}
+
+Tilemap Tilemap_new() {
+    Tilemap tilemap = {0};
+    tilemap.node = new(Node);
+    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
+        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+            tilemap.ceiling_tilemap[r][c] = -1;
+            tilemap.floor_tilemap[r][c] = -1;
+            tilemap.level_tilemap[r][c] = -1;
+        }
+    }
+
+    return tilemap;
+}
+
+void Node_remove_child(Node *parent, Node *child) {
+    for (int i = 0; i < array_length(parent->children); i++) {
+        if (parent->children[i] == child) {
+            array_remove(parent->children, i);
+            return;
+        }
+    }
 }
 
 

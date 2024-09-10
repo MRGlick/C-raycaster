@@ -221,6 +221,10 @@ void MPServer_send_to(MPPacket packet, void *data, SOCKET target) {
     
 }
 
+String get_ip_string() {
+    return String_new(10);
+}
+
 DWORD WINAPI _MPServer(void *data) {
     SOCKET client_socket;
     struct sockaddr_in server_addr, client_addr;
