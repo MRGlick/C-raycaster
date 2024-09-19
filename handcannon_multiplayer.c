@@ -44,6 +44,17 @@
     (v2) { WINDOW_WIDTH * 100, WINDOW_HEIGHT * 100 }
 
 
+#define iter_over_all_nodes(varname, ...) \
+    do { \
+        Node **node_arr = get_all_nodes_array(); \
+        for (int name_i_wont_use = 0; name_i_wont_use < array_length(node_arr); name_i_wont_use++) { \
+            Node *varname = node_arr[name_i_wont_use]; \
+            __VA_ARGS__ \
+        } \
+        array_free(node_arr); \
+    } while(0)
+
+
 #define get_window() SDL_GetWindowFromID(actual_screen->context->windowID)
 
 
@@ -102,46 +113,57 @@ struct player_joined_packet {
 // #TYPES
 
 enum Types {
-    PLAYER,
-    RAYCAST,
-    CIRCLE_COLLIDER,
-    RAY_COLL_DATA,
-    RENDER_OBJECT,
-    WALL_STRIPE,
-    LIGHT_POINT,
-    SPRITE,
-    PARTICLE_SPAWNER,
-    
-    DIR_SPRITE,
-    
-    ENTITY_START,
-    
-        ENTITY,
 
-        BULLET,
+    NODE_START,
 
-        PLAYER_ENTITY,
+        NODE,
 
-        PROJECTILE_START,
-            PROJECTILE,
-        PROJECTILE_END,
-
-        EFFECT_START,
-
-            EFFECT,
-            PARTICLE,
-
-        EFFECT_END,
+        PLAYER,
+        RAYCAST,
+        CIRCLE_COLLIDER,
+        RAY_COLL_DATA,
+        RENDER_OBJECT,
+        WALL_STRIPE,
+        LIGHT_POINT,
+        SPRITE,
+        PARTICLE_SPAWNER,
         
-        ENEMY_START,
-            
-            ENEMY,
-            ENEMY_SHOOTER,
-            ENEMY_EXPLODER,
-            
-        ENEMY_END,
+        DIR_SPRITE,
 
-    ENTITY_END
+        TILEMAP,
+
+        RENDERER,
+        
+        ENTITY_START,
+        
+            ENTITY,
+
+            BULLET,
+
+            PLAYER_ENTITY,
+
+            PROJECTILE_START,
+                PROJECTILE,
+            PROJECTILE_END,
+
+            EFFECT_START,
+
+                EFFECT,
+                PARTICLE,
+
+            EFFECT_END,
+            
+            ENEMY_START,
+                
+                ENEMY,
+                ENEMY_SHOOTER,
+                ENEMY_EXPLODER,
+                
+            ENEMY_END,
+
+        ENTITY_END,
+
+    NODE_END
 };
 
 enum Tiles { WALL1 = 1, WALL2 = 2 };
@@ -268,8 +290,8 @@ typedef struct Player {
 } Player;
 
 typedef struct Entity {
+    Node node;
     v2 pos, size;
-    Sprite *sprite;
     double height;
     bool affected_by_light;
     SDL_Color color;
@@ -312,6 +334,7 @@ typedef struct PlayerEntity {
 } PlayerEntity;
 
 typedef struct LightPoint {
+    Node node;
     v2 pos;
     double strength;
     double radius;
@@ -436,7 +459,26 @@ typedef struct Tilemap {
     int ceiling_tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH];
 } Tilemap;
 
+typedef struct Renderer {
+    Node node;
+} Renderer;
+
 // #FUNC
+
+
+int get_node_count();
+
+PlayerEntity PlayerEntity_new();
+
+Entity Entity_new();
+
+Node **get_all_nodes_array();
+
+LightPoint LightPoint_new();
+
+void Renderer_render(Node *node);
+
+Renderer Renderer_new();
 
 Tilemap Tilemap_new();
 
@@ -604,9 +646,7 @@ void drawSkybox();
 
 void update_entity_collisions(void *val, int type);
 
-void init_tilemap(int ***gridPtr, int cols, int rows);
-
-void reset_tilemap(int ***gridPtr, int cols, int rows);
+void reset_tilemap(int tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH]);
 
 void load_level(char *file);
 
@@ -707,8 +747,8 @@ GPU_Image *bomb_icon;
 GPU_Image **bomb_anim;
 GPU_Image *blood_particle;
 GPU_Image **dash_screen_anim;
-GPU_Image *lightmap_image;
-GPU_Image *tilemap_image;
+GPU_Image *lightmap_image = NULL;
+GPU_Image *tilemap_image = NULL;
 GPU_Image *floor_and_ceiling_spritesheet;
 GPU_Image *dash_icon;
 GPU_Image *ability_icon_frame;
@@ -770,8 +810,11 @@ Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
 
 // #VAR
 
+bool ready_to_render = false;
 
 Node *root_node;
+
+Node *game_node;
 
 
 obj *game_objects_deletion_queue;
@@ -807,7 +850,7 @@ double screen_modulate_b = 1;
 SDL_Color vignette_color = {0, 0, 0};
 bool is_loading = false;
 double loading_progress = 0;
-BakedLightColor baked_light_grid[TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION][TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION];
+BakedLightColor baked_light_grid[TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION][TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION] = {0};
 bool fullscreen = false;
 bool running = true;
 arraylist *game_objects = NULL;
@@ -815,6 +858,8 @@ arraylist *game_objects = NULL;
 Player *player = NULL;
 
 Tilemap *tilemap = NULL;
+
+Renderer *renderer = NULL;
 
 bool keyPressArr[26];
 bool render_debug = false;
@@ -865,7 +910,7 @@ int main(int argc, char *argv[]) {
     hud = GPU_LoadTarget(hud_image);
 
     // renderer = SDL_CreateRenderer(window, -1, RENDERER_FLAGS);
-
+    
     if (argc >= 2) {
         levelToLoad = argv[1];
     }
@@ -896,18 +941,21 @@ int main(int argc, char *argv[]) {
 
     Node_add_child(root_node, tilemap);
 
-    // reset_tilemap(&tilemap->level_tilemap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    // reset_tilemap(&tilemap->floor_tilemap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    // reset_tilemap(&tilemap->ceiling_tilemap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    // bake_lights();
+    renderer = alloc(Renderer);
+
+    Node_add_child(root_node, renderer);
+
+    game_node = alloc(Node);
+
+    Node_add_child(root_node, game_node);
+
 
     init();
     
-    //printf("Reached after init");
-    // loading_map = true;
-    // generate_dungeon();
-    // load_dungeon();
-    // loading_map = false;
+    reset_tilemap(tilemap->level_tilemap);
+    reset_tilemap(tilemap->floor_tilemap);
+    reset_tilemap(tilemap->ceiling_tilemap);
+    bake_lights();
 
     bool is_server = argc == 2 && !strcmp(argv[1], "server");
     if (DEBUG_FLAG) {
@@ -952,21 +1000,21 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    struct player_left_packet packet_data = {.id = client_self_id};
+    // struct player_left_packet packet_data = {.id = client_self_id};
 
-    MPPacket packet = {.type = PACKET_PLAYER_LEFT, .is_broadcast = true, .len = sizeof(packet_data)};
+    // MPPacket packet = {.type = PACKET_PLAYER_LEFT, .is_broadcast = true, .len = sizeof(packet_data)};
 
-    MPClient_send(packet, &packet_data);
+    // MPClient_send(packet, &packet_data);
 
 
-    if (MP_is_server) {
-        MPPacket hl_packet = {.type = PACKET_HOST_LEFT, .len = 0, .is_broadcast = true};
-        MPServer_send(hl_packet, NULL);
-    }
+    // if (MP_is_server) {
+    //     MPPacket hl_packet = {.type = PACKET_HOST_LEFT, .len = 0, .is_broadcast = true};
+    //     MPServer_send(hl_packet, NULL);
+    // }
 
-    while (!can_exit) {
+    // while (!can_exit) {
 
-    }
+    // }
 
     GPU_FreeImage(screen_image);
 
@@ -1162,6 +1210,8 @@ v2 get_key_vector(SDL_Keycode k1, SDL_Keycode k2, SDL_Keycode k3, SDL_Keycode k4
 
 void player_tick(Node *node, double delta) {
 
+    playerForward = get_player_forward();
+
     // why use the node when the player is global :p
 
     static double update_pos_timer = 1.0 / CLIENT_UPDATE_RATE;
@@ -1336,17 +1386,22 @@ void objectTick(void *obj, int type, double delta) {
 // #TICK
 void tick(double delta) {
     
+    if (loading_map) {
+        init_loading_screen();
+        generate_dungeon();
+        update_loading_progress(0.1);
+        load_dungeon();
+        loading_map = false;
+        ready_to_render = true;
+    }
+
+    SDL_SetRelativeMouseMode(lock_and_hide_mouse);
+
     Node_tick(root_node, delta);
 
     //printf("tick start");
 
-    // if (loading_map) {
-    //     init_loading_screen();
-    //     generate_dungeon();
-    //     update_loading_progress(0.1);
-    //     load_dungeon();
-    //     loading_map = false;
-    // }
+    
 
     // if (client_dungeon_seed == -1) {
     //     client_dungeon_seed_request_timer -= delta;
@@ -1541,6 +1596,13 @@ struct floor_and_ceiling_thread_data {
 void render_floor_and_ceiling() {
     // Use the shader for everything.
 
+    if (tilemap_image == NULL || lightmap_image == NULL || player == NULL) {
+        return;
+    }
+
+    static int times_called = 0;
+    times_called++;
+
     float l_positions[RESOLUTION_Y];
     float r_positions[RESOLUTION_Y];
 
@@ -1556,8 +1618,7 @@ void render_floor_and_ceiling() {
         r_positions[i * 2 + 1] = right.y;
     }
 
-
-    drawSkybox();
+    //drawSkybox();
 
     GPU_ActivateShaderProgram(floor_shader, &floor_shader_block);
 
@@ -1585,16 +1646,26 @@ void render_floor_and_ceiling() {
     GPU_SetImageFilter(tilemap_image, GPU_FILTER_NEAREST);
     GPU_SetShaderImage(tilemap_image, GPU_GetUniformLocation(floor_shader, "tilemapTex"), 4);
     
-    
     GPU_Target *image_target = GPU_LoadTarget(floor_and_ceiling_target_image);
 
-    GPU_Blit(floorAndCeiling, NULL, screen, cameraOffset.x, cameraOffset.y);
+    GPU_Blit(floorAndCeiling, NULL, image_target, cameraOffset.x, cameraOffset.y);
+    
+
 
     GPU_FreeTarget(image_target);
-
-    GPU_BlitRect(floor_and_ceiling_target_image, NULL, screen, NULL);
     
+    GPU_BlitRect(floor_and_ceiling_target_image, NULL, screen, NULL);
+
+
     GPU_DeactivateShaderProgram();
+    return;
+
+
+
+    
+    
+    
+    //GPU_DeactivateShaderProgram();
 }
 
 void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affected_by_light, SDL_Color custom_color) {
@@ -1662,11 +1733,11 @@ void renderDirSprite(DirectionalSprite *dSprite, v2 pos, v2 size, double height)
 }
 
 void renderEntity(Entity entity) {  // RENDER ENTITY
-    GPU_Image *texture = getSpriteCurrentTexture(entity.sprite);
+    // GPU_Image *texture = getSpriteCurrentTexture(entity.sprite);
 
-    GPU_SetRGBA(texture, entity.color.r, entity.color.g, entity.color.b, 20);
+    // GPU_SetRGBA(texture, entity.color.r, entity.color.g, entity.color.b, 20);
 
-    renderTexture(texture, entity.pos, entity.size, entity.height, entity.affected_by_light, entity.color);
+    // renderTexture(texture, entity.pos, entity.size, entity.height, entity.affected_by_light, entity.color);
 }
 
 typedef struct WallStripe {
@@ -1737,8 +1808,8 @@ int _cmp(const void *a, const void *b) {
     return d2 - d1;
 }
 
-RenderObject *getRenderList() {
-    RenderObject *renderList = array(RenderObject, RESOLUTION_X + game_objects->length - 1);
+RenderObject *get_render_list() {
+    RenderObject *renderList = array(RenderObject, RESOLUTION_X + get_node_count() - 1);
 
     if (NUM_WALL_THREADS == 1) {
         int i = 0;
@@ -1761,35 +1832,22 @@ RenderObject *getRenderList() {
         array_append(renderList, wallStripesToRender[i]);
     }
 
-    for (int i = 0; i < game_objects->length; i++) {
-        obj *object = arraylist_get(game_objects, i);
+    iter_over_all_nodes(node, {
 
-        RenderObject currentRObj = (RenderObject){.isnull = true};
+        RenderObject render_object = (RenderObject){.isnull = false};
         v2 pos = V2_ZERO;
         
-        if (is_entity_type(object->type)) {
+        if (is_entity_type(node->type)) {
 
-            currentRObj = (RenderObject){.isnull = false};
+            pos = ((Entity *)node)->pos;
 
-
-            currentRObj.val = object->val;
-            currentRObj.type = ENTITY;
-
-            if (object->type == PLAYER_ENTITY) {
-                currentRObj.type = PLAYER_ENTITY;
-            }
-
-            pos = ((Entity *)object->val)->pos;
-
-        } else {
-            continue;
         }
 
-        currentRObj.dist_squared = v2_distance_squared(pos, player->pos);
+        render_object.dist_squared = v2_distance_squared(pos, player->pos);
         
-        array_append(renderList, currentRObj);
+        array_append(renderList, render_object);
         
-    }
+    });
 
     int l = array_length(renderList);
 
@@ -1995,13 +2053,13 @@ void render_ability_hud() {
 }
 
 
-void renderHUD(double delta) {
+void renderHUD() {
 
-    GPU_BlitRect(getSpriteCurrentTexture(dash_anim_sprite), NULL, hud, NULL);
-    spriteTick(dash_anim_sprite, delta);
+    // GPU_BlitRect(getSpriteCurrentTexture(dash_anim_sprite), NULL, hud, NULL);
+    // spriteTick(dash_anim_sprite, delta);
 
-    GPU_SetRGB(vignette_texture, vignette_color.r, vignette_color.g, vignette_color.b);
-    GPU_BlitRect(vignette_texture, NULL, hud, NULL);
+    // GPU_SetRGB(vignette_texture, vignette_color.r, vignette_color.g, vignette_color.b);
+    // GPU_BlitRect(vignette_texture, NULL, hud, NULL);
 
     render_hand();
 
@@ -2035,31 +2093,33 @@ void drawSkybox() {
 
 void render(double delta) {  // #RENDER
 
-    if (loading_map) {
+    if (loading_map || !ready_to_render) {
         return;
     }
 
-    Node_render(root_node);
+    GPU_Clear(screen);
+    GPU_Clear(hud);
+   
+    String title = String("FPS: ");
+    String fps_text = String_new(20);
+    decimal_to_text(realFps, fps_text.data);
+    String final = String_concat(title, fps_text);
+
+    SDL_SetWindowTitle(get_window(), final.data);
+
+    String_delete(&final);
+    String_delete(&fps_text);
+    String_delete(&title);
+
+    Node_render(renderer);
 
     // //printf("render start \n");
 
-    // GPU_Clear(screen);
-    // GPU_Clear(hud);
 
-    // String title = String("FPS: ");
-    // String fps_text = String_new(20);
-    // decimal_to_text(realFps, fps_text.data);
-    // String final = String_concat(title, fps_text);
-
-    // SDL_SetWindowTitle(get_window(), final.data);
-
-    // String_delete(&final);
-    // String_delete(&fps_text);
-    // String_delete(&title);
 
     // // SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
-    // RenderObject *renderList = getRenderList();
+    // RenderObject *renderList = get_render_list();
 
     // render_floor_and_ceiling();
 
@@ -2109,7 +2169,7 @@ void render(double delta) {  // #RENDER
 
     // GPU_SetUniformfv(GPU_GetUniformLocation(bloom_shader, "texResolution"), 2, 1, res);
 
-    // GPU_Blit(screen_image, NULL, actual_screen, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
+    GPU_Blit(screen_image, NULL, actual_screen, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
 
     // GPU_DeactivateShaderProgram();
 
@@ -2124,6 +2184,7 @@ void init_player(v2 pos) {
 
     player->node = new(Node);
     player->node.on_tick = player_tick;
+    player->node.type = PLAYER;
 
     player->angle = 0;
     player->pos = pos;
@@ -2310,7 +2371,7 @@ void freeObject(void *val, int type) {
         case (int)PARTICLE:
         case (int)EFFECT:;
             Effect *effect = (Effect *)val;
-            freeObject(effect->entity.sprite, SPRITE);
+            // freeObject(effect->entity.sprite, SPRITE);
             free(effect);
             break;
         case (int)SPRITE:;  // not gonna destroy the texture
@@ -2334,9 +2395,9 @@ void freeObject(void *val, int type) {
             if (bullet->dirSprite != NULL) {
                 freeObject(bullet->dirSprite, DIR_SPRITE);
             }
-            if (bullet->entity.sprite != NULL) {
-                freeObject(bullet->entity.sprite, SPRITE);
-            }
+            // if (bullet->entity.sprite != NULL) {
+            //     freeObject(bullet->entity.sprite, SPRITE);
+            // }
             if (bullet->particle_spawner != NULL) {
                 remove_game_object(bullet->particle_spawner, PARTICLE_SPAWNER);
             }
@@ -2388,63 +2449,45 @@ void remove_game_object(void *val, int type) {
     array_append(game_objects_deletion_queue, object);
 }
 
-void init_tilemap(int ***gridPtr, int cols, int rows) {
-    *gridPtr = malloc(sizeof(int *) * rows);
-    for (int i = 0; i < rows; i++) {
-        (*gridPtr)[i] = malloc(sizeof(int) * cols);
-        for (int j = 0; j < cols; j++) {
-            (*gridPtr)[i][j] = -1;
+void reset_tilemap(int t[TILEMAP_HEIGHT][TILEMAP_WIDTH]) { 
+
+    printf("Reseting tilemap \n");
+
+    for (int r = 0; r < TILEMAP_HEIGHT; r++) {
+        for (int c = 0; c < TILEMAP_WIDTH; c++) {
+            t[r][c] = -1;
         }
     }
 }
 
-void reset_tilemap(int ***gridPtr, int cols, int rows) {
-
-    if (*gridPtr == NULL) {
-        init_tilemap(gridPtr, cols, rows);
-    }
-
-    for (int r = 0; r < rows; r++) {
-        for (int c = 0; c < cols; c++) {
-            (*gridPtr)[r][c] = -1;
-        }
-    }
-}
-
-void clearLevel() {
-
-    for (int i = game_objects->length - 1; i >= 0; i--) {
-        obj *object = arraylist_get(game_objects, i);
-
-        if (object->type == PLAYER) {
-            continue;
-        }
-
-        remove_game_object(object->val, object->type);
+void clear_level() {
+    for (int i = array_length(game_node->children) - 1; i >= 0; i--) {
+        Node_delete(game_node->children[i]);
     }
 }
 
 void spawn_floor_light(v2 pos) {
-    LightPoint *light = malloc(sizeof(LightPoint));
+    LightPoint *light = alloc(LightPoint);
     light->color = (SDL_Color){255, 50, 50};//{255, 200, 100};
     light->strength = 4;
     light->radius = 140;
     light->pos = pos;
-    add_game_object(light, LIGHT_POINT);
+    Node_add_child(game_node, light);
 }
 
 void spawn_ceiling_light(v2 pos) {
-    LightPoint *light = malloc(sizeof(LightPoint));
+    LightPoint *light = alloc(LightPoint);
     light->color = (SDL_Color){randf_range(200, 255), randf_range(130, 160), 70};//{255, 200, 100};
     light->strength = 5;
     light->radius = 400;
     light->pos = pos;
-    add_game_object(light, LIGHT_POINT);
+    Node_add_child(game_node, light);
 }
 
 void place_entity(v2 pos, int type) {
     switch (type) {
         case (int)P_PLAYER:
+            if (player == NULL) printf("player = null \n");
             player->pos = pos;
             spawn_point = pos;
             break;
@@ -2452,11 +2495,11 @@ void place_entity(v2 pos, int type) {
 }
 
 void load_level(char *file) {
-    clearLevel();
+    clear_level();
 
-    reset_tilemap(&tilemap->level_tilemap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    reset_tilemap(&tilemap->floor_tilemap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    reset_tilemap(&tilemap->ceiling_tilemap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    reset_tilemap(tilemap->level_tilemap);
+    reset_tilemap(tilemap->floor_tilemap);
+    reset_tilemap(tilemap->ceiling_tilemap);
 
     FILE *fh = fopen(file, "r");
     if (fh == NULL) {
@@ -2641,7 +2684,7 @@ Effect *createEffect(v2 pos, v2 size, Sprite *sprite, double lifeTime) {
 
     effect->entity.pos = pos;
     effect->entity.size = size;
-    effect->entity.sprite = sprite;
+    // effect->entity.sprite = sprite;
     effect->entity.color = (SDL_Color){255, 255, 255, 255};
     effect->entity.height = get_max_height() * 0.5;
     effect->life_time = lifeTime;
@@ -2663,7 +2706,7 @@ void effectTick(Effect *effect, double delta) {
         remove_game_object(effect, EFFECT);
         return;
     }
-    spriteTick(effect->entity.sprite, delta);
+    // spriteTick(effect->entity.sprite, delta);
 }
 
 RayCollisionData castRayForEntities(v2 pos, v2 dir) {
@@ -2776,11 +2819,11 @@ Bullet *createDefaultBullet(v2 pos, v2 dir) {
 
     bullet->entity.pos = pos;
     bullet->entity.size = to_vec(8000);
-    bullet->entity.sprite = createSprite(true, 1);
-    bullet->entity.sprite->animations[0] = create_animation(4, 0, shooter_bullet_default_frames);
-    bullet->entity.sprite->animations[0].fps = 12;
-    bullet->entity.sprite->animations[0].loop = true;
-    spritePlayAnim(bullet->entity.sprite, 0);
+    // bullet->entity.sprite = createSprite(true, 1);
+    // bullet->entity.sprite->animations[0] = create_animation(4, 0, shooter_bullet_default_frames);
+    // bullet->entity.sprite->animations[0].fps = 12;
+    // bullet->entity.sprite->animations[0].loop = true;
+    // spritePlayAnim(bullet->entity.sprite, 0);
     bullet->entity.height = get_max_height() * 0.525;
     bullet->entity.affected_by_light = false;
     bullet->dirSprite = NULL;
@@ -2853,7 +2896,7 @@ void bulletTick(Bullet *bullet, double delta) {
     if (bullet->dirSprite != NULL) {
         dSpriteTick(bullet->dirSprite, bullet->entity.pos, delta);
     } else {
-        spriteTick(bullet->entity.sprite, delta);
+        // spriteTick(bullet->entity.sprite, delta);
     }
 }
 
@@ -2984,19 +3027,15 @@ BakedLightColor _lerp_baked_light_color(BakedLightColor a, BakedLightColor b, do
 }
 
 void bake_lights() {
-    
-    return;
-    
+
     bool has_lights = false;
 
-    for (int i = 0; i < game_objects->length; i++) {
-        obj *object = arraylist_get(game_objects, i);
-
-        if (object->type == LIGHT_POINT) {
+    iter_over_all_nodes(node, {
+        if (node->type == LIGHT_POINT) {
             has_lights = true;
             break;
         }
-    }
+    });
 
     if (!has_lights) {
         return;
@@ -3042,55 +3081,56 @@ void bake_lights() {
 
             const int calc_tile_size = BAKED_LIGHT_RESOLUTION / CALC_RES;
 
-            
+            int k = array_length(game_node->children);
 
-            for (int i = 0; i < game_objects->length; i++) {
-                obj *current = arraylist_get(game_objects, i);
-                if (current->type != LIGHT_POINT) continue;
-                
-                LightPoint *point = current->val;
+            iter_over_all_nodes(node, {
 
-                v2 current_pos = v2_mul(v2_div((v2){c, r}, to_vec(BAKED_LIGHT_RESOLUTION)), to_vec(tileSize));
-                if (abs(current_pos.x - point->pos.x) > point->radius || abs(current_pos.y - point->pos.y) > point->radius) continue;
+                    if (node->type != LIGHT_POINT) {
+                        continue;
+                    }
+                    LightPoint *point = node;
 
-                double dist_to_point = v2_distance(point->pos, current_pos);
+                    v2 current_pos = v2_mul(v2_div((v2){c, r}, to_vec(BAKED_LIGHT_RESOLUTION)), to_vec(tileSize));
+                    if (abs(current_pos.x - point->pos.x) > point->radius || abs(current_pos.y - point->pos.y) > point->radius) continue;
 
-                if (dist_to_point > point->radius) continue;
+                    double dist_to_point = v2_distance(point->pos, current_pos);
 
-                v2 dir = v2_div(v2_sub(point->pos, current_pos), to_vec(dist_to_point));
+                    if (dist_to_point > point->radius) continue;
 
-				RayCollisionData data = castRay(current_pos, dir);
+                    v2 dir = v2_div(v2_sub(point->pos, current_pos), to_vec(dist_to_point));
 
-                BakedLightColor col = {0, 0, 0};
+                    RayCollisionData data = castRay(current_pos, dir);
 
-				if (!data.hit) {
-					double s = clamp(lerp(1, 0, dist_to_point / point->radius), 0, 1);
-                    s *= s * s; // cubic
-                    double helper = s * point->strength;
-					col.r += helper * (double)point->color.r / 255;
-					col.g += helper * (double)point->color.g / 255;
-					col.b += helper * (double)point->color.b / 255;
-				} else {
-                    double dist_squared = v2_distance_squared(data.collpos, current_pos);
+                    BakedLightColor col = {0, 0, 0};
 
-                    if (dist_squared <= dist_to_point * dist_to_point) continue;
+                    if (!data.hit) {
+                        double s = clamp(lerp(1, 0, dist_to_point / point->radius), 0, 1);
+                        s *= s * s; // cubic
+                        double helper = s * point->strength;
+                        col.r += helper * (double)point->color.r / 255;
+                        col.g += helper * (double)point->color.g / 255;
+                        col.b += helper * (double)point->color.b / 255;
+                    } else {
+                        double dist_squared = v2_distance_squared(data.collpos, current_pos);
 
-                    double s = clamp(lerp(1, 0, dist_to_point / point->radius), 0, 1);
-                    s *= s * s; // cubic
-                    double helper = s * point->strength;
-                    col.r += helper * (double)point->color.r / 255;
-					col.g += helper * (double)point->color.g / 255;
-					col.b += helper * (double)point->color.b / 255;
+                        if (dist_squared <= dist_to_point * dist_to_point) continue;
+
+                        double s = clamp(lerp(1, 0, dist_to_point / point->radius), 0, 1);
+                        s *= s * s; // cubic
+                        double helper = s * point->strength;
+                        col.r += helper * (double)point->color.r / 255;
+                        col.g += helper * (double)point->color.g / 255;
+                        col.b += helper * (double)point->color.b / 255;
+                    }
+
+                    baked_light_grid[r][c].r = SDL_clamp(baked_light_grid[r][c].r + col.r, 0, MAX_LIGHT);
+                    baked_light_grid[r][c].g = SDL_clamp(baked_light_grid[r][c].g + col.g, 0, MAX_LIGHT);
+                    baked_light_grid[r][c].b = SDL_clamp(baked_light_grid[r][c].b + col.b, 0, MAX_LIGHT);
                 }
-
-                baked_light_grid[r][c].r = SDL_clamp(baked_light_grid[r][c].r + col.r, 0, MAX_LIGHT);
-                baked_light_grid[r][c].g = SDL_clamp(baked_light_grid[r][c].g + col.g, 0, MAX_LIGHT);
-                baked_light_grid[r][c].b = SDL_clamp(baked_light_grid[r][c].b + col.b, 0, MAX_LIGHT);
-
-            }
+            );
+            
         }
     }  
-    
 
     int box_size_x = 20; // doesn't affect performance anymore! go crazy
     int box_size_y = 20;
@@ -3203,6 +3243,7 @@ void bake_lights() {
     update_loading_progress(1);
 
     remove_loading_screen();
+
 }
 
 double get_max_height() {
@@ -3506,13 +3547,13 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
     Effect *hitEffect = createEffect(final_pos, to_vec(size), createSprite(true, 1), 1);
     hitEffect->entity.height = final_height;
 
-    hitEffect->entity.sprite->animations[0] = create_animation(5, 0, shootHitEffectFrames);
+    // hitEffect->entity.sprite->animations[0] = create_animation(5, 0, shootHitEffectFrames);
     
-    hitEffect->entity.sprite->animations[0].fps = 12;
-    hitEffect->entity.sprite->animations[0].loop = false;
-    hitEffect->entity.affected_by_light = false;
+    // hitEffect->entity.sprite->animations[0].fps = 12;
+    // hitEffect->entity.sprite->animations[0].loop = false;
+    // hitEffect->entity.affected_by_light = false;
 
-    spritePlayAnim(hitEffect->entity.sprite, 0);
+    // spritePlayAnim(hitEffect->entity.sprite, 0);
 
     add_game_object(hitEffect, EFFECT);
 
@@ -3652,18 +3693,18 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
     
     particle.initial_size = size;
 
-    particle.effect.entity.sprite = malloc(sizeof(Sprite));
-    *particle.effect.entity.sprite = spawner->sprite;
+    // particle.effect.entity.sprite = malloc(sizeof(Sprite));
+    // *particle.effect.entity.sprite = spawner->sprite;
 
 
     Particle *particle_object = malloc(sizeof(Particle));
     *particle_object = particle;
 
-    if (particle.effect.entity.sprite->texture == NULL) {
-        particle.effect.entity.sprite->texture = default_particle_texture;
-        particle.effect.entity.sprite->isAnimated = false;
-        printf("Error! switching to default texture! \n");
-    }
+    // if (particle.effect.entity.sprite->texture == NULL) {
+    //     particle.effect.entity.sprite->texture = default_particle_texture;
+    //     particle.effect.entity.sprite->isAnimated = false;
+    //     printf("Error! switching to default texture! \n");
+    // }
 
     add_game_object(particle_object, PARTICLE);
 
@@ -3766,7 +3807,10 @@ void ability_dash_activate(Ability *ability) {
 
 void activate_ability(Ability *ability) {
     
-    if (ability == NULL || !ability->can_use || paused) return;
+    if (ability == NULL || !ability->can_use || paused) {
+        printf("bruh %d, %d, %d\n", ability == NULL, !ability->can_use, paused);
+        return;
+    }
 
 
     ability->can_use = false;
@@ -3946,6 +3990,8 @@ void generate_dungeon() {
 
 void load_room(Room *room_ptr) {
 
+    static int num_lights = 0;
+
     room_ptr->left_entrance_pos = (v2){(int)ROOM_WIDTH / 2, (int)ROOM_HEIGHT / 2};
     room_ptr->right_entrance_pos = (v2){(int)ROOM_WIDTH / 2, (int)ROOM_HEIGHT / 2};
     room_ptr->top_entrance_pos = (v2){(int)ROOM_WIDTH / 2, (int)ROOM_HEIGHT / 2};
@@ -3999,6 +4045,7 @@ void load_room(Room *room_ptr) {
             if (tilemap->floor_tilemap[offset_r + r][offset_c + c ] == P_FLOOR_LIGHT) {
                 v2 tile_mid = (v2){(offset_c + c + 0.5) * tileSize, (offset_r + r + 0.5) * tileSize};
                 spawn_floor_light(tile_mid);
+                num_lights++;
             }
         }
     }
@@ -4041,6 +4088,7 @@ void load_room(Room *room_ptr) {
             if (tilemap->ceiling_tilemap[offset_r + r][offset_c + c ] == P_CEILING_LIGHT) {
                 v2 tile_mid = (v2){(offset_c + c + 0.5) * tileSize, (offset_r + r + 0.5) * tileSize};
                 spawn_ceiling_light(tile_mid);
+                num_lights++;
             }
         }
     }
@@ -4150,15 +4198,11 @@ void carve_room_paths() {
 
 void load_dungeon() {
 
-    static int times_called = 0;
-    times_called += 1;
-    printf("times called: %d \n", times_called);
+    clear_level();
 
-    clearLevel();
-
-    reset_tilemap(&tilemap->level_tilemap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    reset_tilemap(&tilemap->floor_tilemap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
-    reset_tilemap(&tilemap->ceiling_tilemap, TILEMAP_WIDTH, TILEMAP_HEIGHT);
+    reset_tilemap(tilemap->level_tilemap);
+    reset_tilemap(tilemap->floor_tilemap);
+    reset_tilemap(tilemap->ceiling_tilemap);
 
     double prog = 0.1;
 
@@ -4202,10 +4246,10 @@ void load_dungeon() {
 
     SDL_FreeSurface(surface);
 
-
     bake_lights();
 
     update_loading_progress(1);
+    
     
 
 }
@@ -4310,15 +4354,21 @@ void on_server_recv(SOCKET socket, MPPacket packet, void *data) {
 }
 
 void client_add_player_entity(int id) {
-    PlayerEntity *player_entity = malloc(sizeof(PlayerEntity));
+
+    printf("Tried to add player entity! too lazy rn! \n");
+    return;
+
+    PlayerEntity *player_entity = alloc(PlayerEntity);
+
+    
 
     player_entity->id = id;
     player_entity->entity.affected_by_light = true;
     player_entity->entity.height = 0;
     player_entity->entity.pos = V2_ZERO;
     player_entity->entity.size = to_vec(10000);
-    player_entity->entity.sprite = createSprite(false, 0);
-    player_entity->entity.sprite->texture = entityTexture;
+    // player_entity->entity.sprite = createSprite(false, 0);
+    // player_entity->entity.sprite->texture = entityTexture;
     player_entity->entity.color = (SDL_Color){255, 255, 255,  255};
     player_entity->desired_pos = V2_ZERO;
     player_entity->desired_height = 0;
@@ -4327,8 +4377,8 @@ void client_add_player_entity(int id) {
     player_entity->direction_indicator = malloc(sizeof(Entity));
     player_entity->direction_indicator->affected_by_light = true;
     player_entity->direction_indicator->color = GPU_MakeColor(255, 255, 255, 255);
-    player_entity->direction_indicator->sprite = createSprite(false, 0);
-    player_entity->direction_indicator->sprite->texture = default_particle_texture;
+    // player_entity->direction_indicator->sprite = createSprite(false, 0);
+    // player_entity->direction_indicator->sprite->texture = default_particle_texture;
     player_entity->direction_indicator->height = get_max_height() / 2 + player->tallness / 2;
     player_entity->direction_indicator->pos = V2_ZERO;
     player_entity->direction_indicator->size = to_vec(1600);
@@ -4407,14 +4457,14 @@ void on_client_recv(MPPacket packet, void *data) {
             return;
         }
 
-        hitEffect->entity.sprite->animations[0] = create_animation(5, 0, shootHitEffectFrames);
+        // hitEffect->entity.sprite->animations[0] = create_animation(5, 0, shootHitEffectFrames);
         
-        hitEffect->entity.sprite->animations[0].fps = 12;
-        hitEffect->entity.sprite->animations[0].loop = false;
-        hitEffect->entity.height = packet_data->hit_height;
-        hitEffect->entity.affected_by_light = false;
+        // hitEffect->entity.sprite->animations[0].fps = 12;
+        // hitEffect->entity.sprite->animations[0].loop = false;
+        // hitEffect->entity.height = packet_data->hit_height;
+        // hitEffect->entity.affected_by_light = false;
 
-        spritePlayAnim(hitEffect->entity.sprite, 0);
+        // spritePlayAnim(hitEffect->entity.sprite, 0);
 
         add_game_object(hitEffect, EFFECT);
 
@@ -4470,7 +4520,7 @@ void on_client_recv(MPPacket packet, void *data) {
         bomb->entity.height = packet_data->height;
         bomb->height_vel = packet_data->height_vel;
 
-        spritePlayAnim(bomb->entity.sprite, 0);
+        // spritePlayAnim(bomb->entity.sprite, 0);
 
         add_game_object(bomb, PROJECTILE);
     }
@@ -4649,6 +4699,8 @@ void init_textures() {
 
     skybox_texture = load_texture("Textures/skybox.png");
 
+    printf("Initialized textures! \n");
+
 }
 
 PlayerEntity *find_player_entity_by_id(int id) {
@@ -4693,7 +4745,7 @@ void ability_bomb_activate() {
     Projectile *bomb = malloc(sizeof(Projectile));
     *bomb = create_bomb_projectile(v2_add(player->pos, v2_mul(playerForward, to_vec(15))), v2_mul(playerForward, to_vec(1.4)));
     bomb->entity.height = get_max_height() / 2 + get_player_height();
-    spritePlayAnim(bomb->entity.sprite, 0);
+    // spritePlayAnim(bomb->entity.sprite, 0);
 
     add_game_object(bomb, PROJECTILE);
 
@@ -4762,7 +4814,7 @@ void projectile_tick(Projectile *projectile, double delta) {
     
     projectile->collider.pos = projectile->entity.pos;
 
-    spriteTick(projectile->entity.sprite, delta);
+    // spriteTick(projectile->entity.sprite, delta);
 
     if (projectile->on_tick != NULL) {
         projectile->on_tick(projectile, delta);
@@ -4802,9 +4854,9 @@ Projectile create_bomb_projectile(v2 pos, v2 start_vel) {
     projectile.entity.pos = pos;
     projectile.vel = v2_add(start_vel, v2_mul(player->vel, to_vec(0.5)));
     projectile.height_vel = (is_player_on_floor()? 0 : player->height_vel * 0.5) + player->pitch * -3;
-    projectile.entity.sprite = createSprite(true, 1);
-    projectile.entity.sprite->animations[0] = create_animation(2, 1, bomb_anim);
-    projectile.entity.sprite->animations[0].loop = true;
+    // projectile.entity.sprite = createSprite(true, 1);
+    // projectile.entity.sprite->animations[0] = create_animation(2, 1, bomb_anim);
+    // projectile.entity.sprite->animations[0].loop = true;
     projectile.entity.size = to_vec(8000);
     projectile.on_destruction = bomb_on_destroy;
     projectile.on_tick = bomb_on_tick;
@@ -4931,7 +4983,7 @@ void randomize_player_abilities() {
 }
 
 void entity_tick(Entity *entity, double delta) {
-    spriteTick(entity->sprite, delta);
+    // spriteTick(entity->sprite, delta);
 }
 
 void bomb_on_tick(Projectile *projectile, double delta) {
@@ -5012,9 +5064,9 @@ Projectile projectile_forcefield_create() {
     Projectile projectile = create_default_projectile(10);
     projectile.type = PROJ_FORCEFIELD;
     projectile.on_tick = projectile_forcefield_on_tick;
-    projectile.entity.sprite = createSprite(true, 1);
-    projectile.entity.sprite->animations[0] = create_animation(2, 1, forcefield_anim);
-    projectile.entity.sprite->animations[0].loop = true;
+    // projectile.entity.sprite = createSprite(true, 1);
+    // projectile.entity.sprite->animations[0] = create_animation(2, 1, forcefield_anim);
+    // projectile.entity.sprite->animations[0].loop = true;
     projectile.entity.size = to_vec(8000);
 
     ParticleSpawner *particle_spawner = malloc(sizeof(ParticleSpawner));
@@ -5066,6 +5118,10 @@ Node Node_new() {
     node.parent = NULL;
     node.children = array(Node *, 2);
     node.type = -1;
+    node.on_tick = NULL;
+    node.on_render = NULL;
+    node.on_ready = NULL;
+    node.on_delete = NULL;
 
     return node;
 }
@@ -5104,6 +5160,9 @@ void Node_add_child(Node *parent, Node *child) {
 
 
 void Node_tick(Node *node, double delta) {
+
+    if (node == NULL) return;
+
     if (node->on_tick != NULL) {
         node->on_tick(node, delta);
     }
@@ -5117,13 +5176,14 @@ void Node_tick(Node *node, double delta) {
 
 
 void Node_render(Node *node) {
-    if (node->on_render != NULL) {
+    if (node != NULL && node->on_render != NULL) {
         node->on_render(node);
     }
 }
 
 Tilemap Tilemap_new() {
     Tilemap tilemap = {0};
+    tilemap.node.type = TILEMAP;
     tilemap.node = new(Node);
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
@@ -5143,6 +5203,101 @@ void Node_remove_child(Node *parent, Node *child) {
             return;
         }
     }
+}
+
+Renderer Renderer_new() {
+    Renderer renderer = {0};
+    renderer.node.type = RENDERER;
+    renderer.node = new(Node);
+    renderer.node.on_render = Renderer_render;
+
+    return renderer;
+}
+
+void Renderer_render(Node *node) {
+    
+    GPU_Clear(screen);
+    GPU_Clear(actual_screen);
+    GPU_Clear(hud);
+
+
+    render_floor_and_ceiling();
+
+    RenderObject *render_list = get_render_list();
+    
+    int counter = 0;
+
+    foreach(RenderObject render_obj, render_list, array_length(render_list), {
+        
+        if (render_obj.type == WALL_STRIPE) {
+            renderWallStripe((WallStripe *)render_obj.val);
+        }
+    });
+
+    array_free(render_list);
+
+
+
+    renderHUD();
+
+}
+
+
+LightPoint LightPoint_new() {
+    LightPoint l = {0};
+    l.node = new(Node);
+    l.node.type = LIGHT_POINT;
+    l.color = Color(255, 255, 255, 255);
+    l.pos = V2_ZERO;
+    l.radius = 10;
+    l.strength = 1;
+
+    return l;
+}
+
+void _GANA_helper(Node *root, Node **arr) {
+
+    int i = 0;
+    int len = array_length(root->children);
+
+    //printf("Node has %d children \n", len);
+    
+    array_append(arr, root);
+
+    for (i = 0; i < len; i++) {
+        _GANA_helper(root->children[i], arr);
+    }
+}
+
+Node **get_all_nodes_array() {
+    Node **arr = array(Node *, 190);
+
+    _GANA_helper(game_node, arr);
+
+    return arr;
+}
+
+Entity Entity_new() {
+    Entity entity = {0};
+    entity.node = new(Node);
+    entity.color = Color(255, 255, 255, 255);
+
+    return entity;
+}
+
+PlayerEntity PlayerEntity_new() {
+    PlayerEntity player_entity = {0};
+    player_entity.entity = new(Entity);
+
+    return player_entity;
+}
+
+int get_node_count() {
+    Node **thing = get_all_nodes_array();
+    int l = array_length(thing);
+    array_free(thing);
+
+    return l;
 }
 
 

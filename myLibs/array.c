@@ -90,7 +90,7 @@ void _array_ensure_capacity(void **array) {
 
     if (header->length >= header->size) {
         _expand_array(array);
-        printf("Expanded! \n");
+        //printf("Expanded! \n");
     }
 }
 
