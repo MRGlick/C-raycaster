@@ -118,50 +118,48 @@ enum Types {
 
         NODE,
 
-        PLAYER,
-        RAYCAST,
-        CIRCLE_COLLIDER,
-        RAY_COLL_DATA,
-        RENDER_OBJECT,
-        WALL_STRIPE,
-        LIGHT_POINT,
-        SPRITE,
-        PARTICLE_SPAWNER,
-        
-        DIR_SPRITE,
+        WORLD_NODE_START,
 
-        TILEMAP,
-
-        RENDERER,
-        
-        ENTITY_START,
-        
-            ENTITY,
-
-            BULLET,
-
-            PLAYER_ENTITY,
-
-            PROJECTILE_START,
-                PROJECTILE,
-            PROJECTILE_END,
-
-            EFFECT_START,
-
-                EFFECT,
-                PARTICLE,
-
-            EFFECT_END,
+            WORLD_NODE,
             
-            ENEMY_START,
-                
-                ENEMY,
-                ENEMY_SHOOTER,
-                ENEMY_EXPLODER,
-                
-            ENEMY_END,
+            PLAYER,
+            RAYCAST,
+            CIRCLE_COLLIDER,
+            RAY_COLL_DATA,
+            RENDER_OBJECT,
+            WALL_STRIPE,
+            LIGHT_POINT,
+            SPRITE,
+            PARTICLE_SPAWNER,
+            
+            DIR_SPRITE,
 
-        ENTITY_END,
+            TILEMAP,
+
+            RENDERER,
+            
+            ENTITY_START,
+            
+                ENTITY,
+
+                BULLET,
+
+                PLAYER_ENTITY,
+
+                PROJECTILE_START,
+                    PROJECTILE,
+                PROJECTILE_END,
+
+                EFFECT_START,
+
+                    EFFECT,
+                    PARTICLE,
+
+                EFFECT_END,
+
+            ENTITY_END,
+
+        WORLD_NODE_END,
 
     NODE_END
 };
@@ -182,6 +180,18 @@ typedef struct Node {
     struct Node *parent;
     struct Node **children;
 } Node;
+
+typedef struct WorldNode {
+    Node node;
+    v2 pos;
+    v2 size;
+    double height;
+} WorldNode;
+
+typedef struct CanvasNode {
+    Node node;
+    v2 pos, size;
+} CanvasNode;
 
 #define new(type) type##_new()
 #define alloc(type) ({type *ptr; ptr = malloc(sizeof(type)); (*ptr) = new(type); ptr;})
@@ -213,11 +223,11 @@ typedef struct Animation {
 } Animation;
 
 typedef struct Sprite {
+    Node node;
     GPU_Image *texture;  // not used if animated
     bool isAnimated;
-    int currentAnimationIdx;
+    int current_anim_idx;
     Animation *animations;
-    int animCount;
 } Sprite;
 
 typedef struct DirectionalSprite {
@@ -290,9 +300,9 @@ typedef struct Player {
 } Player;
 
 typedef struct Entity {
-    Node node;
-    v2 pos, size;
-    double height;
+    WorldNode world_node;
+    // v2 pos, size;
+    // double height;
     bool affected_by_light;
     SDL_Color color;
 } Entity;
@@ -465,6 +475,15 @@ typedef struct Renderer {
 
 // #FUNC
 
+WorldNode WorldNode_new();
+
+void Sprite_delete(Node *node);
+
+void Sprite_render(Node *node);
+
+void Sprite_tick(Node *node);
+
+Sprite Sprite_new();
 
 int get_node_count();
 
@@ -1342,8 +1361,8 @@ void spriteTick(Sprite *sprite, double delta) {
     if (sprite == NULL) return;
     if (!sprite->isAnimated) return;
     if (sprite->animations == NULL) return;
-    if (sprite->currentAnimationIdx == -1) return;
-    animationTick(&sprite->animations[sprite->currentAnimationIdx], delta);
+    if (sprite->current_anim_idx == -1) return;
+    animationTick(&sprite->animations[sprite->current_anim_idx], delta);
 }
 
 void objectTick(void *obj, int type, double delta) {
@@ -1938,8 +1957,8 @@ void render_hand() {
 
     BakedLightColor baked_light_color;
 
-    Animation current_anim = leftHandSprite->animations[leftHandSprite->currentAnimationIdx];
-    int current_anim_idx = leftHandSprite->currentAnimationIdx;
+    Animation current_anim = leftHandSprite->animations[leftHandSprite->current_anim_idx];
+    int current_anim_idx = leftHandSprite->current_anim_idx;
 
     bool first_check = current_anim_idx == 0;
     bool second_check = current_anim_idx == 1 && current_anim.frame > 1;
@@ -2639,7 +2658,7 @@ Sprite *createSprite(bool isAnimated, int animCount) {
     Sprite *sprite = malloc(sizeof(Sprite));
     sprite->isAnimated = isAnimated;
     sprite->texture = NULL;
-    sprite->currentAnimationIdx = 0;
+    sprite->current_anim_idx = 0;
     sprite->animCount = animCount;
     if (isAnimated) {
         sprite->animations = malloc(sizeof(Animation ) * animCount);
@@ -2650,13 +2669,13 @@ Sprite *createSprite(bool isAnimated, int animCount) {
 }
 
 void spritePlayAnim(Sprite *sprite, int idx) {
-    bool less_priority = sprite->currentAnimationIdx != -1 
-    && sprite->animations[sprite->currentAnimationIdx].priority < sprite->animations[idx].priority
-    && sprite->animations[sprite->currentAnimationIdx].playing;
+    bool less_priority = sprite->current_anim_idx != -1 
+    && sprite->animations[sprite->current_anim_idx].priority < sprite->animations[idx].priority
+    && sprite->animations[sprite->current_anim_idx].playing;
     if (less_priority) {
         return;
     }
-    sprite->currentAnimationIdx = idx;
+    sprite->current_anim_idx = idx;
     for (int i = 0; i < sprite->animCount; i++) {
         sprite->animations[i].playing = false;
     }
@@ -2669,8 +2688,8 @@ GPU_Image *getSpriteCurrentTexture(Sprite *sprite) {
     if (!(sprite->isAnimated)) {
         return sprite->texture;
     } else {
-        if (sprite->currentAnimationIdx == -1) return NULL;
-        Animation current = sprite->animations[sprite->currentAnimationIdx];
+        if (sprite->current_anim_idx == -1) return NULL;
+        Animation current = sprite->animations[sprite->current_anim_idx];
         return current.frames[current.frame];
     }
 }
@@ -3430,7 +3449,7 @@ void dir_sprite_play_anim(DirectionalSprite *dir_sprite, int anim) {
     
     for (int i = 0; i < dir_sprite->dirCount; i++) {
         dir_sprite->sprites[i]->animations[anim].frame = 0;
-        dir_sprite->sprites[i]->currentAnimationIdx = anim;
+        dir_sprite->sprites[i]->current_anim_idx = anim;
     }
 
     dir_sprite->current_anim = anim;
@@ -3555,7 +3574,7 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
 
     // spritePlayAnim(hitEffect->entity.sprite, 0);
 
-    add_game_object(hitEffect, EFFECT);
+    //add_game_object(hitEffect, EFFECT);
 
     
     struct ability_shoot_packet packet_data = {
@@ -3621,9 +3640,8 @@ ParticleSpawner create_particle_spawner(v2 pos, double height) {
     };
 
     Sprite sprite;
-    sprite.animCount = 0;
     sprite.animations = NULL;
-    sprite.currentAnimationIdx = 0;
+    sprite.current_anim_idx = 0;
     sprite.isAnimated = false;
     sprite.texture = default_particle_texture;
 
@@ -5279,7 +5297,7 @@ Node **get_all_nodes_array() {
 
 Entity Entity_new() {
     Entity entity = {0};
-    entity.node = new(Node);
+    entity.world_node = new(WorldNode);
     entity.color = Color(255, 255, 255, 255);
 
     return entity;
@@ -5298,6 +5316,55 @@ int get_node_count() {
     array_free(thing);
 
     return l;
+}
+
+Sprite Sprite_new() {
+    Sprite sprite = {0};
+    sprite.node = new(Node);
+    sprite.animations = array(Animation, 2);
+    sprite.isAnimated = false;
+    sprite.texture = NULL;
+    sprite.current_anim_idx = 0;
+
+    sprite.node.on_delete = Sprite_delete;
+    sprite.node.on_tick = Sprite_tick;
+    sprite.node.on_render = Sprite_render;
+
+    return sprite;
+}
+
+void Sprite_delete(Node *node) {
+    Sprite *sprite = node;
+    array_free(sprite->animations);
+}
+
+void Sprite_render(Node *node) {
+
+    v2 pos = V2_ZERO;
+    v2 size = to_vec(5000);
+    double height = 0;
+    if (node->parent != NULL) {
+
+    }
+    
+
+    renderTexture(getSpriteCurrentTexture((Sprite *)node));
+}
+
+void Sprite_tick(Node *node) {
+
+}
+
+WorldNode WorldNode_new() {
+    WorldNode world_node = {0};
+    world_node.node = new(Node);
+
+    world_node.pos = V2_ZERO;
+    world_node.height = 0;
+    world_node.size = to_vec(5000);
+
+
+    return world_node;
 }
 
 
