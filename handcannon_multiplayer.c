@@ -57,6 +57,10 @@
 
 #define get_window() SDL_GetWindowFromID(actual_screen->context->windowID)
 
+#define DEF_STRUCT(name, typename, ...) enum {typename = __COUNTER__}; typedef struct name __VA_ARGS__ name;
+#define END_STRUCT(typename) enum {typename##_END = __COUNTER__};
+#define instanceof(type, parent_type) (type >= parent_type && type <= parent_type##_END)
+
 
 // # PACKET TYPES AND STRUCTS
 enum PacketTypes {
@@ -112,63 +116,63 @@ struct player_joined_packet {
 
 // #TYPES
 
-enum Types {
+// enum Types {
 
-    NODE_START,
+//     NODE_START,
 
-        NODE,
+//         NODE,
 
-        WORLD_NODE_START,
+//         WORLD_NODE_START,
 
-            WORLD_NODE,
+//             WORLD_NODE,
             
-            PLAYER,
-            RAYCAST,
-            CIRCLE_COLLIDER,
-            RAY_COLL_DATA,
-            RENDER_OBJECT,
-            WALL_STRIPE,
-            LIGHT_POINT,
-            SPRITE,
-            PARTICLE_SPAWNER,
+//             PLAYER,
+//             RAYCAST,
+//             CIRCLE_COLLIDER,
+//             RAY_COLL_DATA,
+//             RENDER_OBJECT,
+//             WALL_STRIPE,
+//             LIGHT_POINT,
+//             SPRITE,
+//             PARTICLE_SPAWNER,
             
-            DIR_SPRITE,
+//             DIR_SPRITE,
 
-            TILEMAP,
+//             TILEMAP,
 
-            RENDERER,
+//             RENDERER,
             
-            ENTITY_START,
+//             ENTITY_START,
             
-                ENTITY,
+//                 ENTITY,
 
-                BULLET,
+//                 BULLET,
 
-                PLAYER_ENTITY,
+//                 PLAYER_ENTITY,
 
-                PROJECTILE_START,
-                    PROJECTILE,
-                PROJECTILE_END,
+//                 PROJECTILE_START,
+//                     PROJECTILE,
+//                 PROJECTILE_END,
 
-                EFFECT_START,
+//                 EFFECT_START,
 
-                    EFFECT,
-                    PARTICLE,
+//                     EFFECT,
+//                     PARTICLE,
 
-                EFFECT_END,
+//                 EFFECT_END,
 
-            ENTITY_END,
+//             ENTITY_END,
 
-        WORLD_NODE_END,
+//         WORLD_NODE_END,
 
-    NODE_END
-};
+//     NODE_END
+// };
 
 enum Tiles { WALL1 = 1, WALL2 = 2 };
 
 
-typedef struct Node {
-
+// #STRUCTS
+DEF_STRUCT(Node, NODE, {
     void (*on_render)(struct Node *);
     void (*on_tick)(struct Node *, double);
     void (*on_ready)(struct Node *);
@@ -176,22 +180,208 @@ typedef struct Node {
 
     int type;
 
-
     struct Node *parent;
     struct Node **children;
-} Node;
+});
 
-typedef struct WorldNode {
-    Node node;
-    v2 pos;
-    v2 size;
-    double height;
-} WorldNode;
+    DEF_STRUCT(Tilemap, TILEMAP, {
+        Node node;
+        int level_tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH];
+        int floor_tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH];
+        int ceiling_tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH];
+    });
 
-typedef struct CanvasNode {
-    Node node;
-    v2 pos, size;
-} CanvasNode;
+    DEF_STRUCT(Renderer, RENDERER, {
+        Node node;
+    });
+
+    DEF_STRUCT(LightPoint, LIGHT_POINT, {
+        Node node;
+        v2 pos;
+        double strength;
+        double radius;
+        SDL_Color color;
+    });
+
+    DEF_STRUCT(DirectionalSprite, DIRECTIONAL_SPRITE, {
+        Node node;
+        Sprite **sprites;
+        v2 dir;  // global direction
+        int dirCount;
+
+        int current_anim;
+        int playing;
+        int fps;
+    });
+
+    DEF_STRUCT(WorldNode, WORLD_NODE, {
+        Node node;
+        v2 pos;
+        v2 size;
+        double height;
+    });
+
+        DEF_STRUCT(Entity, ENTITY, {
+                WorldNode world_node;
+            // v2 pos, size;
+            // double height;
+            bool affected_by_light;
+            SDL_Color color;
+        });
+
+            DEF_STRUCT(Effect, EFFECT, {
+                Entity entity;
+                double life_time;
+                double life_timer;
+            });
+
+                DEF_STRUCT(Particle, PARTICLE, {
+                    Effect effect;
+                    v2 vel;
+                    double h_vel;
+                    v2 accel;
+                    double h_accel;
+                    double bounciness;
+                    double floor_drag;
+                    v2 initial_size;
+                    bool fade;
+                    bool fade_scale;
+                    SDL_Color start_color, end_color;
+
+                });
+
+            END_STRUCT(EFFECT);
+
+            DEF_STRUCT(PlayerEntity, PLAYER_ENTITY, {
+                Entity entity;
+                v2 desired_pos;
+                double desired_height;
+                CircleCollider collider;
+                v2 dir;
+                int id;
+                Entity *direction_indicator;
+                DirectionalSprite *dir_sprite;
+            });
+
+            DEF_STRUCT(Projectile, PROJECTILE, {
+                Entity entity;
+                int type;
+                v2 vel;
+                double height_vel;
+                v2 accel;
+                CircleCollider collider;
+                double height_accel;
+                double life_time, life_timer;
+                double bounciness;
+                bool destroy_on_floor;
+                bool _created;
+                void (*on_create)(struct Projectile *);
+                void (*on_tick)(struct Projectile *, double);
+                void (*on_destruction)(struct Projectile *);
+
+                void *extra_data;
+            });
+
+            END_STRUCT(PROJECTILE);
+
+        END_STRUCT(ENTITY);
+
+        DEF_STRUCT(Player, PLAYER, {            
+            WorldNode node;
+            v2 vel;
+            double speed, angle, torque, collSize;
+            double pitch_angle;
+            double height;
+            double height_vel;
+            double pitch;
+            bool sprinting;
+            bool crouching;
+            bool canShoot;
+            double shootCooldown;
+            double shootChargeTimer;
+            int pendingShots;
+            int max_pending_shots;
+            double ShootTickTimer;
+            v2 handOffset;
+            double health, maxHealth;
+            CircleCollider *collider;
+            double tallness;
+
+            Ability *primary, *secondary, *utility, *special;
+
+        });
+
+        DEF_STRUCT(CircleCollider, CIRCLE_COLLIDER, {
+            WorldNode world_node;
+            v2 pos;
+            double radius;
+        });
+
+        DEF_STRUCT(ParticleSpawner, PARTICLE_SPAWNER, {
+            WorldNode world_node;
+
+            v2 dir;
+            double height_dir;
+
+            double spread;
+
+            v2 accel;
+            double height_accel;
+
+            double min_speed, max_speed;
+
+            v2 min_size, max_size;
+
+            int spawn_rate; // per second
+
+            double spawn_timer;
+
+            double bounciness;
+
+            double floor_drag;
+
+            Sprite sprite;
+
+            double particle_lifetime;
+
+            bool active;
+
+            Entity *target;
+
+            bool fade;
+
+            bool fade_scale;
+
+            bool affected_by_light;
+
+            int explode_particle_amount;
+
+            SDL_Color start_color, end_color;
+
+        });
+
+    END_STRUCT(WORLD_NODE);
+
+    DEF_STRUCT(CanvasNode, CANVAS_NODE, {
+        Node node;
+        v2 pos, size;
+    });
+
+    END_STRUCT(CANVAS_NODE);
+
+    DEF_STRUCT(Sprite, SPRITE, {
+        Node node;
+        GPU_Image *texture;  // not used if animated
+        bool isAnimated;
+        int current_anim_idx;
+        Animation *animations;
+    });
+
+    END_STRUCT(SPRITE);
+
+
+END_STRUCT(NODE);
+
 
 #define new(type) type##_new()
 #define alloc(type) ({type *ptr; ptr = malloc(sizeof(type)); (*ptr) = new(type); ptr;})
@@ -222,24 +412,6 @@ typedef struct Animation {
     int priority;
 } Animation;
 
-typedef struct Sprite {
-    Node node;
-    GPU_Image *texture;  // not used if animated
-    bool isAnimated;
-    int current_anim_idx;
-    Animation *animations;
-} Sprite;
-
-typedef struct DirectionalSprite {
-    Sprite **sprites;
-    v2 dir;  // global direction
-    int dirCount;
-
-    int current_anim;
-    int playing;
-    int fps;
-} DirectionalSprite;
-
 typedef struct Raycast {
     v2 pos, dir;
 } Raycast;
@@ -252,11 +424,6 @@ typedef struct RayCollisionData {
     bool hit;
     double collIdx, wallWidth;
 } RayCollisionData;
-
-typedef struct CircleCollider {
-    v2 pos;
-    double radius;
-} CircleCollider;
 
 typedef struct Ability {
     void (*activate)(struct Ability *);
@@ -273,148 +440,10 @@ typedef struct Ability {
 
 } Ability;
 
-typedef struct Player {
-
-    Node node;
-
-    v2 pos, vel;
-    double speed, angle, torque, collSize;
-    double pitch_angle;
-    double height;
-    double height_vel;
-    double pitch;
-    bool sprinting;
-    bool crouching;
-    bool canShoot;
-    double shootCooldown;
-    double shootChargeTimer;
-    int pendingShots;
-    int max_pending_shots;
-    double ShootTickTimer;
-    v2 handOffset;
-    double health, maxHealth;
-    CircleCollider *collider;
-    double tallness;
-
-    Ability *primary, *secondary, *utility, *special;
-} Player;
-
-typedef struct Entity {
-    WorldNode world_node;
-    // v2 pos, size;
-    // double height;
-    bool affected_by_light;
-    SDL_Color color;
-} Entity;
-
-typedef struct Projectile {
-    Entity entity;
-    int type;
-    v2 vel;
-    double height_vel;
-    v2 accel;
-    CircleCollider collider;
-    double height_accel;
-    double life_time, life_timer;
-    double bounciness;
-    bool destroy_on_floor;
-    bool _created;
-    void (*on_create)(struct Projectile *);
-    void (*on_tick)(struct Projectile *, double);
-    void (*on_destruction)(struct Projectile *);
-
-    void *extra_data;
-
-} Projectile;
-
 enum ProjectileTypes {
     PROJ_BOMB,
     PROJ_FORCEFIELD
 };
-
-typedef struct PlayerEntity {
-    Entity entity;
-    v2 desired_pos;
-    double desired_height;
-    CircleCollider collider;
-    v2 dir;
-    int id;
-    Entity *direction_indicator;
-    DirectionalSprite *dir_sprite;
-} PlayerEntity;
-
-typedef struct LightPoint {
-    Node node;
-    v2 pos;
-    double strength;
-    double radius;
-    SDL_Color color;
-} LightPoint;
-
-typedef struct Effect {
-    Entity entity;
-    double life_time;
-    double life_timer;
-} Effect;
-
-typedef struct Particle {
-    Effect effect;
-    v2 vel;
-    double h_vel;
-    v2 accel;
-    double h_accel;
-    double bounciness;
-    double floor_drag;
-    v2 initial_size;
-    bool fade;
-    bool fade_scale;
-    SDL_Color start_color, end_color;
-} Particle;
-
-typedef struct ParticleSpawner {
-    v2 pos;
-    double height;
-
-    v2 dir;
-    double height_dir;
-
-    double spread;
-
-    v2 accel;
-    double height_accel;
-
-    double min_speed, max_speed;
-
-    v2 min_size, max_size;
-
-    int spawn_rate; // per second
-
-    double spawn_timer;
-
-    double bounciness;
-
-    double floor_drag;
-
-    Sprite sprite;
-
-    double particle_lifetime;
-
-    bool active;
-
-    Entity *target;
-
-    bool fade;
-
-    bool fade_scale;
-
-    bool affected_by_light;
-
-    int explode_particle_amount;
-
-    SDL_Color start_color, end_color;
-
-} ParticleSpawner;
-
 
 typedef struct RenderObject {
     void *val;
@@ -422,24 +451,6 @@ typedef struct RenderObject {
     int type;
     bool isnull;
 } RenderObject;
-
-typedef struct Bullet {
-    Entity entity;
-    DirectionalSprite *dirSprite;
-    CircleCollider *collider;
-    ParticleSpawner *particle_spawner;
-    v2 dir;
-    double dmg;
-    double speed;
-    double lifeTime;
-    double lifeTimer;
-    bool hit_enemies;
-    bool hit_player;
-
-    void (*on_hit)(struct Bullet *);
-    
-
-} Bullet;
 
 typedef struct BakedLightColor {
     float r, g, b;
@@ -461,17 +472,6 @@ typedef struct Room {
 
     bool initialized;
 } Room;
-
-typedef struct Tilemap {
-    Node node;
-    int level_tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH];
-    int floor_tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH];
-    int ceiling_tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH];
-} Tilemap;
-
-typedef struct Renderer {
-    Node node;
-} Renderer;
 
 // #FUNC
 

@@ -2,7 +2,6 @@
 
 #define DEF_STRUCT(name, typename, ...) enum {typename = __COUNTER__}; typedef struct name __VA_ARGS__ name;
 #define END_STRUCT(typename) enum {typename##_END = __COUNTER__};
-#define typename __COUNTER__ \
 #define instanceof(type, parent_type) (type >= parent_type && type <= parent_type##_END)
 
 DEF_STRUCT(Foo, FOO, {
