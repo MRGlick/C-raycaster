@@ -171,7 +171,50 @@ struct player_joined_packet {
 enum Tiles { WALL1 = 1, WALL2 = 2 };
 
 
+typedef enum AbilityType {
+    A_PRIMARY,
+    A_SECONDARY,
+    A_UTILITY,
+    A_SPECIAL
+} AbilityType;
+
 // #STRUCTS
+
+DEF_STRUCT(Ability, ABILITY, {
+    void (*activate)(struct Ability *);
+    void (*tick)(struct Ability *, double);
+    void (*before_activate)(struct Ability *);
+    bool can_use;
+    double cooldown;
+    double timer;
+    double delay;
+    double delay_timer;
+    AbilityType type;
+
+    GPU_Image *texture;
+});
+
+DEF_STRUCT(Animation, ANIMATION, {
+    GPU_Image **frames;
+    int frameCount;
+    int frame;
+    double fps;
+    double timeToNextFrame;
+    bool loop;
+    bool playing;
+    int priority;
+});
+
+DEF_STRUCT(WallStripe, WALL_STRIPE, {
+    v2 pos, normal; // 16, 16
+    double size; // 8
+    double brightness; // 8  // a bunch of rendering bullshit:
+    double collIdx; // 8
+    double wallWidth; // 8
+    GPU_Image *texture; // 8
+    int i; // 4
+});
+
 DEF_STRUCT(Node, NODE, {
     void (*on_render)(struct Node *);
     void (*on_tick)(struct Node *, double);
@@ -183,6 +226,11 @@ DEF_STRUCT(Node, NODE, {
     struct Node *parent;
     struct Node **children;
 });
+    DEF_STRUCT(CircleCollider, CIRCLE_COLLIDER, {
+        Node node;
+        v2 pos;
+        double radius;
+    });
 
     DEF_STRUCT(Tilemap, TILEMAP, {
         Node node;
@@ -190,6 +238,15 @@ DEF_STRUCT(Node, NODE, {
         int floor_tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH];
         int ceiling_tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH];
     });
+    DEF_STRUCT(Sprite, SPRITE, {
+        Node node;
+        GPU_Image *texture;  // not used if animated
+        bool isAnimated;
+        int current_anim_idx;
+        Animation *animations;
+    });
+
+    END_STRUCT(SPRITE);
 
     DEF_STRUCT(Renderer, RENDERER, {
         Node node;
@@ -202,17 +259,16 @@ DEF_STRUCT(Node, NODE, {
         double radius;
         SDL_Color color;
     });
-
     DEF_STRUCT(DirectionalSprite, DIRECTIONAL_SPRITE, {
         Node node;
         Sprite **sprites;
         v2 dir;  // global direction
         int dirCount;
-
         int current_anim;
         int playing;
         int fps;
     });
+
 
     DEF_STRUCT(WorldNode, WORLD_NODE, {
         Node node;
@@ -222,7 +278,7 @@ DEF_STRUCT(Node, NODE, {
     });
 
         DEF_STRUCT(Entity, ENTITY, {
-                WorldNode world_node;
+            WorldNode world_node;
             // v2 pos, size;
             // double height;
             bool affected_by_light;
@@ -287,7 +343,7 @@ DEF_STRUCT(Node, NODE, {
         END_STRUCT(ENTITY);
 
         DEF_STRUCT(Player, PLAYER, {            
-            WorldNode node;
+            WorldNode world_node;
             v2 vel;
             double speed, angle, torque, collSize;
             double pitch_angle;
@@ -311,11 +367,6 @@ DEF_STRUCT(Node, NODE, {
 
         });
 
-        DEF_STRUCT(CircleCollider, CIRCLE_COLLIDER, {
-            WorldNode world_node;
-            v2 pos;
-            double radius;
-        });
 
         DEF_STRUCT(ParticleSpawner, PARTICLE_SPAWNER, {
             WorldNode world_node;
@@ -369,48 +420,16 @@ DEF_STRUCT(Node, NODE, {
 
     END_STRUCT(CANVAS_NODE);
 
-    DEF_STRUCT(Sprite, SPRITE, {
-        Node node;
-        GPU_Image *texture;  // not used if animated
-        bool isAnimated;
-        int current_anim_idx;
-        Animation *animations;
-    });
-
-    END_STRUCT(SPRITE);
 
 
 END_STRUCT(NODE);
 
 
-#define new(type) type##_new()
-#define alloc(type) ({type *ptr; ptr = malloc(sizeof(type)); (*ptr) = new(type); ptr;})
+#define new(type, ...) type##_new(__VA_ARGS__)
+#define alloc(type, ...) ({type *ptr; ptr = malloc(sizeof(type)); (*ptr) = new(type, __VA_ARGS__); ptr;})
 
-
-typedef enum AbilityType {
-    A_PRIMARY,
-    A_SECONDARY,
-    A_UTILITY,
-    A_SPECIAL
-} AbilityType;
-
-typedef enum {
-    STATE_IDLE,
-    STATE_PURSUING
-} EnemyState;
 
 // #STRUCTS
-
-typedef struct Animation {
-    GPU_Image **frames;
-    int frameCount;
-    int frame;
-    double fps;
-    double timeToNextFrame;
-    bool loop;
-    bool playing;
-    int priority;
-} Animation;
 
 typedef struct Raycast {
     v2 pos, dir;
@@ -424,21 +443,6 @@ typedef struct RayCollisionData {
     bool hit;
     double collIdx, wallWidth;
 } RayCollisionData;
-
-typedef struct Ability {
-    void (*activate)(struct Ability *);
-    void (*tick)(struct Ability *, double);
-    void (*before_activate)(struct Ability *);
-    bool can_use;
-    double cooldown;
-    double timer;
-    double delay;
-    double delay_timer;
-    AbilityType type;
-
-    GPU_Image *texture;
-
-} Ability;
 
 enum ProjectileTypes {
     PROJ_BOMB,
@@ -540,8 +544,6 @@ void projectile_destroy(Projectile *projectile);
 
 void projectile_tick(Projectile *projectile, double delta);
 
-bool is_projectile_type(int type);
-
 void ability_bomb_activate();
 
 Ability ability_bomb_create();
@@ -568,8 +570,6 @@ void on_server_recv(SOCKET socket, MPPacket packet, void *data);
 void on_player_connect(SOCKET player_socket);
 
 void on_player_disconnect(SOCKET player_socket);
-
-void enemy_bullet_destroy(Bullet *bullet);
 
 void write_to_debug_label(String string);
 
@@ -601,8 +601,6 @@ void ability_dash_activate(Ability *ability);
 
 void ability_dash_tick(Ability *ability, double delta);
 
-void shooter_bullet_effect(Bullet *bullet);
-
 void place_entity(v2 pos, int type);
 
 void particle_tick(Particle *particle, double delta);
@@ -611,7 +609,7 @@ void particle_spawner_spawn(ParticleSpawner *spawner);
 
 void particle_spawner_tick(ParticleSpawner *spawner, double delta);
 
-ParticleSpawner create_particle_spawner(v2 pos, double height);
+ParticleSpawner ParticleSpawner_new(v2 pos, double height);
 
 void draw_3d_line(v2 pos1, double h1, v2 pos2, double h2);
 
@@ -629,9 +627,6 @@ void default_ability_tick(Ability *ability, double delta);
 
 
 void dir_sprite_play_anim(DirectionalSprite *dir_sprite, int anim);
-
-
-bool is_entity_type(int type);
 
 int charge_time_to_shots(double charge_time);
 
@@ -722,9 +717,7 @@ void spriteTick(Sprite *sprite, double delta);
 void animationTick(Animation *anim, double delta);
 
 void effectTick(Effect *effect, double delta);
-
-void bulletTick(Bullet *bullet, double delta);
-
+ 
 Sprite *createSprite(bool isAnimated, int animCount);
 
 DirectionalSprite *createDirSprite(int dirCount);
@@ -1060,10 +1053,10 @@ void init() {  // #INIT
     //exit(1);
 
     bomb_explode_particles = malloc(sizeof(ParticleSpawner));
-    *bomb_explode_particles = create_particle_spawner(V2_ZERO, 0);
+    *bomb_explode_particles = ParticleSpawner_new(V2_ZERO, 0);
 
     player_hit_particles = malloc(sizeof(ParticleSpawner));
-    *player_hit_particles = create_particle_spawner(V2_ZERO, 0);
+    *player_hit_particles = ParticleSpawner_new(V2_ZERO, 0);
     player_hit_particles->spread = 2;
     player_hit_particles->dir = (v2){0.5, 1};
     player_hit_particles->min_size = to_vec(1000);
@@ -1185,7 +1178,7 @@ void key_pressed(SDL_Keycode key) {
             player->height_vel = 370;
         }
     }
-    player->height = clamp(player->height, 0, get_max_height());
+    player->world_node.height = clamp(player->world_node.height, 0, get_max_height());
 
     if (key == SDLK_LSHIFT) {
         activate_ability(player->utility);
@@ -1239,23 +1232,23 @@ void player_tick(Node *node, double delta) {
         exit(12);
     }
 
-    //String height_str = String_from_double(player->height, 2);
+    //String height_str = String_from_double(player->world_node.height, 2);
 
     //write_to_debug_label(height_str);
-    //printf("%.2f \n", player->height);
+    //printf("%.2f \n", player->world_node.height);
 
     double speed_multiplier = 1;
 
 
 
     player->height_vel -= 750 * delta;
-    player->height += player->height_vel * (delta * 144);
-    if (player->height > get_max_height() - player->tallness * 0.2) {
+    player->world_node.height += player->height_vel * (delta * 144);
+    if (player->world_node.height > get_max_height() - player->tallness * 0.2) {
         player->height_vel = 0;
     }
-    player->height = clamp(player->height, player->tallness * 0.8, get_max_height());
+    player->world_node.height = clamp(player->world_node.height, player->tallness * 0.8, get_max_height());
 
-    player->collider->pos = player->pos;
+    // player->collider->pos = player->world_node.pos;
 
     if (player->primary != NULL) player->primary->tick(player->primary, delta);
     if (player->secondary != NULL) player->secondary->tick(player->secondary, delta);
@@ -1312,23 +1305,23 @@ void player_tick(Node *node, double delta) {
 
     v2 movement_dir = v2_normalize(finalVel);
 
-    RayCollisionData ray = castRay(player->pos, movement_dir);
+    RayCollisionData ray = castRay(player->world_node.pos, movement_dir);
     if (ray.hit) {
         double dist = v2_distance(ray.startpos, ray.collpos);
         if (dist < movement) {
             move_without_ray = false;
-            player->pos = v2_add(player->pos, v2_mul(movement_dir, to_vec(dist - 10)));
+            player->world_node.pos = v2_add(player->world_node.pos, v2_mul(movement_dir, to_vec(dist - 10)));
         }
     }
     
     CollisionData player_coldata = getCircleTileMapCollision(*player->collider);
     if (player_coldata.didCollide) {
-        player->pos = v2_add(player->pos, player_coldata.offset);
+        player->world_node.pos = v2_add(player->world_node.pos, player_coldata.offset);
         player->vel = v2_slide(player->vel, v2_normalize(player_coldata.offset));
     }
 
     if (move_without_ray) 
-        player->pos = v2_add(player->pos, v2_mul(finalVel, to_vec(delta)));
+        player->world_node.pos = v2_add(player->world_node.pos, v2_mul(finalVel, to_vec(delta)));
     
     
 
@@ -1336,8 +1329,8 @@ void player_tick(Node *node, double delta) {
     if (update_pos_timer <= 0) {
         update_pos_timer = 1.0 / CLIENT_UPDATE_RATE;
         struct player_pos_packet packet_data = {
-            .pos = player->pos,
-            .height = player->height,
+            .pos = player->world_node.pos,
+            .height = player->world_node.height,
             .dir = playerForward,
             .id = client_self_id,
             .color = client_self_color
@@ -1369,7 +1362,7 @@ void objectTick(void *obj, int type, double delta) {
     
     update_entity_collisions(obj, type);
     
-    if (is_projectile_type(type)) {
+    if (instanceof(type, PROJECTILE)) {
         projectile_tick(obj, delta);
         return;
     }
@@ -1389,9 +1382,6 @@ void objectTick(void *obj, int type, double delta) {
             break;
         case (int)PARTICLE_SPAWNER:
             particle_spawner_tick(obj, delta);
-            break;
-        case (int)BULLET:
-            bulletTick(obj, delta);
             break;
         case (int)PLAYER_ENTITY:
             player_entity_tick(obj, delta);
@@ -1508,7 +1498,7 @@ void renderDebug() {  // #DEBUG
         }
     }
 
-    GPU_RectangleFilled2(screen, (GPU_Rect){player->pos.x / tileSize * tile_size, player->pos.y / tileSize * tile_size, tile_size / 2, tile_size / 2}, GPU_MakeColor(255, 0, 0, 255));
+    GPU_RectangleFilled2(screen, (GPU_Rect){player->world_node.pos.x / tileSize * tile_size, player->world_node.pos.y / tileSize * tile_size, tile_size / 2, tile_size / 2}, GPU_MakeColor(255, 0, 0, 255));
     
 }
 
@@ -1526,11 +1516,11 @@ v2 getRayDirByIdx(int i) {
 
 v2 worldToScreen(v2 pos, double height, bool allow_out_of_screen) { // gotta refactor this.
     
-    if (v2_equal(pos, player->pos)) {
+    if (v2_equal(pos, player->world_node.pos)) {
         return (v2){WINDOW_WIDTH / 2, WINDOW_HEIGHT};
     }
 
-    double signed_angle_to_forward = v2_signed_angle_between(playerForward, v2_sub(pos, player->pos));
+    double signed_angle_to_forward = v2_signed_angle_between(playerForward, v2_sub(pos, player->world_node.pos));
 
     double signed_angle_degrees = rad_to_deg(signed_angle_to_forward);
 
@@ -1538,21 +1528,21 @@ v2 worldToScreen(v2 pos, double height, bool allow_out_of_screen) { // gotta ref
         return OUT_OF_SCREEN_POS;
     } else {
         if (!in_range(signed_angle_degrees, -90, 90)) {
-            double dist_to_viewplane = abs(v2_distance(pos, player->pos) * v2_cos_angle_between(playerForward, v2_sub(pos, player->pos)));
+            double dist_to_viewplane = abs(v2_distance(pos, player->world_node.pos) * v2_cos_angle_between(playerForward, v2_sub(pos, player->world_node.pos)));
 
             pos = v2_add(pos, v2_mul(playerForward, to_vec(dist_to_viewplane + 2)));
 
             // we need to recalculate prev variables
-            signed_angle_to_forward = v2_signed_angle_between(playerForward, v2_sub(pos, player->pos));
+            signed_angle_to_forward = v2_signed_angle_between(playerForward, v2_sub(pos, player->world_node.pos));
 
             signed_angle_degrees = deg_to_rad(signed_angle_to_forward);
         }
     }
 
 
-    double cos_angle_to_forward = v2_cos_angle_between(playerForward, v2_sub(pos, player->pos));
+    double cos_angle_to_forward = v2_cos_angle_between(playerForward, v2_sub(pos, player->world_node.pos));
 
-    double dist_to_player = v2_distance(pos, player->pos);
+    double dist_to_player = v2_distance(pos, player->world_node.pos);
 
 
     double dist_to_viewplane = dist_to_player * cos_angle_to_forward;
@@ -1603,7 +1593,7 @@ v2 screenToFloor(v2 pos) {
 
     dist *= m * WALL_HEIGHT_MULTIPLIER;
 
-    return v2_add(player->pos, v2_mul(rayDir, to_vec(dist)));
+    return v2_add(player->world_node.pos, v2_mul(rayDir, to_vec(dist)));
 }
 
 struct floor_and_ceiling_thread_data {
@@ -1695,9 +1685,9 @@ void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affe
     if (v2_equal(screen_pos, OUT_OF_SCREEN_POS)) {
         return;
     }
-    double cos_angle_to_forward = v2_cos_angle_between(playerForward, v2_sub(pos, player->pos));
+    double cos_angle_to_forward = v2_cos_angle_between(playerForward, v2_sub(pos, player->world_node.pos));
 
-    double dist_to_player = v2_distance(pos, player->pos);
+    double dist_to_player = v2_distance(pos, player->world_node.pos);
 
     double dist_to_viewplane = dist_to_player * cos_angle_to_forward;
 
@@ -1756,23 +1746,13 @@ void renderEntity(Entity entity) {  // RENDER ENTITY
 
     // GPU_SetRGBA(texture, entity.color.r, entity.color.g, entity.color.b, 20);
 
-    // renderTexture(texture, entity.pos, entity.size, entity.height, entity.affected_by_light, entity.color);
+    // renderTexture(texture, entity.world_node.pos, entity.world_node.size, entity.world_node.height, entity.affected_by_light, entity.color);
 }
-
-typedef struct WallStripe {
-    v2 pos, normal; // 16, 16
-    double size; // 8
-    double brightness; // 8  // a bunch of rendering bullshit:
-    double collIdx; // 8
-    double wallWidth; // 8
-    GPU_Image *texture; // 8
-    int i; // 4
-} WallStripe;
 
 RenderObject getWallStripe(int i) {
     v2 ray_dir = getRayDirByIdx(i);
 
-    RayCollisionData data = castRay(player->pos, ray_dir);
+    RayCollisionData data = castRay(player->world_node.pos, ray_dir);
 
     if (!data.hit) {
         return (RenderObject){.isnull = true};
@@ -1856,13 +1836,13 @@ RenderObject *get_render_list() {
         RenderObject render_object = (RenderObject){.isnull = false};
         v2 pos = V2_ZERO;
         
-        if (is_entity_type(node->type)) {
+        if (instanceof(node->type, ENTITY)) {
 
-            pos = ((Entity *)node)->pos;
+            pos = ((Entity *)node)->world_node.pos;
 
         }
 
-        render_object.dist_squared = v2_distance_squared(pos, player->pos);
+        render_object.dist_squared = v2_distance_squared(pos, player->world_node.pos);
         
         array_append(renderList, render_object);
         
@@ -1963,7 +1943,7 @@ void render_hand() {
     bool first_check = current_anim_idx == 0;
     bool second_check = current_anim_idx == 1 && current_anim.frame > 1;
     if (first_check || second_check) {
-        baked_light_color = get_light_color_by_pos(player->pos, 0, 0);
+        baked_light_color = get_light_color_by_pos(player->world_node.pos, 0, 0);
         baked_light_color.r = 0.3 + baked_light_color.r * 0.7;
         baked_light_color.g = 0.3 + baked_light_color.g * 0.7;
         baked_light_color.b = 0.3 + baked_light_color.b * 0.7;
@@ -2158,14 +2138,14 @@ void render(double delta) {  // #RENDER
     //         case (int)BULLET:;
     //             Bullet *bullet = rObj.val;
     //             if (bullet->dirSprite != NULL) {
-    //                 renderDirSprite(bullet->dirSprite, bullet->entity.pos, bullet->entity.size, bullet->entity.height);
+    //                 renderDirSprite(bullet->dirSprite, bullet->entity.world_node.pos, bullet->entity.world_node.size, bullet->entity.world_node.height);
     //             } else {
     //                 renderEntity(bullet->entity);
     //             }
     //             break;
     //         case (int)PLAYER_ENTITY: ;
     //             PlayerEntity *player_entity = rObj.val;
-    //             renderDirSprite(player_entity->dir_sprite, player_entity->entity.pos, player_entity->entity.size, player_entity->entity.height);
+    //             renderDirSprite(player_entity->dir_sprite, player_entity->entity.world_node.pos, player_entity->entity.world_node.size, player_entity->entity.world_node.height);
     //             break;
     //     }
     // }
@@ -2201,12 +2181,12 @@ void render(double delta) {  // #RENDER
 void init_player(v2 pos) {
     if (player == NULL) player = malloc(sizeof(Player));
 
-    player->node = new(Node);
-    player->node.on_tick = player_tick;
-    player->node.type = PLAYER;
+    player->world_node = new(WorldNode);
+    player->world_node.node.on_tick = player_tick;
+    player->world_node.node.type = PLAYER;
 
     player->angle = 0;
-    player->pos = pos;
+    player->world_node.pos = pos;
     player->vel = V2_ZERO;
     player->speed = 70;
     player->collSize = 7;
@@ -2219,7 +2199,7 @@ void init_player(v2 pos) {
     player->max_pending_shots = 10;
     player->collider = malloc(sizeof(CircleCollider));
     player->collider->radius = PLAYER_COLLIDER_RADIUS;
-    player->collider->pos = player->pos;
+    player->collider->pos = player->world_node.pos;
 
     if (player->collider == NULL) {
         exit(-123456789);
@@ -2228,7 +2208,7 @@ void init_player(v2 pos) {
     player->maxHealth = 10;
     player->health = player->maxHealth;
     player->tallness = 11000;
-    player->height = player->tallness;
+    player->world_node.height = player->tallness;
     player->height_vel = 0;
     player->crouching = false;
 
@@ -2398,7 +2378,7 @@ void freeObject(void *val, int type) {
             free(s->animations);
             free(s);
             break;
-        case (int)DIR_SPRITE:;
+        case (int)DIRECTIONAL_SPRITE:;
             DirectionalSprite *dSprite = val;
             for (int i = 0; i < dSprite->dirCount; i++) {
                 freeObject(dSprite->sprites[i], SPRITE);
@@ -2406,26 +2386,10 @@ void freeObject(void *val, int type) {
             free(dSprite->sprites);
             free(dSprite);
             break;
-        
 
-        case (int)BULLET:;
-            Bullet *bullet = val;
-            free(bullet->collider);
-            if (bullet->dirSprite != NULL) {
-                freeObject(bullet->dirSprite, DIR_SPRITE);
-            }
-            // if (bullet->entity.sprite != NULL) {
-            //     freeObject(bullet->entity.sprite, SPRITE);
-            // }
-            if (bullet->particle_spawner != NULL) {
-                remove_game_object(bullet->particle_spawner, PARTICLE_SPAWNER);
-            }
-
-            free(bullet);
-            break;
         case (int)PLAYER_ENTITY:;
             PlayerEntity *player_entity = val;
-            remove_game_object(player_entity->dir_sprite, DIR_SPRITE);
+            remove_game_object(player_entity->dir_sprite, DIRECTIONAL_SPRITE);
             remove_game_object(player_entity->direction_indicator, ENTITY);
             free(val);
             break;
@@ -2507,7 +2471,7 @@ void place_entity(v2 pos, int type) {
     switch (type) {
         case (int)P_PLAYER:
             if (player == NULL) printf("player = null \n");
-            player->pos = pos;
+            player->world_node.pos = pos;
             spawn_point = pos;
             break;
     }
@@ -2659,9 +2623,8 @@ Sprite *createSprite(bool isAnimated, int animCount) {
     sprite->isAnimated = isAnimated;
     sprite->texture = NULL;
     sprite->current_anim_idx = 0;
-    sprite->animCount = animCount;
     if (isAnimated) {
-        sprite->animations = malloc(sizeof(Animation ) * animCount);
+        sprite->animations = array(Animation, animCount);
     } else {
         sprite->animations = NULL;
     }
@@ -2676,7 +2639,7 @@ void spritePlayAnim(Sprite *sprite, int idx) {
         return;
     }
     sprite->current_anim_idx = idx;
-    for (int i = 0; i < sprite->animCount; i++) {
+    for (int i = 0; i < array_length(sprite->animations); i++) {
         sprite->animations[i].playing = false;
     }
     sprite->animations[idx].frame = 0;
@@ -2701,11 +2664,11 @@ Effect *createEffect(v2 pos, v2 size, Sprite *sprite, double lifeTime) {
         printf("Failed to malloc effect \n");
     }
 
-    effect->entity.pos = pos;
-    effect->entity.size = size;
+    effect->entity.world_node.pos = pos;
+    effect->entity.world_node.size = size;
     // effect->entity.sprite = sprite;
     effect->entity.color = (SDL_Color){255, 255, 255, 255};
-    effect->entity.height = get_max_height() * 0.5;
+    effect->entity.world_node.height = get_max_height() * 0.5;
     effect->life_time = lifeTime;
     effect->life_timer = effect->life_time;
 
@@ -2775,7 +2738,7 @@ DirectionalSprite *createDirSprite(int dirCount) {
 }
 
 Sprite *dir_sprite_current_sprite(DirectionalSprite *dSprite, v2 spritePos) {
-    double player_angle_to_sprite = v2_get_angle(v2_dir(player->pos, spritePos));
+    double player_angle_to_sprite = v2_get_angle(v2_dir(player->world_node.pos, spritePos));
 
     if (dSprite->dirCount < 2) {
         return dSprite->sprites[0];
@@ -2833,91 +2796,10 @@ double angleDist(double a1, double a2) {
     return min(d1, d2);
 }
 
-Bullet *createDefaultBullet(v2 pos, v2 dir) {
-    Bullet *bullet = malloc(sizeof(Bullet));
-
-    bullet->entity.pos = pos;
-    bullet->entity.size = to_vec(8000);
-    // bullet->entity.sprite = createSprite(true, 1);
-    // bullet->entity.sprite->animations[0] = create_animation(4, 0, shooter_bullet_default_frames);
-    // bullet->entity.sprite->animations[0].fps = 12;
-    // bullet->entity.sprite->animations[0].loop = true;
-    // spritePlayAnim(bullet->entity.sprite, 0);
-    bullet->entity.height = get_max_height() * 0.525;
-    bullet->entity.affected_by_light = false;
-    bullet->dirSprite = NULL;
-    bullet->dmg = 1;
-    bullet->speed = 360;
-    bullet->dir = dir;
-    bullet->lifeTime = 5;
-    bullet->lifeTimer = bullet->lifeTime;
-
-    bullet->on_hit = shooter_bullet_effect;
-    
-    bullet->hit_player = true;
-    bullet->hit_enemies = false;
-
-    bullet->collider = malloc(sizeof(CircleCollider));
-    bullet->collider->pos = bullet->entity.pos;
-    bullet->collider->radius = 5;
-
-
-
-    bullet->particle_spawner = malloc(sizeof(ParticleSpawner));
-    *bullet->particle_spawner = create_particle_spawner(V2_ZERO, get_max_height() / 2);
-
-    bullet->particle_spawner->height_dir = 0;
-    bullet->particle_spawner->dir = V2_ZERO;
-    
-    bullet->particle_spawner->height_accel = -PARTICLE_GRAVITY / 5;
-    
-
-    bullet->particle_spawner->target = bullet;
-    bullet->particle_spawner->active = true;
-
-    add_game_object(bullet->particle_spawner, PARTICLE_SPAWNER);
-
-    return bullet;
-}
-
-Bullet *createTestBullet(v2 pos) { return createDefaultBullet(pos, (v2){1, 0}); }
-
 bool intersectCircles(CircleCollider c1, CircleCollider c2) {
     return v2_distance_squared(c1.pos, c2.pos) < (c1.radius + c2.radius) * (c1.radius + c2.radius);  // dist^2 < (r1 + r2)^2
 }
 
-void bulletTick(Bullet *bullet, double delta) {
-
-    bullet->entity.pos = v2_add(bullet->entity.pos, v2_mul(bullet->dir, to_vec(bullet->speed * delta)));
-    bullet->collider->pos = bullet->entity.pos;
-
-    bullet->lifeTimer -= delta;
-
-
-
-    if (bullet->lifeTimer <= 0) {
-        enemy_bullet_destroy(bullet);
-        return;
-    }
-
-    CollisionData bullet_coldata = getCircleTileMapCollision(*bullet->collider);
-    if (bullet_coldata.didCollide) {
-        enemy_bullet_destroy(bullet);
-        return;
-    }
-
-    if (bullet->hit_player && intersectCircles(*bullet->collider, *(player->collider))) {
-        player_take_dmg(bullet->dmg);
-        enemy_bullet_destroy(bullet);
-        return;
-    }
-
-    if (bullet->dirSprite != NULL) {
-        dSpriteTick(bullet->dirSprite, bullet->entity.pos, delta);
-    } else {
-        // spriteTick(bullet->entity.sprite, delta);
-    }
-}
 
 bool pos_in_tile(v2 pos) {
     int row = pos.y / tileSize;
@@ -2993,7 +2875,7 @@ void update_entity_collisions(void *val, int type) {
             Projectile *projectile = val;
             CollisionData coll_data = getCircleTileMapCollision(projectile->collider);
             if (coll_data.didCollide) {
-                projectile->entity.pos = v2_add(projectile->entity.pos, coll_data.offset);
+                projectile->entity.world_node.pos = v2_add(projectile->entity.world_node.pos, coll_data.offset);
                 projectile->vel = v2_reflect(projectile->vel, v2_normalize(coll_data.offset));
                 projectile->vel = v2_mul(to_vec(projectile->bounciness), projectile->vel);
             }
@@ -3286,8 +3168,8 @@ void player_take_dmg(double dmg) {
     play_sound(player_default_hurt, 0.1);
     shakeCamera(20, 10, true, 2);
 
-    player_hit_particles->pos = player->pos;
-    player_hit_particles->height = player->height;
+    player_hit_particles->world_node.pos = player->world_node.pos;
+    player_hit_particles->world_node.height = player->world_node.height;
     player_hit_particles->target = NULL;
     particle_spawner_explode(player_hit_particles);
 
@@ -3306,7 +3188,7 @@ void player_die() {
 
 void _player_die() {
     
-    player->pos = spawn_point;
+    player->world_node.pos = spawn_point;
     player->vel = V2_ZERO;
     player->height_vel = 0;
     player->health = player->maxHealth;
@@ -3415,31 +3297,6 @@ SDL_Color lerp_color(SDL_Color col1, SDL_Color col2, double w) {
     return res;
 }
 
-void shooter_bullet_effect(Bullet *bullet) {
-    Sprite *sprite = createSprite(true, 1);
-    sprite->animations[0] = create_animation(4, 0, shooter_bullet_explode_frames);
-    sprite->animations[0].playing = true;
-    sprite->animations[0].fps = 12;
-    sprite->animations[0].loop = false;
-
-    v2 pos = v2_sub(bullet->entity.pos, v2_mul(bullet->dir, to_vec(5)));
-
-    Effect *effect = createEffect(pos, bullet->entity.size, sprite, 0.35);
-    effect->entity.height = bullet->entity.height;
-    effect->entity.affected_by_light = false;
-
-    add_game_object(effect, EFFECT);
-}
-
-void enemy_bullet_destroy(Bullet *bullet) {
-   
-   if (bullet->on_hit != NULL) {
-        bullet->on_hit(bullet);
-   }
-
-    remove_game_object(bullet, BULLET); 
-}
-
 int charge_time_to_shots(double charge_time) {
     return (int)(charge_time * 3);
 }
@@ -3544,11 +3401,11 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
 
     v2 effect_size = to_vec(8000);
 
-    RayCollisionData ray_data = castRayForAll(player->pos, shoot_dir);
+    RayCollisionData ray_data = castRayForAll(player->world_node.pos, shoot_dir);
 
     v2 hit_pos = screenToFloor((v2){RESOLUTION_X / 2, WINDOW_HEIGHT / 2 + pitch});
-    double distance_to_hit_pos = v2_distance(hit_pos, player->pos);
-    double distance_to_coll_pos = ray_data.hit? v2_distance(ray_data.collpos, player->pos) : 999999999999;
+    double distance_to_hit_pos = v2_distance(hit_pos, player->world_node.pos);
+    double distance_to_coll_pos = ray_data.hit? v2_distance(ray_data.collpos, player->world_node.pos) : 999999999999;
 
     v2 final_pos;
     bool is_ceiling = pitch < 0;
@@ -3564,7 +3421,7 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
 
     double size = 8000;
     Effect *hitEffect = createEffect(final_pos, to_vec(size), createSprite(true, 1), 1);
-    hitEffect->entity.height = final_height;
+    hitEffect->entity.world_node.height = final_height;
 
     // hitEffect->entity.sprite->animations[0] = create_animation(5, 0, shootHitEffectFrames);
     
@@ -3614,14 +3471,15 @@ void draw_3d_line(v2 pos1, double h1, v2 pos2, double h2) {
     // SDL_RenderDrawLine(renderer, screen_pos_1.x, screen_pos_1.y, screen_pos_2.x, screen_pos_2.y);
 }
 
-ParticleSpawner create_particle_spawner(v2 pos, double height) {
+ParticleSpawner ParticleSpawner_new(v2 pos, double height) {
     ParticleSpawner spawner = {
         .dir = (v2){1, 0},
         .height_dir = 0,
         .accel = (v2){0, 0},
         .height_accel = PARTICLE_GRAVITY,
-        .pos = pos,
-        .height = height,
+        .world_node = new(WorldNode),
+        .world_node.pos = pos,
+        .world_node.height = height,
         .spawn_rate = 20,
         .spread = 0.1,
         .min_speed = 10,
@@ -3668,11 +3526,11 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
 
     Particle particle;
     
-    v2 pos = spawner->pos;
-    double height = spawner->height;
+    v2 pos = spawner->world_node.pos;
+    double height = spawner->world_node.height;
     if (spawner->target != NULL) {
-        pos = v2_add(pos, spawner->target->pos);
-        height += spawner->target->height;
+        pos = v2_add(pos, spawner->target->world_node.pos);
+        height += spawner->target->world_node.height;
     }
 
     double speed = randf_range(spawner->min_speed, spawner->max_speed);
@@ -3700,8 +3558,8 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
     particle.bounciness = spawner->bounciness;
     particle.floor_drag = spawner->floor_drag;
 
-    particle.effect.entity.pos = pos; // change later with emission
-    particle.effect.entity.height = spawner->height;
+    particle.effect.entity.world_node.pos = pos; // change later with emission
+    particle.effect.entity.world_node.height = spawner->world_node.height;
     
     particle.fade = spawner->fade;
     particle.fade_scale = spawner->fade_scale;
@@ -3752,18 +3610,18 @@ void particle_tick(Particle *particle, double delta) {
     particle->vel = v2_add(particle->vel, v2_mul(particle->accel, to_vec(delta)));
     particle->h_vel += particle->h_accel * delta;
 
-    particle->effect.entity.size = v2_lerp(particle->initial_size, V2_ZERO, inverse_lerp(particle->effect.life_time, 0, particle->effect.life_timer));
-    particle->effect.entity.pos = v2_add(particle->effect.entity.pos, v2_mul(particle->vel, to_vec(delta)));
-    particle->effect.entity.height += particle->h_vel * delta;
-    double floor_bound = get_max_height() / 2 + particle->effect.entity.size.y / 2;
-    double ceil_bound = get_max_height() / 2 + get_max_height() - particle->effect.entity.size.y / 2;
-    if (particle->effect.entity.height < floor_bound) {
-        particle->effect.entity.height = floor_bound;
+    particle->effect.entity.world_node.size = v2_lerp(particle->initial_size, V2_ZERO, inverse_lerp(particle->effect.life_time, 0, particle->effect.life_timer));
+    particle->effect.entity.world_node.pos = v2_add(particle->effect.entity.world_node.pos, v2_mul(particle->vel, to_vec(delta)));
+    particle->effect.entity.world_node.height += particle->h_vel * delta;
+    double floor_bound = get_max_height() / 2 + particle->effect.entity.world_node.size.y / 2;
+    double ceil_bound = get_max_height() / 2 + get_max_height() - particle->effect.entity.world_node.size.y / 2;
+    if (particle->effect.entity.world_node.height < floor_bound) {
+        particle->effect.entity.world_node.height = floor_bound;
         particle->h_vel *= -particle->bounciness;
         particle->vel = v2_mul(particle->vel, to_vec(1 - particle->floor_drag));
     }
-    if (particle->effect.entity.height > ceil_bound) {
-        particle->effect.entity.height = ceil_bound;
+    if (particle->effect.entity.world_node.height > ceil_bound) {
+        particle->effect.entity.world_node.height = ceil_bound;
         particle->h_vel *= -particle->bounciness;
     }
 
@@ -3793,7 +3651,7 @@ void ability_dash_activate(Ability *ability) {
 
     const double MAX_DASH_STR = 100;
 
-    v2 pos = player->pos;
+    v2 pos = player->world_node.pos;
     v2 dir = playerForward;
     double dash_distance = MAX_DASH_STR;
 
@@ -3817,7 +3675,7 @@ void ability_dash_activate(Ability *ability) {
         }
     }
 
-    player->pos = v2_add(player->pos, v2_mul(dir, to_vec(dash_distance)));
+    player->world_node.pos = v2_add(player->world_node.pos, v2_mul(dir, to_vec(dash_distance)));
     player->height_vel = -2;
     player->vel = v2_mul(dir, to_vec(3));
 
@@ -4273,7 +4131,7 @@ void load_dungeon() {
 }
 
 double get_player_height() {
-    return player->crouching? player->height - player->tallness / 2 : player->height;
+    return player->crouching? player->world_node.height - player->tallness / 2 : player->world_node.height;
 }
 
 
@@ -4283,17 +4141,13 @@ double set_time_scale_for_duration(double ts, double duration) {
 }
 
 bool is_player_on_floor() {
-    return player->height <= player->tallness * 0.8;
+    return player->world_node.height <= player->tallness * 0.8;
 }
 
 // takes ownership of 'string'
 void write_to_debug_label(String string) {
     UILabel_set_text(debug_label, string);
     UILabel_update(debug_label);
-}
-
-bool is_entity_type(int type) {
-    return in_range(type, ENTITY_START, ENTITY_END);
 }
 
 void on_player_connect(SOCKET player_socket) {
@@ -4382,9 +4236,9 @@ void client_add_player_entity(int id) {
 
     player_entity->id = id;
     player_entity->entity.affected_by_light = true;
-    player_entity->entity.height = 0;
-    player_entity->entity.pos = V2_ZERO;
-    player_entity->entity.size = to_vec(10000);
+    player_entity->entity.world_node.height = 0;
+    player_entity->entity.world_node.pos = V2_ZERO;
+    player_entity->entity.world_node.size = to_vec(10000);
     // player_entity->entity.sprite = createSprite(false, 0);
     // player_entity->entity.sprite->texture = entityTexture;
     player_entity->entity.color = (SDL_Color){255, 255, 255,  255};
@@ -4397,9 +4251,9 @@ void client_add_player_entity(int id) {
     player_entity->direction_indicator->color = GPU_MakeColor(255, 255, 255, 255);
     // player_entity->direction_indicator->sprite = createSprite(false, 0);
     // player_entity->direction_indicator->sprite->texture = default_particle_texture;
-    player_entity->direction_indicator->height = get_max_height() / 2 + player->tallness / 2;
-    player_entity->direction_indicator->pos = V2_ZERO;
-    player_entity->direction_indicator->size = to_vec(1600);
+    player_entity->direction_indicator->world_node.height = get_max_height() / 2 + player->tallness / 2;
+    player_entity->direction_indicator->world_node.pos = V2_ZERO;
+    player_entity->direction_indicator->world_node.size = to_vec(1600);
     
 
     add_game_object(player_entity->direction_indicator, ENTITY);
@@ -4479,7 +4333,7 @@ void on_client_recv(MPPacket packet, void *data) {
         
         // hitEffect->entity.sprite->animations[0].fps = 12;
         // hitEffect->entity.sprite->animations[0].loop = false;
-        // hitEffect->entity.height = packet_data->hit_height;
+        // hitEffect->entity.world_node.height = packet_data->hit_height;
         // hitEffect->entity.affected_by_light = false;
 
         // spritePlayAnim(hitEffect->entity.sprite, 0);
@@ -4535,7 +4389,7 @@ void on_client_recv(MPPacket packet, void *data) {
 
          Projectile *bomb = malloc(sizeof(Projectile));
         *bomb = create_bomb_projectile(packet_data->pos, packet_data->vel);
-        bomb->entity.height = packet_data->height;
+        bomb->entity.world_node.height = packet_data->height;
         bomb->height_vel = packet_data->height_vel;
 
         // spritePlayAnim(bomb->entity.sprite, 0);
@@ -4546,16 +4400,16 @@ void on_client_recv(MPPacket packet, void *data) {
 
 void player_entity_tick(PlayerEntity *player_entity, double delta) {
 
-    double real_desired_height = player_entity->desired_height + get_max_height() * 0.5 - player_entity->entity.size.y / 2;
+    double real_desired_height = player_entity->desired_height + get_max_height() * 0.5 - player_entity->entity.world_node.size.y / 2;
 
-    player_entity->entity.pos = v2_lerp(player_entity->entity.pos, player_entity->desired_pos, 0.1 * (delta * 144));
-    player_entity->entity.height = lerp(player_entity->entity.height, real_desired_height, 0.1 * (delta * 144));
-    player_entity->collider.pos = player_entity->entity.pos;
-    player_entity->direction_indicator->pos = v2_add(player_entity->entity.pos, v2_mul(player_entity->dir, to_vec(20)));
-    player_entity->direction_indicator->height = player_entity->entity.height + player->tallness * .25;
+    player_entity->entity.world_node.pos = v2_lerp(player_entity->entity.world_node.pos, player_entity->desired_pos, 0.1 * (delta * 144));
+    player_entity->entity.world_node.height = lerp(player_entity->entity.world_node.height, real_desired_height, 0.1 * (delta * 144));
+    player_entity->collider.pos = player_entity->entity.world_node.pos;
+    player_entity->direction_indicator->world_node.pos = v2_add(player_entity->entity.world_node.pos, v2_mul(player_entity->dir, to_vec(20)));
+    player_entity->direction_indicator->world_node.height = player_entity->entity.world_node.height + player->tallness * .25;
     player_entity->dir_sprite->dir = player_entity->dir;
 
-    dSpriteTick(player_entity->dir_sprite, player_entity->entity.pos, delta);
+    dSpriteTick(player_entity->dir_sprite, player_entity->entity.world_node.pos, delta);
 }
 
 
@@ -4752,8 +4606,8 @@ PlayerEntity *find_or_add_player_entity_by_id(int id) {
 void player_entity_take_dmg(PlayerEntity *player_entity, double dmg) {
     // actually damage the player
 
-    player_hit_particles->pos = player_entity->entity.pos;
-    player_hit_particles->height = player_entity->entity.height;
+    player_hit_particles->world_node.pos = player_entity->entity.world_node.pos;
+    player_hit_particles->world_node.height = player_entity->entity.world_node.height;
     player_hit_particles->target = NULL;
     particle_spawner_explode(player_hit_particles);
 
@@ -4761,15 +4615,15 @@ void player_entity_take_dmg(PlayerEntity *player_entity, double dmg) {
 
 void ability_bomb_activate() {
     Projectile *bomb = malloc(sizeof(Projectile));
-    *bomb = create_bomb_projectile(v2_add(player->pos, v2_mul(playerForward, to_vec(15))), v2_mul(playerForward, to_vec(1.4)));
-    bomb->entity.height = get_max_height() / 2 + get_player_height();
+    *bomb = create_bomb_projectile(v2_add(player->world_node.pos, v2_mul(playerForward, to_vec(15))), v2_mul(playerForward, to_vec(1.4)));
+    bomb->entity.world_node.height = get_max_height() / 2 + get_player_height();
     // spritePlayAnim(bomb->entity.sprite, 0);
 
     add_game_object(bomb, PROJECTILE);
 
     MPPacket packet = {.type = PACKET_ABILITY_BOMB, .len = sizeof(struct ability_bomb_packet), .is_broadcast = true};
 
-    struct ability_bomb_packet packet_data = {.pos = bomb->entity.pos, .height = bomb->entity.height, .vel = bomb->vel, .height_vel = bomb->height_vel, .sender_id = client_self_id};
+    struct ability_bomb_packet packet_data = {.pos = bomb->entity.world_node.pos, .height = bomb->entity.world_node.height, .vel = bomb->vel, .height_vel = bomb->height_vel, .sender_id = client_self_id};
 
     MPClient_send(packet, &packet_data);
 
@@ -4793,10 +4647,6 @@ Ability ability_bomb_create() {
     return ability;
 }
 
-bool is_projectile_type(int type) {
-    return in_range(type, PROJECTILE_START, PROJECTILE_END);
-}
-
 void projectile_tick(Projectile *projectile, double delta) {
 
     if (!projectile->_created && projectile->on_create != NULL) {
@@ -4807,21 +4657,21 @@ void projectile_tick(Projectile *projectile, double delta) {
     projectile->vel = v2_add(projectile->vel, v2_mul(projectile->accel, to_vec(delta * 144)));
     projectile->height_vel += projectile->height_accel * delta;
 
-    projectile->entity.pos = v2_add(projectile->entity.pos, v2_mul(projectile->vel, to_vec(delta * 144)));
-    projectile->entity.height += projectile->height_vel * delta * 144;
+    projectile->entity.world_node.pos = v2_add(projectile->entity.world_node.pos, v2_mul(projectile->vel, to_vec(delta * 144)));
+    projectile->entity.world_node.height += projectile->height_vel * delta * 144;
 
-    if (projectile->entity.height - projectile->entity.size.y / 2 <= get_max_height() / 2) {
+    if (projectile->entity.world_node.height - projectile->entity.world_node.size.y / 2 <= get_max_height() / 2) {
         if (projectile->destroy_on_floor) {
             projectile_destroy(projectile);
             return;
         }
 
         projectile->height_vel *= -projectile->bounciness;
-        projectile->entity.height = get_max_height() / 2 + projectile->entity.size.y / 2;
+        projectile->entity.world_node.height = get_max_height() / 2 + projectile->entity.world_node.size.y / 2;
     }
-    if (projectile->entity.height + projectile->entity.size.y / 2 >= get_max_height() * 1.5) {
+    if (projectile->entity.world_node.height + projectile->entity.world_node.size.y / 2 >= get_max_height() * 1.5) {
         projectile->height_vel *= -projectile->bounciness;
-        projectile->entity.height = get_max_height() * 1.5 - projectile->entity.size.y / 2;
+        projectile->entity.world_node.height = get_max_height() * 1.5 - projectile->entity.world_node.size.y / 2;
     }
 
     projectile->life_timer -= delta;
@@ -4830,7 +4680,7 @@ void projectile_tick(Projectile *projectile, double delta) {
         return;
     }
     
-    projectile->collider.pos = projectile->entity.pos;
+    projectile->collider.pos = projectile->entity.world_node.pos;
 
     // spriteTick(projectile->entity.sprite, delta);
 
@@ -4856,7 +4706,7 @@ Projectile create_default_projectile(double life_time) {
     projectile.life_timer = life_time;
     projectile.entity.color = (SDL_Color){255, 255, 255, 255};
     projectile.collider.radius = 5;
-    projectile.entity.size = to_vec(8000);
+    projectile.entity.world_node.size = to_vec(8000);
 
     return projectile;
 }
@@ -4869,13 +4719,13 @@ Projectile create_bomb_projectile(v2 pos, v2 start_vel) {
     projectile.height_accel = PROJECTILE_GRAVITY;
     projectile.bounciness = 1.0;
     projectile.destroy_on_floor = false;
-    projectile.entity.pos = pos;
+    projectile.entity.world_node.pos = pos;
     projectile.vel = v2_add(start_vel, v2_mul(player->vel, to_vec(0.5)));
     projectile.height_vel = (is_player_on_floor()? 0 : player->height_vel * 0.5) + player->pitch * -3;
     // projectile.entity.sprite = createSprite(true, 1);
     // projectile.entity.sprite->animations[0] = create_animation(2, 1, bomb_anim);
     // projectile.entity.sprite->animations[0].loop = true;
-    projectile.entity.size = to_vec(8000);
+    projectile.entity.world_node.size = to_vec(8000);
     projectile.on_destruction = bomb_on_destroy;
     projectile.on_tick = bomb_on_tick;
     
@@ -4903,8 +4753,8 @@ void bomb_on_destroy(Projectile *projectile) {
     bomb_explode_particles->start_color = GPU_MakeColor(255, 230, 120, 255);
     bomb_explode_particles->end_color = GPU_MakeColor(255, 230, 120, 255);
 
-    bomb_explode_particles->pos = projectile->entity.pos;
-    bomb_explode_particles->height = get_max_height() / 2;
+    bomb_explode_particles->world_node.pos = projectile->entity.world_node.pos;
+    bomb_explode_particles->world_node.height = get_max_height() / 2;
     particle_spawner_explode(bomb_explode_particles);
 
     bomb_explode_particles->particle_lifetime = 2.5;
@@ -4917,10 +4767,10 @@ void bomb_on_destroy(Projectile *projectile) {
 
     particle_spawner_explode(bomb_explode_particles);
 
-    play_spatial_sound(bomb_explosion, 0.5, player->pos, projectile->entity.pos, 500);
+    play_spatial_sound(bomb_explosion, 0.5, player->world_node.pos, projectile->entity.world_node.pos, 500);
 
 
-    double dist_sqr_to_player = v2_distance_squared(projectile->entity.pos, player->pos);
+    double dist_sqr_to_player = v2_distance_squared(projectile->entity.world_node.pos, player->world_node.pos);
 
     if (dist_sqr_to_player < MAX_DIST * MAX_DIST) {
 
@@ -4929,7 +4779,7 @@ void bomb_on_destroy(Projectile *projectile) {
         double dmg = w * 8;
         player_take_dmg(dmg);
 
-        v2 full_kb = v2_mul(v2_dir(projectile->entity.pos, player->pos), to_vec(5));
+        v2 full_kb = v2_mul(v2_dir(projectile->entity.world_node.pos, player->world_node.pos), to_vec(5));
         double height_full_kb = 500;
 
         v2 kb = v2_lerp(full_kb, V2_ZERO, 1 - w);
@@ -4945,7 +4795,7 @@ void bomb_on_destroy(Projectile *projectile) {
 
         PlayerEntity *player_entity = object->val;
         
-        double dist_sqr = v2_distance_squared(projectile->entity.pos, player_entity->entity.pos);
+        double dist_sqr = v2_distance_squared(projectile->entity.world_node.pos, player_entity->entity.world_node.pos);
         
         
 
@@ -5071,9 +4921,9 @@ void ability_forcefield_activate() {
 
     ((ParticleSpawner *)proj->extra_data)->target = proj;
 
-    proj->entity.pos = player->pos;
-    proj->entity.height = get_max_height() / 2 + get_player_height();
-    ((ParticleSpawner *)proj->extra_data)->height = proj->entity.height;
+    proj->entity.world_node.pos = player->world_node.pos;
+    proj->entity.world_node.height = get_max_height() / 2 + get_player_height();
+    ((ParticleSpawner *)proj->extra_data)->world_node.height = proj->entity.world_node.height;
     proj->vel = playerForward;
     add_game_object(proj, PROJECTILE);
 }
@@ -5085,10 +4935,10 @@ Projectile projectile_forcefield_create() {
     // projectile.entity.sprite = createSprite(true, 1);
     // projectile.entity.sprite->animations[0] = create_animation(2, 1, forcefield_anim);
     // projectile.entity.sprite->animations[0].loop = true;
-    projectile.entity.size = to_vec(8000);
+    projectile.entity.world_node.size = to_vec(8000);
 
     ParticleSpawner *particle_spawner = malloc(sizeof(ParticleSpawner));
-    *particle_spawner = create_particle_spawner(V2_ZERO, 0);
+    *particle_spawner = ParticleSpawner_new(V2_ZERO, 0);
     particle_spawner->spread = 2;
     particle_spawner->min_size = to_vec(4000);
     particle_spawner->max_size = to_vec(7000);
@@ -5123,9 +4973,9 @@ void projectile_forcefield_on_tick(Projectile *projectile, double delta) {
         Projectile *proj = gameobject->val;
         if (proj == projectile) continue;
 
-        double dist_sqr = v2_distance_squared(projectile->entity.pos, proj->entity.pos);
+        double dist_sqr = v2_distance_squared(projectile->entity.world_node.pos, proj->entity.world_node.pos);
         if (dist_sqr < 50 * 50) {
-            proj->vel = v2_add(proj->vel, v2_dir(projectile->entity.pos, proj->entity.pos));
+            proj->vel = v2_add(proj->vel, v2_dir(projectile->entity.world_node.pos, proj->entity.world_node.pos));
             printf("Pushed! \n");
         }
     }
@@ -5339,16 +5189,23 @@ void Sprite_delete(Node *node) {
 }
 
 void Sprite_render(Node *node) {
-
-    v2 pos = V2_ZERO;
-    v2 size = to_vec(5000);
-    double height = 0;
-    if (node->parent != NULL) {
-
-    }
     
+    if (node->parent == NULL) return;
 
-    renderTexture(getSpriteCurrentTexture((Sprite *)node));
+    if (!instanceof(node->parent->type, WORLD_NODE)) return;
+
+    WorldNode *parent = node->parent;
+
+    bool affected_by_light = false;
+    SDL_Color custom_color = Color(255, 255, 255, 255);
+
+    if (instanceof(node->parent->type, ENTITY)) {
+        affected_by_light = ((Entity *)parent)->affected_by_light;
+        custom_color = ((Entity *)parent)->color;
+    }
+
+
+    renderTexture(getSpriteCurrentTexture((Sprite *)node), parent->pos, parent->size, parent->height, affected_by_light, custom_color);
 }
 
 void Sprite_tick(Node *node) {
