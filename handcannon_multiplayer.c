@@ -885,7 +885,7 @@ const char *font = "font.ttf";
 const SDL_Color fogColor = {0, 0, 0, 255};
 double tanHalfFOV;
 double tanHalfStartFOV;
-double ambient_light = 0.5;
+double ambient_light = 0.6;
 int floorRenderStart;
 const int tileSize = WINDOW_WIDTH / 30;
 double realFps;
@@ -2451,7 +2451,8 @@ void clear_level() {
 
 void spawn_floor_light(v2 pos) {
     LightPoint *light = alloc(LightPoint);
-    light->color = (SDL_Color){255, 50, 50};//{255, 200, 100};
+
+    light->color = (SDL_Color){255, 50, 50};
     light->strength = 4;
     light->radius = 140;
     light->pos = pos;
@@ -2460,7 +2461,18 @@ void spawn_floor_light(v2 pos) {
 
 void spawn_ceiling_light(v2 pos) {
     LightPoint *light = alloc(LightPoint);
-    light->color = (SDL_Color){randf_range(200, 255), randf_range(130, 160), 70};//{255, 200, 100};
+    
+    randomize();
+    int chance = randi_range(0, 2);
+
+    if (chance == 0) {
+        light->color = (SDL_Color){randf_range(200, 255), randf_range(130, 160), 70};//{255, 200, 100};
+    } else if (chance == 1) {
+        light->color = (SDL_Color){160, 160, 255};
+    } else {
+        light->color = (SDL_Color){120, 255, 120};
+    }
+    
     light->strength = 5;
     light->radius = 400;
     light->pos = pos;
@@ -3024,9 +3036,9 @@ void bake_lights() {
                         col.b += helper * (double)point->color.b / 255;
                     }
 
-                    baked_light_grid[r][c].r = SDL_clamp(baked_light_grid[r][c].r + col.r, 0, MAX_LIGHT);
-                    baked_light_grid[r][c].g = SDL_clamp(baked_light_grid[r][c].g + col.g, 0, MAX_LIGHT);
-                    baked_light_grid[r][c].b = SDL_clamp(baked_light_grid[r][c].b + col.b, 0, MAX_LIGHT);
+                    baked_light_grid[r][c].r = SDL_clamp(baked_light_grid[r][c].r + col.r, ambient_light, MAX_LIGHT);
+                    baked_light_grid[r][c].g = SDL_clamp(baked_light_grid[r][c].g + col.g, ambient_light, MAX_LIGHT);
+                    baked_light_grid[r][c].b = SDL_clamp(baked_light_grid[r][c].b + col.b, ambient_light, MAX_LIGHT);
                 }
             );
             
