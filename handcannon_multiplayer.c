@@ -60,7 +60,7 @@
 #define DEF_STRUCT(name, typename, ...) enum {typename = __COUNTER__}; typedef struct name __VA_ARGS__ name;
 #define END_STRUCT(typename) enum {typename##_END = __COUNTER__};
 #define instanceof(type, parent_type) (type >= parent_type && type <= parent_type##_END)
-
+#define node(thing) ((Node *)thing)
 
 // # PACKET TYPES AND STRUCTS
 enum PacketTypes {
@@ -425,8 +425,8 @@ DEF_STRUCT(Node, NODE, {
 END_STRUCT(NODE);
 
 
-#define new(type, ...) type##_new(__VA_ARGS__)
-#define alloc(type, ...) ({type *ptr; ptr = malloc(sizeof(type)); (*ptr) = new(type, __VA_ARGS__); ptr;})
+#define new(var_type, var_type_name, ...)  ({var_type object = var_type##_new(__VA_ARGS__); ((Node *)&object)->type = instanceof(var_type_name, NODE)? var_type_name : ((Node *)&object)->type; object;})
+#define alloc(var_type, var_type_name, ...) ({var_type *ptr; ptr = malloc(sizeof(var_type)); (*ptr) = new(var_type, var_type_name, __VA_ARGS__); ptr;})
 
 
 // #STRUCTS
@@ -479,15 +479,21 @@ typedef struct Room {
 
 // #FUNC
 
+void ability_tick(Ability *ability, double delta);
+
+Effect Effect_new(double life_time);
+
+Particle Particle_new(double life_time);
+
 WorldNode WorldNode_new();
 
 void Sprite_delete(Node *node);
 
 void Sprite_render(Node *node);
 
-void Sprite_tick(Node *node);
+void Sprite_tick(Node *node, double delta);
 
-Sprite Sprite_new();
+Sprite Sprite_new(bool is_animated);
 
 int get_node_count();
 
@@ -520,11 +526,9 @@ Node Node_new();
 
 void projectile_forcefield_on_tick(Projectile *projectile, double delta);
 
-Projectile projectile_forcefield_create();
+Projectile *projectile_forcefield_create();
 
 void ability_forcefield_activate();
-
-void actually_remove_game_object(void *val, int type);
 
 CollisionData get_circle_collision(CircleCollider col1, CircleCollider col2);
 
@@ -536,13 +540,13 @@ void randomize_player_abilities();
 
 void bomb_on_destroy(Projectile *projectile);
 
-Projectile create_bomb_projectile(v2 pos, v2 start_vel);
+Projectile *create_bomb_projectile(v2 pos, v2 start_vel);
 
-Projectile create_default_projectile(double life_time);
+Projectile Projectile_new(double life_time);
 
 void projectile_destroy(Projectile *projectile);
 
-void projectile_tick(Projectile *projectile, double delta);
+void projectile_tick(Node *node, double delta);
 
 void ability_bomb_activate();
 
@@ -692,8 +696,6 @@ void handle_input(SDL_Event event);
 
 void add_game_object(void *val, int type);
 
-void remove_game_object(void *val, int type);
-
 double mili_to_sec(u64 mili);
 
 v2 get_player_forward();
@@ -702,7 +704,7 @@ Animation create_animation(int frameCount, int priority, GPU_Image **frames);
 
 void freeAnimation(Animation *anim);
 
-GPU_Image *getSpriteCurrentTexture(Sprite *sprite);
+GPU_Image *get_sprite_current_texture(Sprite *sprite);
 
 Sprite *dir_sprite_current_sprite(DirectionalSprite *dSprite, v2 spritePos);
 
@@ -714,11 +716,9 @@ void dSpriteTick(DirectionalSprite *dSprite, v2 spritePos, double delta);
 
 void spriteTick(Sprite *sprite, double delta);
 
-void animationTick(Animation *anim, double delta);
+void animation_tick(Animation *anim, double delta);
 
 void effectTick(Effect *effect, double delta);
- 
-Sprite *createSprite(bool isAnimated, int animCount);
 
 DirectionalSprite *createDirSprite(int dirCount);
 
@@ -941,7 +941,7 @@ int main(int argc, char *argv[]) {
 
     game_objects = NULL;
 
-    root_node = alloc(Node);
+    root_node = alloc(Node, NODE);
 
     init_textures();
 
@@ -949,15 +949,15 @@ int main(int argc, char *argv[]) {
 
     Node_add_child(root_node, player);
 
-    tilemap = alloc(Tilemap);
+    tilemap = alloc(Tilemap, TILEMAP);
 
     Node_add_child(root_node, tilemap);
 
-    renderer = alloc(Renderer);
+    renderer = alloc(Renderer, RENDERER);
 
     Node_add_child(root_node, renderer);
 
-    game_node = alloc(Node);
+    game_node = alloc(Node, NODE);
 
     Node_add_child(root_node, game_node);
 
@@ -1250,11 +1250,10 @@ void player_tick(Node *node, double delta) {
 
     // player->collider->pos = player->world_node.pos;
 
-    if (player->primary != NULL) player->primary->tick(player->primary, delta);
-    if (player->secondary != NULL) player->secondary->tick(player->secondary, delta);
-    
-    if (player->utility != NULL) player->utility->tick(player->utility, delta);
-    if (player->special != NULL) player->special->tick(player->special, delta);
+    ability_tick(player->primary, delta);
+    ability_tick(player->secondary, delta);
+    ability_tick(player->utility, delta);
+    ability_tick(player->special, delta);
 
     if (isLMouseDown) {
         activate_ability(player->primary);
@@ -1355,7 +1354,7 @@ void spriteTick(Sprite *sprite, double delta) {
     if (!sprite->isAnimated) return;
     if (sprite->animations == NULL) return;
     if (sprite->current_anim_idx == -1) return;
-    animationTick(&sprite->animations[sprite->current_anim_idx], delta);
+    animation_tick(&sprite->animations[sprite->current_anim_idx], delta);
 }
 
 void objectTick(void *obj, int type, double delta) {
@@ -1468,12 +1467,6 @@ void tick(double delta) {
     // if (queued_player_death) {
     //     queued_player_death = false;
     //     _player_die();
-    // }
-
-
-    // for (int i = array_length(game_objects_deletion_queue) - 1; i >= 0; i--) {
-    //     actually_remove_game_object(game_objects_deletion_queue[i].val, game_objects_deletion_queue[i].type);
-    //     array_remove(game_objects_deletion_queue, i);
     // }
 }
 
@@ -1737,12 +1730,12 @@ void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affe
 }
 
 void renderDirSprite(DirectionalSprite *dSprite, v2 pos, v2 size, double height) {
-    GPU_Image *texture = getSpriteCurrentTexture(dir_sprite_current_sprite(dSprite, pos));
+    GPU_Image *texture = get_sprite_current_texture(dir_sprite_current_sprite(dSprite, pos));
     renderTexture(texture, pos, size, height, true, (SDL_Color){255, 255, 255, 255});
 }
 
 void renderEntity(Entity entity) {  // RENDER ENTITY
-    // GPU_Image *texture = getSpriteCurrentTexture(entity.sprite);
+    // GPU_Image *texture = get_sprite_current_texture(entity.sprite);
 
     // GPU_SetRGBA(texture, entity.color.r, entity.color.g, entity.color.b, 20);
 
@@ -1953,7 +1946,7 @@ void render_hand() {
         baked_light_color.b = 1.5;
     }
 
-    GPU_Image *texture = getSpriteCurrentTexture(leftHandSprite);
+    GPU_Image *texture = get_sprite_current_texture(leftHandSprite);
     
 
     if (texture != NULL) {
@@ -2054,7 +2047,7 @@ void render_ability_hud() {
 
 void renderHUD() {
 
-    // GPU_BlitRect(getSpriteCurrentTexture(dash_anim_sprite), NULL, hud, NULL);
+    // GPU_BlitRect(get_sprite_current_texture(dash_anim_sprite), NULL, hud, NULL);
     // spriteTick(dash_anim_sprite, delta);
 
     // GPU_SetRGB(vignette_texture, vignette_color.r, vignette_color.g, vignette_color.b);
@@ -2181,7 +2174,7 @@ void render(double delta) {  // #RENDER
 void init_player(v2 pos) {
     if (player == NULL) player = malloc(sizeof(Player));
 
-    player->world_node = new(WorldNode);
+    player->world_node = new(WorldNode, WORLD_NODE);
     player->world_node.node.on_tick = player_tick;
     player->world_node.node.type = PLAYER;
 
@@ -2365,48 +2358,6 @@ RayCollisionData ray_circle(Raycast ray, CircleCollider circle) {
     return data;
 }
 
-void freeObject(void *val, int type) {
-    switch (type) {
-        case (int)PARTICLE:
-        case (int)EFFECT:;
-            Effect *effect = (Effect *)val;
-            // freeObject(effect->entity.sprite, SPRITE);
-            free(effect);
-            break;
-        case (int)SPRITE:;  // not gonna destroy the texture
-            Sprite *s = val;
-            free(s->animations);
-            free(s);
-            break;
-        case (int)DIRECTIONAL_SPRITE:;
-            DirectionalSprite *dSprite = val;
-            for (int i = 0; i < dSprite->dirCount; i++) {
-                freeObject(dSprite->sprites[i], SPRITE);
-            }
-            free(dSprite->sprites);
-            free(dSprite);
-            break;
-
-        case (int)PLAYER_ENTITY:;
-            PlayerEntity *player_entity = val;
-            remove_game_object(player_entity->dir_sprite, DIRECTIONAL_SPRITE);
-            remove_game_object(player_entity->direction_indicator, ENTITY);
-            free(val);
-            break;
-        case (int)PROJECTILE:;
-            Projectile *projectile = val;
-            if (projectile->type == PROJ_FORCEFIELD) {
-                remove_game_object(projectile->extra_data, PARTICLE_SPAWNER);
-            }
-            free(val);
-
-        default:
-            free(val);
-            break;
-    }
-}
-
-
 void shakeCamera(double strength, int ticks, bool fade, int priority) {
     if (priority < camerashake_current_priority && isCameraShaking) return;
     camerashake_current_priority = priority;
@@ -2424,12 +2375,6 @@ void add_game_object(void *val, int type) {
             arraylist_add(game_objects, val, type);
             break;
     }
-}
-
-// Queues the game object for deletion.
-void remove_game_object(void *val, int type) {
-    obj object = {val, type};
-    array_append(game_objects_deletion_queue, object);
 }
 
 void reset_tilemap(int t[TILEMAP_HEIGHT][TILEMAP_WIDTH]) { 
@@ -2450,7 +2395,7 @@ void clear_level() {
 }
 
 void spawn_floor_light(v2 pos) {
-    LightPoint *light = alloc(LightPoint);
+    LightPoint *light = alloc(LightPoint, LIGHT_POINT);
 
     light->color = (SDL_Color){255, 50, 50};
     light->strength = 4;
@@ -2460,7 +2405,7 @@ void spawn_floor_light(v2 pos) {
 }
 
 void spawn_ceiling_light(v2 pos) {
-    LightPoint *light = alloc(LightPoint);
+    LightPoint *light = alloc(LightPoint, LIGHT_POINT);
     
     randomize();
     int chance = randi_range(0, 2);
@@ -2614,7 +2559,7 @@ Animation create_animation(int frameCount, int priority, GPU_Image **frames) {
     return anim;
 }
 
-void animationTick(Animation *anim, double delta) {
+void animation_tick(Animation *anim, double delta) {
     if (!anim->playing) return;
     anim->timeToNextFrame -= delta;
     if (anim->timeToNextFrame <= 0) {
@@ -2659,8 +2604,8 @@ void spritePlayAnim(Sprite *sprite, int idx) {
     sprite->animations[idx].playing = true;
 }
 
-GPU_Image *getSpriteCurrentTexture(Sprite *sprite) {
-    if (!(sprite->isAnimated)) {
+GPU_Image *get_sprite_current_texture(Sprite *sprite) {
+    if (!sprite->isAnimated) {
         return sprite->texture;
     } else {
         if (sprite->current_anim_idx == -1) return NULL;
@@ -2691,13 +2636,14 @@ Effect *createEffect(v2 pos, v2 size, Sprite *sprite, double lifeTime) {
 void ability_shoot_activate(Ability *ability) {
     play_sound(player_default_shoot, 0.4);
     _shoot(0);
+    printf("Your honor I shot \n");
 }
 
 void effectTick(Effect *effect, double delta) {
 
     effect->life_timer -= delta;
     if (effect->life_timer <= 0) {
-        remove_game_object(effect, EFFECT);
+        Node_delete(effect);
         return;
     }
     // spriteTick(effect->entity.sprite, delta);
@@ -2789,7 +2735,7 @@ void dSpriteTick(DirectionalSprite *dSprite, v2 spritePos, double delta) {
         }
         anim->fps = dSprite->fps;
         anim->playing = dSprite->playing;
-        animationTick(anim, delta);
+        animation_tick(anim, delta);
     }
 
     // spriteTick(dir_sprite_current_sprite(dSprite, spritePos), delta);
@@ -3336,7 +3282,7 @@ Ability ability_primary_shoot_create() {
 
     return (Ability) {
         .activate = ability_shoot_activate,
-        .tick = default_ability_tick,
+        .tick = NULL,
         .before_activate = NULL,
         .can_use = false,
         .cooldown = 0.2,
@@ -3351,6 +3297,7 @@ Ability ability_primary_shoot_create() {
 void default_ability_tick(Ability *ability, double delta) {
     if (!ability->can_use) {
         ability->timer -= delta;
+        cd_print(true, "ability cooldown: %.2f \n", ability->timer);
         if (ability->timer <= 0) {
             ability->timer = ability->cooldown;
             ability->can_use = true;
@@ -3361,7 +3308,7 @@ void default_ability_tick(Ability *ability, double delta) {
     if (waiting_delay) {
         ability->delay_timer -= delta;
         if (ability->delay_timer <= 0) {
-            ability->delay_timer = 0;
+            ability->delay_timer = -1;
             ability->activate(ability);
         }
     }
@@ -3370,7 +3317,7 @@ void default_ability_tick(Ability *ability, double delta) {
 Ability ability_secondary_shoot_create() {
     return (Ability) {
         .activate = ability_secondary_shoot_activate,
-        .tick = default_ability_tick,
+        .tick = NULL,
         .before_activate = NULL,
         .can_use = false,
         .cooldown = 5,
@@ -3432,18 +3379,18 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
     }
 
     double size = 8000;
-    Effect *hitEffect = createEffect(final_pos, to_vec(size), createSprite(true, 1), 1);
-    hitEffect->entity.world_node.height = final_height;
+    Effect *hit_effect = alloc(Effect, EFFECT, 1);//createEffect(final_pos, to_vec(size), createSprite(true, 1), 1);
+    hit_effect->entity.world_node.pos = final_pos;
+    hit_effect->entity.world_node.height = final_height;
+    hit_effect->entity.world_node.size = to_vec(size);
 
-    // hitEffect->entity.sprite->animations[0] = create_animation(5, 0, shootHitEffectFrames);
-    
-    // hitEffect->entity.sprite->animations[0].fps = 12;
-    // hitEffect->entity.sprite->animations[0].loop = false;
-    // hitEffect->entity.affected_by_light = false;
+    Sprite *sprite = alloc(Sprite, SPRITE, true);
 
-    // spritePlayAnim(hitEffect->entity.sprite, 0);
+    array_append(sprite->animations, create_animation(5, 0, shootHitEffectFrames));
 
-    //add_game_object(hitEffect, EFFECT);
+    Node_add_child(hit_effect, sprite);
+
+    Node_add_child(game_node, hit_effect);
 
     
     struct ability_shoot_packet packet_data = {
@@ -3489,7 +3436,7 @@ ParticleSpawner ParticleSpawner_new(v2 pos, double height) {
         .height_dir = 0,
         .accel = (v2){0, 0},
         .height_accel = PARTICLE_GRAVITY,
-        .world_node = new(WorldNode),
+        .world_node = new(WorldNode, WORLD_NODE),
         .world_node.pos = pos,
         .world_node.height = height,
         .spawn_rate = 20,
@@ -3536,7 +3483,7 @@ void particle_spawner_tick(ParticleSpawner *spawner, double delta) {
 
 void particle_spawner_spawn(ParticleSpawner *spawner) {
 
-    Particle particle;
+    Particle *particle = alloc(Particle, PARTICLE, spawner->particle_lifetime);
     
     v2 pos = spawner->world_node.pos;
     double height = spawner->world_node.height;
@@ -3553,48 +3500,44 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
     double vel_y = dir.y * speed;
     double vel_z = height_dir * speed * 3000; // bc height is different like that
 
-    particle.vel = (v2){vel_x, vel_y};
-    particle.h_vel = vel_z;
+    particle->vel = (v2){vel_x, vel_y};
+    particle->h_vel = vel_z;
 
-    particle.effect.entity.affected_by_light = spawner->affected_by_light;
+    particle->effect.entity.affected_by_light = spawner->affected_by_light;
 
-    particle.accel = spawner->accel;
-    particle.h_accel = spawner->height_accel;
+    particle->accel = spawner->accel;
+    particle->h_accel = spawner->height_accel;
 
-    particle.effect.life_time = spawner->particle_lifetime;
-    particle.effect.life_timer = particle.effect.life_time;
+    particle->effect.life_time = spawner->particle_lifetime;
+    particle->effect.life_timer = particle->effect.life_time;
 
-    particle.start_color = spawner->start_color;
-    particle.end_color = spawner->end_color;
+    particle->start_color = spawner->start_color;
+    particle->end_color = spawner->end_color;
 
-    particle.bounciness = spawner->bounciness;
-    particle.floor_drag = spawner->floor_drag;
+    particle->bounciness = spawner->bounciness;
+    particle->floor_drag = spawner->floor_drag;
 
-    particle.effect.entity.world_node.pos = pos; // change later with emission
-    particle.effect.entity.world_node.height = spawner->world_node.height;
+    particle->effect.entity.world_node.pos = pos; // change later with emission
+    particle->effect.entity.world_node.height = spawner->world_node.height;
     
-    particle.fade = spawner->fade;
-    particle.fade_scale = spawner->fade_scale;
+    particle->fade = spawner->fade;
+    particle->fade_scale = spawner->fade_scale;
 
     double size_rand = randf_range(0, 1);
     v2 size = v2_lerp(spawner->min_size, spawner->max_size, size_rand);
     
-    particle.initial_size = size;
+    particle->initial_size = size;
 
-    // particle.effect.entity.sprite = malloc(sizeof(Sprite));
-    // *particle.effect.entity.sprite = spawner->sprite;
+    Node_add_child(game_node, particle);
 
+    // particle->effect.entity.sprite = malloc(sizeof(Sprite));
+    // *particle->effect.entity.sprite = spawner->sprite;
 
-    Particle *particle_object = malloc(sizeof(Particle));
-    *particle_object = particle;
-
-    // if (particle.effect.entity.sprite->texture == NULL) {
-    //     particle.effect.entity.sprite->texture = default_particle_texture;
-    //     particle.effect.entity.sprite->isAnimated = false;
+    // if (particle->effect.entity.sprite->texture == NULL) {
+    //     particle->effect.entity.sprite->texture = default_particle_texture;
+    //     particle->effect.entity.sprite->isAnimated = false;
     //     printf("Error! switching to default texture! \n");
     // }
-
-    add_game_object(particle_object, PARTICLE);
 
 }
 
@@ -3643,7 +3586,7 @@ void particle_tick(Particle *particle, double delta) {
 Ability ability_dash_create() {
     return (Ability) {
         .activate = ability_dash_activate,
-        .tick = default_ability_tick,
+        .tick = NULL,
         .before_activate = ability_dash_before_activate,
         .can_use = true,
         .cooldown = 3,
@@ -3697,6 +3640,9 @@ void activate_ability(Ability *ability) {
     
     if (ability == NULL || !ability->can_use || paused) {
         printf("bruh %d, %d, %d\n", ability == NULL, !ability->can_use, paused);
+        if (ability == NULL) {
+            debug_crash();
+        }
         return;
     }
 
@@ -4239,10 +4185,7 @@ void on_server_recv(SOCKET socket, MPPacket packet, void *data) {
 
 void client_add_player_entity(int id) {
 
-    printf("Tried to add player entity! too lazy rn! \n");
-    return;
-
-    PlayerEntity *player_entity = alloc(PlayerEntity);
+    PlayerEntity *player_entity = alloc(PlayerEntity, PLAYER_ENTITY);
 
     
 
@@ -4267,9 +4210,6 @@ void client_add_player_entity(int id) {
     player_entity->direction_indicator->world_node.pos = V2_ZERO;
     player_entity->direction_indicator->world_node.size = to_vec(1600);
     
-
-    add_game_object(player_entity->direction_indicator, ENTITY);
-
     player_entity->dir_sprite = createDirSprite(16);
     for (int i = 0; i < 16; i++) {
         Sprite *sprite = createSprite(false, 0);
@@ -4280,7 +4220,7 @@ void client_add_player_entity(int id) {
     printf("Player joined! ID: %d \n", player_entity->id);
     write_to_debug_label(String_from_int(player_entity->id));
 
-    add_game_object(player_entity, PLAYER_ENTITY);
+    Node_add_child(game_node, player_entity);
 }
 
 // #CLIENT RECV
@@ -4334,23 +4274,18 @@ void on_client_recv(MPPacket packet, void *data) {
             
 
         // create the effect at the pos and height
-        Effect *hitEffect = createEffect(packet_data->hit_pos, to_vec(8000), createSprite(true, 1), 1);
+        Effect *hit_effect = alloc(Effect, EFFECT, 1);//createEffect(packet_data->hit_pos, to_vec(8000), createSprite(true, 1), 1);
 
-        if (hitEffect == NULL) {
-            printf("hit effect is null \n");
-            return;
-        }
+        hit_effect->entity.world_node.pos = packet_data->hit_pos;
+        hit_effect->entity.world_node.size = to_vec(8000);
 
-        // hitEffect->entity.sprite->animations[0] = create_animation(5, 0, shootHitEffectFrames);
-        
-        // hitEffect->entity.sprite->animations[0].fps = 12;
-        // hitEffect->entity.sprite->animations[0].loop = false;
-        // hitEffect->entity.world_node.height = packet_data->hit_height;
-        // hitEffect->entity.affected_by_light = false;
+        Sprite *sprite = alloc(Sprite, SPRITE, true);
 
-        // spritePlayAnim(hitEffect->entity.sprite, 0);
+        array_append(sprite->animations, create_animation(5, 0, shootHitEffectFrames));
 
-        add_game_object(hitEffect, EFFECT);
+        Node_add_child(hit_effect, sprite);
+
+        Node_add_child(game_node, hit_effect);
 
 
         if (packet_data->hit_id != -1) {
@@ -4382,31 +4317,28 @@ void on_client_recv(MPPacket packet, void *data) {
             return;
         }
 
-        for (int i = 0; i < game_objects->length; i++) {
-            obj *object = arraylist_get(game_objects, i);
+        iter_over_all_nodes(node, {
+            if (node->type != PLAYER_ENTITY) continue;
 
-            if (object->type != PLAYER_ENTITY) continue;
-
-            PlayerEntity *player_entity = object->val;
+            PlayerEntity *player_entity = node;
 
             if (player_entity->id == packet_data->id) {
-                remove_game_object(player_entity, PLAYER_ENTITY);
+                Node_delete(node);
                 return;
             }
-        }
+        });
     } else if (packet.type == PACKET_ABILITY_BOMB) {
         struct ability_bomb_packet *packet_data = data;
 
         if (packet_data->sender_id == client_self_id) return;
 
-         Projectile *bomb = malloc(sizeof(Projectile));
-        *bomb = create_bomb_projectile(packet_data->pos, packet_data->vel);
+         Projectile *bomb = create_bomb_projectile(packet_data->pos, packet_data->vel);
         bomb->entity.world_node.height = packet_data->height;
         bomb->height_vel = packet_data->height_vel;
 
         // spritePlayAnim(bomb->entity.sprite, 0);
 
-        add_game_object(bomb, PROJECTILE);
+        Node_add_child(game_node, bomb);
     }
 }
 
@@ -4588,16 +4520,14 @@ void init_textures() {
 }
 
 PlayerEntity *find_player_entity_by_id(int id) {
-    for (int i = 0; i < game_objects->length; i++) {
-        obj *object = arraylist_get(game_objects, i);
-
-        if (object->type == PLAYER_ENTITY) {
-            PlayerEntity *player_entity = object->val;
+    iter_over_all_nodes(node, {
+        if (node->type == PLAYER_ENTITY) {
+            PlayerEntity *player_entity = node;
             if (player_entity->id == id) {
                 return player_entity;
             }
         }
-    }
+    });
 
     return NULL;
 }
@@ -4626,12 +4556,10 @@ void player_entity_take_dmg(PlayerEntity *player_entity, double dmg) {
 }
 
 void ability_bomb_activate() {
-    Projectile *bomb = malloc(sizeof(Projectile));
-    *bomb = create_bomb_projectile(v2_add(player->world_node.pos, v2_mul(playerForward, to_vec(15))), v2_mul(playerForward, to_vec(1.4)));
+    Projectile *bomb = create_bomb_projectile(v2_add(player->world_node.pos, v2_mul(playerForward, to_vec(15))), v2_mul(playerForward, to_vec(1.4)));
     bomb->entity.world_node.height = get_max_height() / 2 + get_player_height();
-    // spritePlayAnim(bomb->entity.sprite, 0);
 
-    add_game_object(bomb, PROJECTILE);
+    Node_add_child(game_node, bomb);
 
     MPPacket packet = {.type = PACKET_ABILITY_BOMB, .len = sizeof(struct ability_bomb_packet), .is_broadcast = true};
 
@@ -4651,7 +4579,7 @@ Ability ability_bomb_create() {
         .delay = 0,
         .delay_timer = 0,
         .texture = bomb_icon,
-        .tick = default_ability_tick,
+        .tick = NULL,
         .timer = 2,
         .type = A_SPECIAL
     };
@@ -4659,7 +4587,9 @@ Ability ability_bomb_create() {
     return ability;
 }
 
-void projectile_tick(Projectile *projectile, double delta) {
+void projectile_tick(Node *node, double delta) {
+
+    Projectile *projectile = node;
 
     if (!projectile->_created && projectile->on_create != NULL) {
         projectile->on_create(projectile);
@@ -4708,11 +4638,16 @@ void projectile_destroy(Projectile *projectile) {
         projectile->on_destruction(projectile);
     }
 
-    remove_game_object(projectile, PROJECTILE);
+    Node_delete(projectile);
 }
 
-Projectile create_default_projectile(double life_time) {
+Projectile Projectile_new(double life_time) {
     Projectile projectile = {0};
+
+    projectile.entity = new(Entity, ENTITY);
+
+    node(&projectile)->on_tick = projectile_tick;
+    
 
     projectile.life_time = life_time;
     projectile.life_timer = life_time;
@@ -4723,23 +4658,27 @@ Projectile create_default_projectile(double life_time) {
     return projectile;
 }
 
-Projectile create_bomb_projectile(v2 pos, v2 start_vel) {
-    Projectile projectile = create_default_projectile(1.6);
+Projectile *create_bomb_projectile(v2 pos, v2 start_vel) {
+    Projectile *projectile = alloc(Projectile, PROJECTILE, 1.6);
     
-    projectile.type = PROJ_BOMB;
+    projectile->type = PROJ_BOMB;
 
-    projectile.height_accel = PROJECTILE_GRAVITY;
-    projectile.bounciness = 1.0;
-    projectile.destroy_on_floor = false;
-    projectile.entity.world_node.pos = pos;
-    projectile.vel = v2_add(start_vel, v2_mul(player->vel, to_vec(0.5)));
-    projectile.height_vel = (is_player_on_floor()? 0 : player->height_vel * 0.5) + player->pitch * -3;
-    // projectile.entity.sprite = createSprite(true, 1);
-    // projectile.entity.sprite->animations[0] = create_animation(2, 1, bomb_anim);
-    // projectile.entity.sprite->animations[0].loop = true;
-    projectile.entity.world_node.size = to_vec(8000);
-    projectile.on_destruction = bomb_on_destroy;
-    projectile.on_tick = bomb_on_tick;
+    projectile->height_accel = PROJECTILE_GRAVITY;
+    projectile->bounciness = 1.0;
+    projectile->destroy_on_floor = false;
+    projectile->entity.world_node.pos = pos;
+    projectile->vel = v2_add(start_vel, v2_mul(player->vel, to_vec(0.5)));
+    projectile->height_vel = (is_player_on_floor()? 0 : player->height_vel * 0.5) + player->pitch * -3;
+    projectile->entity.world_node.size = to_vec(8000);
+    projectile->on_destruction = bomb_on_destroy;
+    projectile->on_tick = bomb_on_tick;
+
+
+    Sprite *sprite = alloc(Sprite, SPRITE, true);
+    array_append(sprite->animations, create_animation(2, 1, bomb_anim));
+    spritePlayAnim(sprite, 0);
+
+    Node_add_child(projectile, sprite);
     
     return projectile;
 }
@@ -4900,13 +4839,6 @@ CollisionData get_circle_collision(CircleCollider col1, CircleCollider col2) {
     return data;
 }
 
-// Frees and removes the game object.
-void actually_remove_game_object(void *val, int type) {
-    arraylist_remove(game_objects, arraylist_find(game_objects, val));
-    freeObject(val, type);
-}
-
-
 Ability ability_forcefield_create() {
     Ability ability = {
         .activate = ability_forcefield_activate,
@@ -4917,7 +4849,7 @@ Ability ability_forcefield_create() {
         .delay_timer = 0,
         .delay = 0,
         .texture = entityTexture,
-        .tick = default_ability_tick,
+        .tick = NULL,
         .type = A_UTILITY
     };
 
@@ -4927,49 +4859,47 @@ Ability ability_forcefield_create() {
 void ability_forcefield_activate() {
     printf("Forcefield! \n");
 
-    Projectile *proj = malloc(sizeof(Projectile));
+    Projectile *proj = projectile_forcefield_create();
 
-    *proj = projectile_forcefield_create();
-
-    ((ParticleSpawner *)proj->extra_data)->target = proj;
+    // ((ParticleSpawner *)proj->extra_data)->target = proj;
 
     proj->entity.world_node.pos = player->world_node.pos;
     proj->entity.world_node.height = get_max_height() / 2 + get_player_height();
-    ((ParticleSpawner *)proj->extra_data)->world_node.height = proj->entity.world_node.height;
+    // ((ParticleSpawner *)proj->extra_data)->world_node.height = proj->entity.world_node.height;
     proj->vel = playerForward;
-    add_game_object(proj, PROJECTILE);
+    Node_add_child(game_node, proj);
 }
 
-Projectile projectile_forcefield_create() {
-    Projectile projectile = create_default_projectile(10);
-    projectile.type = PROJ_FORCEFIELD;
-    projectile.on_tick = projectile_forcefield_on_tick;
+Projectile *projectile_forcefield_create() {
+    Projectile *projectile = alloc(Projectile, PROJECTILE, 10);
+    projectile->type = PROJ_FORCEFIELD;
+    projectile->on_tick = projectile_forcefield_on_tick;
     // projectile.entity.sprite = createSprite(true, 1);
     // projectile.entity.sprite->animations[0] = create_animation(2, 1, forcefield_anim);
     // projectile.entity.sprite->animations[0].loop = true;
-    projectile.entity.world_node.size = to_vec(8000);
+    projectile->entity.world_node.size = to_vec(8000);
 
-    ParticleSpawner *particle_spawner = malloc(sizeof(ParticleSpawner));
-    *particle_spawner = ParticleSpawner_new(V2_ZERO, 0);
-    particle_spawner->spread = 2;
-    particle_spawner->min_size = to_vec(4000);
-    particle_spawner->max_size = to_vec(7000);
-    particle_spawner->height_dir = 1;
-    particle_spawner->start_color = Color(200, 255, 255, 255);
-    particle_spawner->end_color = Color(255, 255, 255, 255);
-    particle_spawner->active = true;
-    particle_spawner->height_accel = 0;
-    particle_spawner->particle_lifetime = 0.8;
-    particle_spawner->bounciness = 1;
-    particle_spawner->dir = (v2){10, 0};
-    particle_spawner->affected_by_light = false;
-    // particle_spawner->min_speed = 90;
-    // particle_spawner->min_speed = 290;
-    // set the target later
+    // ParticleSpawner *particle_spawner = malloc(sizeof(ParticleSpawner));
+    // *particle_spawner = ParticleSpawner_new(V2_ZERO, 0);
+    // particle_spawner->spread = 2;
+    // particle_spawner->min_size = to_vec(4000);
+    // particle_spawner->max_size = to_vec(7000);
+    // particle_spawner->height_dir = 1;
+    // particle_spawner->start_color = Color(200, 255, 255, 255);
+    // particle_spawner->end_color = Color(255, 255, 255, 255);
+    // particle_spawner->active = true;
+    // particle_spawner->height_accel = 0;
+    // particle_spawner->particle_lifetime = 0.8;
+    // particle_spawner->bounciness = 1;
+    // particle_spawner->dir = (v2){10, 0};
+    // particle_spawner->affected_by_light = false;
+    // // particle_spawner->min_speed = 90;
+    // // particle_spawner->min_speed = 290;
+    // // set the target later
 
-    projectile.extra_data = particle_spawner;
+    // projectile->extra_data = particle_spawner;
 
-    add_game_object(particle_spawner, PARTICLE_SPAWNER);
+    // add_game_object(particle_spawner, PARTICLE_SPAWNER);
 
     return projectile;
 }
@@ -5064,7 +4994,7 @@ void Node_render(Node *node) {
 Tilemap Tilemap_new() {
     Tilemap tilemap = {0};
     tilemap.node.type = TILEMAP;
-    tilemap.node = new(Node);
+    tilemap.node = new(Node, NODE);
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
             tilemap.ceiling_tilemap[r][c] = -1;
@@ -5088,7 +5018,7 @@ void Node_remove_child(Node *parent, Node *child) {
 Renderer Renderer_new() {
     Renderer renderer = {0};
     renderer.node.type = RENDERER;
-    renderer.node = new(Node);
+    renderer.node = new(Node, NODE);
     renderer.node.on_render = Renderer_render;
 
     return renderer;
@@ -5125,7 +5055,7 @@ void Renderer_render(Node *node) {
 
 LightPoint LightPoint_new() {
     LightPoint l = {0};
-    l.node = new(Node);
+    l.node = new(Node, NODE);
     l.node.type = LIGHT_POINT;
     l.color = Color(255, 255, 255, 255);
     l.pos = V2_ZERO;
@@ -5159,7 +5089,7 @@ Node **get_all_nodes_array() {
 
 Entity Entity_new() {
     Entity entity = {0};
-    entity.world_node = new(WorldNode);
+    entity.world_node = new(WorldNode, WORLD_NODE);
     entity.color = Color(255, 255, 255, 255);
 
     return entity;
@@ -5167,7 +5097,7 @@ Entity Entity_new() {
 
 PlayerEntity PlayerEntity_new() {
     PlayerEntity player_entity = {0};
-    player_entity.entity = new(Entity);
+    player_entity.entity = new(Entity, ENTITY);
 
     return player_entity;
 }
@@ -5180,11 +5110,11 @@ int get_node_count() {
     return l;
 }
 
-Sprite Sprite_new() {
+Sprite Sprite_new(bool is_animated) {
     Sprite sprite = {0};
-    sprite.node = new(Node);
+    sprite.node = new(Node, NODE);
     sprite.animations = array(Animation, 2);
-    sprite.isAnimated = false;
+    sprite.isAnimated = is_animated;
     sprite.texture = NULL;
     sprite.current_anim_idx = 0;
 
@@ -5204,29 +5134,50 @@ void Sprite_render(Node *node) {
     
     if (node->parent == NULL) return;
 
-    if (!instanceof(node->parent->type, WORLD_NODE)) return;
+    if (instanceof(node->parent->type, WORLD_NODE)) {
+        WorldNode *parent = node->parent;
 
-    WorldNode *parent = node->parent;
+        bool affected_by_light = false;
+        SDL_Color custom_color = Color(255, 255, 255, 255);
 
-    bool affected_by_light = false;
-    SDL_Color custom_color = Color(255, 255, 255, 255);
+        if (instanceof(node->parent->type, ENTITY)) {
+            affected_by_light = ((Entity *)parent)->affected_by_light;
+            custom_color = ((Entity *)parent)->color;
+        }
+        renderTexture(get_sprite_current_texture((Sprite *)node), parent->pos, parent->size, parent->height, affected_by_light, custom_color);
+    
+    } else if (instanceof(node->parent->type, CANVAS_NODE)) {
+        CanvasNode *parent = node->parent;
 
-    if (instanceof(node->parent->type, ENTITY)) {
-        affected_by_light = ((Entity *)parent)->affected_by_light;
-        custom_color = ((Entity *)parent)->color;
+        GPU_Rect rect = {
+            parent->pos.x,
+            parent->pos.y,
+            parent->size.x,
+            parent->size.y
+        };
+
+        GPU_BlitRect(get_sprite_current_texture((Sprite *)node), NULL, screen, &rect);
     }
 
+    
 
-    renderTexture(getSpriteCurrentTexture((Sprite *)node), parent->pos, parent->size, parent->height, affected_by_light, custom_color);
+
 }
 
-void Sprite_tick(Node *node) {
+void Sprite_tick(Node *node, double delta) {
 
+    Sprite *sprite = node;
+
+    if (sprite == NULL) return;
+    if (!sprite->isAnimated) return;
+    if (sprite->animations == NULL) return;
+    if (sprite->current_anim_idx == -1) return;
+    animation_tick(&sprite->animations[sprite->current_anim_idx], delta);
 }
 
 WorldNode WorldNode_new() {
     WorldNode world_node = {0};
-    world_node.node = new(Node);
+    world_node.node = new(Node, NODE);
 
     world_node.pos = V2_ZERO;
     world_node.height = 0;
@@ -5234,6 +5185,37 @@ WorldNode WorldNode_new() {
 
 
     return world_node;
+}
+
+Particle Particle_new(double life_time) {
+    Particle particle = {0};
+
+    particle.effect = new(Effect, EFFECT, life_time);
+    particle.start_color = Color(255, 255, 255, 255);
+    particle.end_color = Color(255, 255, 255, 255);
+    particle.h_accel = -PARTICLE_GRAVITY;
+
+
+    return particle;
+}
+
+Effect Effect_new(double life_time) {
+    Effect effect = {0};
+    effect.entity = new(Entity, ENTITY);
+    effect.life_time = life_time;
+    effect.life_timer = life_time;
+
+    return effect;
+}
+
+void ability_tick(Ability *ability, double delta) {
+    
+    if (ability == NULL) return;
+    
+    if (ability->tick != NULL) {
+        ability->tick(ability, delta);
+    }
+    default_ability_tick(ability, delta);
 }
 
 
