@@ -479,6 +479,12 @@ typedef struct Room {
 
 // #FUNC
 
+CanvasNode CanvasNode_new();
+
+void hand_sprite_tick(Node *node, double delta);
+
+void init_hand_sprite();
+
 void ability_tick(Ability *ability, double delta);
 
 Effect Effect_new(double life_time);
@@ -738,7 +744,7 @@ void shakeCamera(double strength, int ticks, bool fade, int priority);
 
 bool isValidLevel(char *file);
 
-void getTextureFiles(char *fileName, int fileCount, GPU_Image ***textures);
+GPU_Image **get_texture_files(char *file_name, int file_count);
 
 // #FUNC END
 
@@ -753,6 +759,8 @@ UIComponent *pause_menu;
 UILabel *debug_label;
 
 // #TEXTURES
+GPU_Image *hand_default;
+GPU_Image **hand_shoot;
 GPU_Image **forcefield_anim;
 GPU_Image **player_textures;
 GPU_Image *bomb_icon;
@@ -1087,6 +1095,9 @@ void init() {  // #INIT
     
 
     for (int i = 0; i < 26; i++) keyPressArr[i] = false;
+
+
+    init_hand_sprite();
 
 }  // #INIT END
 
@@ -1824,22 +1835,31 @@ RenderObject *get_render_list() {
         array_append(renderList, wallStripesToRender[i]);
     }
 
+    printf("START---- \n");
+
     iter_over_all_nodes(node, {
 
         RenderObject render_object = (RenderObject){.isnull = false};
         v2 pos = V2_ZERO;
         
-        if (instanceof(node->type, ENTITY)) {
+        if (instanceof(node->type, WORLD_NODE)) {
 
-            pos = ((Entity *)node)->world_node.pos;
+            pos = ((WorldNode *)node)->pos;
 
         }
+        
+        if (instanceof(node->type, CANVAS_NODE)) printf("מצאתי כנבס וזה מרגיש כלכך טוב \n");
+        if (instanceof(node->type, SPRITE)) printf("Sprite! \n");
 
         render_object.dist_squared = v2_distance_squared(pos, player->world_node.pos);
+        render_object.val = node;
+        render_object.type = NODE;
         
         array_append(renderList, render_object);
         
     });
+
+    printf("END-----\n");
 
     int l = array_length(renderList);
 
@@ -2165,7 +2185,7 @@ void render(double delta) {  // #RENDER
 
     // GPU_DeactivateShaderProgram();
 
-    // GPU_Blit(hud_image, NULL, actual_screen, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
+    GPU_Blit(hud_image, NULL, actual_screen, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
 
     GPU_Flip(actual_screen);
 } // #RENDER END
@@ -2575,19 +2595,6 @@ void animation_tick(Animation *anim, double delta) {
     }
 }
 
-Sprite *createSprite(bool isAnimated, int animCount) {
-    Sprite *sprite = malloc(sizeof(Sprite));
-    sprite->isAnimated = isAnimated;
-    sprite->texture = NULL;
-    sprite->current_anim_idx = 0;
-    if (isAnimated) {
-        sprite->animations = array(Animation, animCount);
-    } else {
-        sprite->animations = NULL;
-    }
-    return sprite;
-}
-
 void spritePlayAnim(Sprite *sprite, int idx) {
     bool less_priority = sprite->current_anim_idx != -1 
     && sprite->animations[sprite->current_anim_idx].priority < sprite->animations[idx].priority
@@ -2855,21 +2862,26 @@ bool isValidLevel(char *file) {
 }
 
 // Takes a file name with no extension and assumes it's a png
-void getTextureFiles(char *fileName, int fileCount, GPU_Image ***textures) {
-    int charCount = get_num_digits(fileCount);
+GPU_Image **get_texture_files(char *file_name, int file_count) {
 
-    for (int i = 0; i < fileCount; i++) {
+    GPU_Image **textures = malloc(sizeof(GPU_Image *) * file_count);
+
+    int charCount = get_num_digits(file_count);
+
+    for (int i = 0; i < file_count; i++) {
         char num[charCount + 10];
         sprintf(num, "%d", i + 1);
-        char *fileWithNum = concat(fileName, num);
+        char *fileWithNum = concat(file_name, num);
         char *fileWithExtension = concat(fileWithNum, ".png");
 
         GPU_Image *tex = load_texture(fileWithExtension);
-        (*textures)[i] = tex;
+        textures[i] = tex;
 
         free(fileWithNum);
         free(fileWithExtension);
     }
+
+    return textures;
 }
 
 void update_fullscreen() { // iffy solution but whatever
@@ -3297,7 +3309,6 @@ Ability ability_primary_shoot_create() {
 void default_ability_tick(Ability *ability, double delta) {
     if (!ability->can_use) {
         ability->timer -= delta;
-        cd_print(true, "ability cooldown: %.2f \n", ability->timer);
         if (ability->timer <= 0) {
             ability->timer = ability->cooldown;
             ability->can_use = true;
@@ -3641,7 +3652,7 @@ void activate_ability(Ability *ability) {
     if (ability == NULL || !ability->can_use || paused) {
         printf("bruh %d, %d, %d\n", ability == NULL, !ability->can_use, paused);
         if (ability == NULL) {
-            debug_crash();
+            commit_sudoku();
         }
         return;
     }
@@ -4212,7 +4223,7 @@ void client_add_player_entity(int id) {
     
     player_entity->dir_sprite = createDirSprite(16);
     for (int i = 0; i < 16; i++) {
-        Sprite *sprite = createSprite(false, 0);
+        Sprite *sprite = alloc(Sprite, SPRITE, false);
         sprite->texture = player_textures[i];
         player_entity->dir_sprite->sprites[i] = sprite;
     }
@@ -4360,16 +4371,20 @@ void player_entity_tick(PlayerEntity *player_entity, double delta) {
 // #TEXTURES INIT
 void init_textures() {
     
-    forcefield_anim = malloc(sizeof(GPU_Image *) * 3);
-    getTextureFiles("Textures/Abilities/Forcefield/forcefield", 3, &forcefield_anim);
+    hand_default = load_texture("Textures/rightHandAnim/rightHandAnim1.png");
 
-    player_textures = malloc(sizeof(GPU_Image *) * 16);
-    getTextureFiles("Textures/Player/player", 16, &player_textures);
+    hand_shoot = get_texture_files("Textures/rightHandAnim/rightHandAnim", 6);
+
+    forcefield_anim = get_texture_files("Textures/Abilities/Forcefield/forcefield", 3);
+    
+
+    player_textures = get_texture_files("Textures/Player/player", 16);
+    
 
     bomb_icon = load_texture("Textures/Abilities/Icons/bomb_icon.png");
 
-    bomb_anim = malloc(sizeof(GPU_Image *) * 2);
-    getTextureFiles("Textures/Abilities/Bomb/bomb", 2, &bomb_anim);
+    bomb_anim = get_texture_files("Textures/Abilities/Bomb/bomb", 2);
+   
 
     blood_particle = load_texture("Textures/BloodParticle.png");
     
@@ -4409,14 +4424,14 @@ void init_textures() {
     GPU_FreeShader(frag);
     GPU_FreeShader(vert);
 
-    dash_screen_anim = malloc(sizeof(GPU_Image *) * 6);
-    getTextureFiles("Textures/Abilities/Dash/screen_anim", 6, &dash_screen_anim);
+    dash_screen_anim = get_texture_files("Textures/Abilities/Dash/screen_anim", 6);
+    
 
-    dash_anim_sprite = createSprite(true, 1);
-    dash_anim_sprite->animations[0] = create_animation(6, 10, dash_screen_anim);
-    dash_anim_sprite->animations[0].loop = false;
-    dash_anim_sprite->animations[0].fps = 10;
-    dash_anim_sprite->animations[0].frame = 5;
+    // dash_anim_sprite = createSprite(true, 1);
+    // dash_anim_sprite->animations[0] = create_animation(6, 10, dash_screen_anim);
+    // dash_anim_sprite->animations[0].loop = false;
+    // dash_anim_sprite->animations[0].fps = 10;
+    // dash_anim_sprite->animations[0].frame = 5;
 
 
     dash_icon = load_texture("Textures/Abilities/Icons/dash_icon.png");
@@ -4427,51 +4442,17 @@ void init_textures() {
 
     shoot_icon = load_texture("Textures/Abilities/Icons/shoot_icon.png");
 
-    exploder_hit = load_texture("Textures/ExploderEnemyAnim/exploder_hit.png");
-
-    exploder_explosion_texture = malloc(sizeof(GPU_Image *) * 12);
-    getTextureFiles("Textures/ExploderEnemyAnim/Explosion/explosion", 12, &exploder_explosion_texture);
-
-    shooter_dirs_textures = malloc(sizeof(GPU_Image *) * 16);
-
-    for (int i = 0; i < 16; i++) {
-        char *baseFileName = "Textures/ShooterEnemy/frame";
-        char num[get_num_digits(i + 1)];
-        sprintf(num, "%d", i + 1);
-        char *fileWithNum = concat(baseFileName, num);
-        char *fileWithExtension = concat(fileWithNum, ".png");
-
-        shooter_dirs_textures[i] = load_texture(fileWithExtension);
-    }
-
     default_particle_texture = load_texture("Textures/base_particle.png");
 
-    shooter_bullet_default_frames = malloc(sizeof(GPU_Image *) * 4);
-    shooter_bullet_explode_frames = malloc(sizeof(GPU_Image *) * 4);
-
-    getTextureFiles("Textures/ShooterEnemy/Bullet/Default/Bullet", 4, &shooter_bullet_default_frames);
-    getTextureFiles("Textures/ShooterEnemy/Bullet/Explode/Bullet", 4, &shooter_bullet_explode_frames);
-
-    exploder_frames = malloc(sizeof(GPU_Image *) * 80);
-    getTextureFiles("Textures/ExploderEnemyAnim/exploderEnemyAnim", 80, &exploder_frames);
-
-
-    exclam_notice_anim = malloc(sizeof(GPU_Image *) * 6);
-    getTextureFiles("Textures/ExclamNoticeAnim/noticeAnim", 6, &exclam_notice_anim);
-
     player_default_hurt = create_sound("Sounds/player_default_hurt.wav");
+
     player_default_shoot = create_sound("Sounds/player_default_shoot.wav");
 
     mimran_jumpscare = load_texture("Textures/scary_monster2.png");
 
-    shooter_hit_texture = load_texture("Textures/ShooterEnemy/hit_frame1.png");
-
     healthbar_texture = load_texture("Textures/health_bar1.png");
 
     vignette_texture = load_texture("Textures/vignette.png");
-
-    fenceTexture = load_texture("Textures/fence.png");
-    SDL_SetTextureBlendMode(fenceTexture, SDL_BLENDMODE_BLEND);
 
     floorAndCeiling = GPU_CreateImage(RESOLUTION_X, RESOLUTION_Y, GPU_FORMAT_RGBA);
     GPU_SetImageFilter(floorAndCeiling, GPU_FILTER_NEAREST);
@@ -4487,29 +4468,22 @@ void init_textures() {
     wallTexture = load_texture("Textures/wall.png");
      GPU_SetImageFilter(wallTexture, GPU_FILTER_NEAREST);
 
-
-    wallFrames = malloc(sizeof(GPU_Image *) * 17);
-    getTextureFiles("Textures/WallAnim/wallAnim", 17, &wallFrames);
-
     crosshair = load_texture("Textures/crosshair.png");
 
-    leftHandSprite = createSprite(true, 2);
-    GPU_Image **default_hand = malloc(sizeof(GPU_Image *)); 
-    default_hand[0] = load_texture("Textures/rightHandAnim/rightHandAnim6.png");
-    leftHandSprite->animations[0] = create_animation(1, 0, default_hand);
+    // leftHandSprite = createSprite(true, 2);
+    // GPU_Image **default_hand = malloc(sizeof(GPU_Image *)); 
+    // default_hand[0] = load_texture("Textures/rightHandAnim/rightHandAnim6.png");
+    // leftHandSprite->animations[0] = create_animation(1, 0, default_hand);
 
 
-    leftHandSprite->animations[1] = create_animation(6, 0, NULL);
-    getTextureFiles("Textures/rightHandAnim/rightHandAnim", 6, &leftHandSprite->animations[1].frames);
-    leftHandSprite->animations[1].fps = 12;
+    // leftHandSprite->animations[1] = create_animation(6, 0, NULL);
+    // get_texture_files("Textures/rightHandAnim/rightHandAnim", 6, &leftHandSprite->animations[1].frames);
+    // leftHandSprite->animations[1].fps = 12;
 
-    leftHandSprite->animations[1].loop = false;
-    spritePlayAnim(leftHandSprite, 0);
+    // leftHandSprite->animations[1].loop = false;
+    // spritePlayAnim(leftHandSprite, 0);
 
-    shootHitEffectFrames = malloc(sizeof(GPU_Image *) * 5);
-
-    getTextureFiles("Textures/ShootEffectAnim/shootHitEffect", 5, &shootHitEffectFrames);
-
+    shootHitEffectFrames = get_texture_files("Textures/ShootEffectAnim/shootHitEffect", 5);
 
     entityTexture = load_texture("Textures/scary_monster.png");
 
@@ -4978,9 +4952,7 @@ void Node_tick(Node *node, double delta) {
     }
 
     for (int i = 0; i < array_length(node->children); i++) {
-        if (node->children[i]->on_tick != NULL) {
-            node->children[i]->on_tick(node->children[i], delta);
-        }
+        Node_tick(node->children[i], delta);
     }
 }
 
@@ -4989,6 +4961,12 @@ void Node_render(Node *node) {
     if (node != NULL && node->on_render != NULL) {
         node->on_render(node);
     }
+
+    // for (int i = 0; i < array_length(node->children); i++) {
+    //     if (node->children[i]->on_render != NULL) {
+    //         node->children[i]->on_render(node->children[i]);
+    //     }
+    // }
 }
 
 Tilemap Tilemap_new() {
@@ -5035,20 +5013,17 @@ void Renderer_render(Node *node) {
 
     RenderObject *render_list = get_render_list();
     
-    int counter = 0;
-
     foreach(RenderObject render_obj, render_list, array_length(render_list), {
         
         if (render_obj.type == WALL_STRIPE) {
             renderWallStripe((WallStripe *)render_obj.val);
+        } else if (render_obj.type == NODE) {
+            if (render_obj.val == renderer) continue;
+            Node_render(render_obj.val);
         }
     });
 
     array_free(render_list);
-
-
-
-    renderHUD();
 
 }
 
@@ -5082,7 +5057,7 @@ void _GANA_helper(Node *root, Node **arr) {
 Node **get_all_nodes_array() {
     Node **arr = array(Node *, 190);
 
-    _GANA_helper(game_node, arr);
+    _GANA_helper(root_node, arr);
 
     return arr;
 }
@@ -5131,7 +5106,9 @@ void Sprite_delete(Node *node) {
 }
 
 void Sprite_render(Node *node) {
-    
+
+    printf("hi \n");
+
     if (node->parent == NULL) return;
 
     if (instanceof(node->parent->type, WORLD_NODE)) {
@@ -5156,7 +5133,11 @@ void Sprite_render(Node *node) {
             parent->size.y
         };
 
-        GPU_BlitRect(get_sprite_current_texture((Sprite *)node), NULL, screen, &rect);
+        printf("Rendering using CanvasNode \n");
+
+        GPU_Image *current_texture = get_sprite_current_texture((Sprite *)node);
+
+        GPU_BlitRect(current_texture, NULL, hud, &rect);
     }
 
     
@@ -5168,10 +5149,14 @@ void Sprite_tick(Node *node, double delta) {
 
     Sprite *sprite = node;
 
+    printf("Outside sprite tick \n");
+
     if (sprite == NULL) return;
     if (!sprite->isAnimated) return;
     if (sprite->animations == NULL) return;
     if (sprite->current_anim_idx == -1) return;
+
+    cd_print(true, "Reached inside tick \n");
     animation_tick(&sprite->animations[sprite->current_anim_idx], delta);
 }
 
@@ -5216,6 +5201,56 @@ void ability_tick(Ability *ability, double delta) {
         ability->tick(ability, delta);
     }
     default_ability_tick(ability, delta);
+}
+
+void hand_sprite_tick(Node *node, double delta) {
+    printf("");
+}
+
+void init_hand_sprite() {
+
+    CanvasNode *canvas_node = alloc(CanvasNode, CANVAS_NODE);
+
+    canvas_node->size = (v2){WINDOW_WIDTH, WINDOW_HEIGHT};
+
+    Sprite *sprite = alloc(Sprite, SPRITE, true);
+
+    Animation shoot_anim = create_animation(6, 1, hand_shoot);
+    Animation default_anim = create_animation(1, 0, hand_default);
+    array_append(sprite->animations, shoot_anim);
+    array_append(sprite->animations, default_anim);
+
+    spritePlayAnim(sprite, 0);
+
+    canvas_node->node.on_tick = hand_sprite_tick;
+
+    Node_add_child(canvas_node, sprite);
+
+    Node_add_child(root_node, canvas_node);
+
+
+    // Node *thing = game_node->children[array_length(game_node->children) - 1];
+
+    // printf("Thing is sprite: %d \n", thing->type == SPRITE);
+    // printf("Thing is CanvasNode: %d \n", thing->type == CANVAS_NODE);
+    // printf("Thing's child is Sprite: %d \n", thing->children[0]->type == SPRITE);
+
+    // iter_over_all_nodes(node, {
+    //     if (node->type == SPRITE) {
+    //         printf("Found the kid. \n");
+    //         if (instanceof(node->type, SPRITE)) {
+    //             printf("btw instance doesnt even work \n");
+    //         }
+    //     }
+    // });
+}
+
+CanvasNode CanvasNode_new() {
+    CanvasNode canvas_node = {0};
+
+    canvas_node.node = new(Node, NODE);
+
+    return canvas_node;
 }
 
 

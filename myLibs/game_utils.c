@@ -30,7 +30,12 @@
 
 #endif
 
-#define debug_crash() *(int *)NULL = 42
+// self_defstruct
+// kill_yourself_NOW
+// overdose_on_...
+// commit_sudoku
+
+#define commit_sudoku() *(int *)NULL = 42
 
 #define init_grid(type, rows, cols, default, result) do { \
     result = malloc(sizeof(type *) * rows); \
