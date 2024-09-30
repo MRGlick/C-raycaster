@@ -226,50 +226,6 @@ DEF_STRUCT(Node, NODE, {
     struct Node *parent;
     struct Node **children;
 });
-    DEF_STRUCT(CircleCollider, CIRCLE_COLLIDER, {
-        Node node;
-        v2 pos;
-        double radius;
-    });
-
-    DEF_STRUCT(Tilemap, TILEMAP, {
-        Node node;
-        int level_tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH];
-        int floor_tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH];
-        int ceiling_tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH];
-    });
-    DEF_STRUCT(Sprite, SPRITE, {
-        Node node;
-        GPU_Image *texture;  // not used if animated
-        bool isAnimated;
-        int current_anim_idx;
-        Animation *animations;
-    });
-
-    END_STRUCT(SPRITE);
-
-    DEF_STRUCT(Renderer, RENDERER, {
-        Node node;
-    });
-
-    DEF_STRUCT(LightPoint, LIGHT_POINT, {
-        Node node;
-        v2 pos;
-        double strength;
-        double radius;
-        SDL_Color color;
-    });
-    DEF_STRUCT(DirectionalSprite, DIRECTIONAL_SPRITE, {
-        Node node;
-        Sprite **sprites;
-        v2 dir;  // global direction
-        int dirCount;
-        int current_anim;
-        int playing;
-        int fps;
-    });
-
-
     DEF_STRUCT(WorldNode, WORLD_NODE, {
         Node node;
         v2 pos;
@@ -413,6 +369,50 @@ DEF_STRUCT(Node, NODE, {
 
     END_STRUCT(WORLD_NODE);
 
+    DEF_STRUCT(CircleCollider, CIRCLE_COLLIDER, {
+        WorldNode world_node;
+        double radius;
+    });
+
+    DEF_STRUCT(Tilemap, TILEMAP, {
+        Node node;
+        int level_tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH];
+        int floor_tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH];
+        int ceiling_tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH];
+    });
+    DEF_STRUCT(Sprite, SPRITE, {
+        Node node;
+        GPU_Image *texture;  // not used if animated
+        bool isAnimated;
+        int current_anim_idx;
+        Animation *animations;
+    });
+
+    END_STRUCT(SPRITE);
+
+    DEF_STRUCT(Renderer, RENDERER, {
+        Node node;
+    });
+
+    DEF_STRUCT(LightPoint, LIGHT_POINT, {
+        Node node;
+        v2 pos;
+        double strength;
+        double radius;
+        SDL_Color color;
+    });
+    DEF_STRUCT(DirectionalSprite, DIRECTIONAL_SPRITE, {
+        Node node;
+        Sprite **sprites;
+        v2 dir;  // global direction
+        int dirCount;
+        int current_anim;
+        int playing;
+        int fps;
+    });
+
+
+
     DEF_STRUCT(CanvasNode, CANVAS_NODE, {
         Node node;
         v2 pos, size;
@@ -478,6 +478,8 @@ typedef struct Room {
 } Room;
 
 // #FUNC
+
+CircleCollider CircleCollider_new(int radius);
 
 CanvasNode CanvasNode_new();
 
@@ -678,9 +680,9 @@ void init();
 
 void render(double delta);
 
-RayCollisionData ray_circle(Raycast ray, CircleCollider circle);
+RayCollisionData ray_circle(Raycast ray, CircleCollider *collider);
 
-RayCollisionData ray_object(Raycast ray, obj *object);
+RayCollisionData ray_node(Raycast ray, Node *node);
 
 RayCollisionData castRayForEntities(v2 pos, v2 dir);
 
@@ -688,9 +690,9 @@ RayCollisionData castRay(v2 pos, v2 dir);
 
 RayCollisionData castRayForAll(v2 pos, v2 dir);
 
-CollisionData getCircleTileCollision(CircleCollider circle, v2 tilePos);
+CollisionData getCircleTileCollision(CircleCollider *circle, v2 tilePos);
 
-CollisionData getCircleTileMapCollision(CircleCollider circle);
+CollisionData getCircleTileMapCollision(CircleCollider *circle);
 
 void key_pressed(SDL_Keycode key);
 
@@ -1259,7 +1261,7 @@ void player_tick(Node *node, double delta) {
     }
     player->world_node.height = clamp(player->world_node.height, player->tallness * 0.8, get_max_height());
 
-    // player->collider->pos = player->world_node.pos;
+    // player->collider->world_node.pos = player->world_node.pos;
 
     ability_tick(player->primary, delta);
     ability_tick(player->secondary, delta);
@@ -1324,7 +1326,7 @@ void player_tick(Node *node, double delta) {
         }
     }
     
-    CollisionData player_coldata = getCircleTileMapCollision(*player->collider);
+    CollisionData player_coldata = {.didCollide = false};
     if (player_coldata.didCollide) {
         player->world_node.pos = v2_add(player->world_node.pos, player_coldata.offset);
         player->vel = v2_slide(player->vel, v2_normalize(player_coldata.offset));
@@ -2210,13 +2212,6 @@ void init_player(v2 pos) {
     player->ShootTickTimer = 0.15;
     player->pendingShots = 0;
     player->max_pending_shots = 10;
-    player->collider = malloc(sizeof(CircleCollider));
-    player->collider->radius = PLAYER_COLLIDER_RADIUS;
-    player->collider->pos = player->world_node.pos;
-
-    if (player->collider == NULL) {
-        exit(-123456789);
-    }
 
     player->maxHealth = 10;
     player->health = player->maxHealth;
@@ -2229,26 +2224,13 @@ void init_player(v2 pos) {
 }
 
 // CLEAR
-RayCollisionData  ray_object(Raycast ray, obj *object) {
+RayCollisionData ray_node(Raycast ray, Node *node) {
 
     RayCollisionData ray_data = {0};
 
-    switch (object->type) {
-        case (int)PLAYER:;
-            ray_data = ray_circle(ray, *player->collider);
-            if (ray_data.hit) {
-                ray_data.collider = player;
-                ray_data.colliderType = PLAYER;
-            }
-            break;
-        case (int)PLAYER_ENTITY:;
-            PlayerEntity *player_entity = object->val;
-            ray_data = ray_circle(ray, player_entity->collider);
-            if (ray_data.hit) {
-                ray_data.collider = player_entity;
-                ray_data.colliderType = PLAYER_ENTITY;
-            }
-            break;
+    switch (node->type) {
+        case (int)CIRCLE_COLLIDER:
+            ray_data = ray_circle(ray, node);
         default:
             ray_data.hit = false;
             break;
@@ -2337,39 +2319,39 @@ RayCollisionData castRay(v2 pos, v2 dir) {
     }
 }
 
-RayCollisionData ray_circle(Raycast ray, CircleCollider circle) {
+RayCollisionData ray_circle(Raycast ray, CircleCollider *collider) {
     
     RayCollisionData data;
     
-    if (v2_distance(ray.pos, circle.pos) <= circle.radius || v2_dot(ray.dir, v2_dir(ray.pos, circle.pos)) < 0) {
+    if (v2_distance(ray.pos, collider->world_node.pos) <= collider->radius || v2_dot(ray.dir, v2_dir(ray.pos, collider->world_node.pos)) < 0) {
         data.hit = false;
         return data;
     }
 
     
 
-    v2 rayToCircle = v2_sub(circle.pos, ray.pos);
+    v2 rayToCircle = v2_sub(collider->world_node.pos, ray.pos);
     double a = v2_dot(rayToCircle, ray.dir);
     double cSquared = v2_length_squared(rayToCircle);
     double bSquared = cSquared - a * a;  // pythagoras
-    if (circle.radius * circle.radius - bSquared < 0) {
+    if (collider->radius * collider->radius - bSquared < 0) {
         data.hit = false;
         return data;
     }                                                           // no imaginary numbers pls
-    double d = sqrt(circle.radius * circle.radius - bSquared);  // more pythagoras
+    double d = sqrt(collider->radius * collider->radius - bSquared);  // more pythagoras
 
     // raypos + raydir * (a - d)
     v2 collision_pos = v2_add(ray.pos, v2_mul(ray.dir, to_vec(a - d)));  // woohoo!
 
-    v2 normal = v2_dir(circle.pos, collision_pos);
-    double collIdx = v2_get_angle(v2_dir(circle.pos, data.collpos)) / (2 * PI);
+    v2 normal = v2_dir(collider->world_node.pos, collision_pos);
+    double collIdx = v2_get_angle(v2_dir(collider->world_node.pos, data.collpos)) / (2 * PI);
 
     data.hit = true;
     data.normal = normal;
     data.startpos = ray.pos;
     data.collpos = collision_pos;
-    data.wallWidth = circle.radius * PI;
-
+    data.wallWidth = collider->radius * PI;
+    data.collider = node(collider)->parent;
     
 
     data.collIdx = collIdx;
@@ -2641,7 +2623,7 @@ Effect *createEffect(v2 pos, v2 size, Sprite *sprite, double lifeTime) {
 
 // Todo: add shoot cooldown for base shooting
 void ability_shoot_activate(Ability *ability) {
-    play_sound(player_default_shoot, 0.4);
+    // play_sound(player_default_shoot, 0.4);
     _shoot(0);
     printf("Your honor I shot \n");
 }
@@ -2662,8 +2644,9 @@ RayCollisionData castRayForEntities(v2 pos, v2 dir) {
     RayCollisionData data;
     double minSquaredDist = INFINITY;
 
-    for (int i = 0; i < game_objects->length; i++) {
-        RayCollisionData newData = ray_object(ray, arraylist_get(game_objects, i));
+    iter_over_all_nodes(node, {
+
+        RayCollisionData newData = ray_node(ray, node);
         if (!newData.hit) continue;
 
         double currentSquaredDist = v2_distance_squared(pos, newData.collpos);
@@ -2671,7 +2654,7 @@ RayCollisionData castRayForEntities(v2 pos, v2 dir) {
             minSquaredDist = currentSquaredDist;
             data = newData;
         }
-    }
+    }); 
 
     return data;
 }
@@ -2761,11 +2744,6 @@ double angleDist(double a1, double a2) {
     return min(d1, d2);
 }
 
-bool intersectCircles(CircleCollider c1, CircleCollider c2) {
-    return v2_distance_squared(c1.pos, c2.pos) < (c1.radius + c2.radius) * (c1.radius + c2.radius);  // dist^2 < (r1 + r2)^2
-}
-
-
 bool pos_in_tile(v2 pos) {
     int row = pos.y / tileSize;
     int col = pos.x / tileSize;
@@ -2775,21 +2753,21 @@ bool pos_in_tile(v2 pos) {
     return tilemap->level_tilemap[row][col] == P_WALL;
 }
 
-CollisionData getCircleTileCollision(CircleCollider circle, v2 tilePos) {
+CollisionData getCircleTileCollision(CircleCollider *circle, v2 tilePos) {
     CollisionData result;
     result.didCollide = false;
     result.offset = (v2){0, 0};
 
     v2 clampedPos;
-    clampedPos.x = clamp(circle.pos.x, tilePos.x, tilePos.x + tileSize);
-    clampedPos.y = clamp(circle.pos.y, tilePos.y, tilePos.y + tileSize);
+    clampedPos.x = clamp(circle->world_node.pos.x, tilePos.x, tilePos.x + tileSize);
+    clampedPos.y = clamp(circle->world_node.pos.y, tilePos.y, tilePos.y + tileSize);
 
-    v2 toClamped = v2_sub(clampedPos, circle.pos);
+    v2 toClamped = v2_sub(clampedPos, circle->world_node.pos);
     double dist = v2_length(toClamped);
     if (dist == 0) {
         return result;
     }
-    double overlap = circle.radius - dist;
+    double overlap = circle->radius - dist;
     if (overlap == 0) {
         return result;
     }
@@ -2803,7 +2781,7 @@ CollisionData getCircleTileCollision(CircleCollider circle, v2 tilePos) {
     return result;
 }
 
-CollisionData getCircleTileMapCollision(CircleCollider circle) {
+CollisionData getCircleTileMapCollision(CircleCollider *circle) {
     CollisionData result;
     result.didCollide = false;
     result.offset = (v2){0, 0};
@@ -2811,11 +2789,11 @@ CollisionData getCircleTileMapCollision(CircleCollider circle) {
     v2 gridCheckStart;
     v2 gridCheckEnd;
 
-    gridCheckStart.x = (int)((circle.pos.x - circle.radius) / tileSize) - 1;
-    gridCheckStart.y = (int)((circle.pos.y - circle.radius) / tileSize) - 1;
+    gridCheckStart.x = (int)((circle->world_node.pos.x - circle->radius) / tileSize) - 1;
+    gridCheckStart.y = (int)((circle->world_node.pos.y - circle->radius) / tileSize) - 1;
 
-    gridCheckEnd.x = (int)((circle.pos.x + circle.radius) / tileSize) + 2;  //+ 2 to account for rounding up
-    gridCheckEnd.y = (int)((circle.pos.y + circle.radius) / tileSize) + 2;
+    gridCheckEnd.x = (int)((circle->world_node.pos.x + circle->radius) / tileSize) + 2;  //+ 2 to account for rounding up
+    gridCheckEnd.y = (int)((circle->world_node.pos.y + circle->radius) / tileSize) + 2;
 
     v2 gridCheckSize = v2_sub(gridCheckEnd, gridCheckStart);
 
@@ -2832,19 +2810,6 @@ CollisionData getCircleTileMapCollision(CircleCollider circle) {
     }
 
     return result;
-}
-
-void update_entity_collisions(void *val, int type) {
-    switch (type) {
-        case (int)PROJECTILE:;
-            Projectile *projectile = val;
-            CollisionData coll_data = getCircleTileMapCollision(projectile->collider);
-            if (coll_data.didCollide) {
-                projectile->entity.world_node.pos = v2_add(projectile->entity.world_node.pos, coll_data.offset);
-                projectile->vel = v2_reflect(projectile->vel, v2_normalize(coll_data.offset));
-                projectile->vel = v2_mul(to_vec(projectile->bounciness), projectile->vel);
-            }
-    }
 }
 
 bool isValidLevel(char *file) {
@@ -3309,6 +3274,9 @@ Ability ability_primary_shoot_create() {
 void default_ability_tick(Ability *ability, double delta) {
     if (!ability->can_use) {
         ability->timer -= delta;
+        if (ability == player->primary) {
+            printf("shoot timer: %.2f \n", ability->timer);
+        }
         if (ability->timer <= 0) {
             ability->timer = ability->cooldown;
             ability->can_use = true;
@@ -3365,7 +3333,7 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
 
     
     shakeCamera(10, 4, true, 1);
-    spritePlayAnim(leftHandSprite, 1);
+    // spritePlayAnim(leftHandSprite, 1);
 
     v2 shoot_dir = v2_rotate(playerForward, randf_range(-PI * spread, PI * spread));
 
@@ -3662,9 +3630,11 @@ void activate_ability(Ability *ability) {
 
     if (ability->before_activate != NULL) {
         ability->before_activate(ability);
+        ability->delay_timer = ability->delay;
+    } else {
+        ability->activate(ability);
     }
 
-    ability->delay_timer = ability->delay;
 }
 
 void ability_dash_before_activate(Ability *ability) {
@@ -4210,7 +4180,7 @@ void client_add_player_entity(int id) {
     player_entity->entity.color = (SDL_Color){255, 255, 255,  255};
     player_entity->desired_pos = V2_ZERO;
     player_entity->desired_height = 0;
-    player_entity->collider = (CircleCollider){.radius = PLAYER_COLLIDER_RADIUS, .pos = V2_ZERO};
+    // player_entity->collider = (CircleCollider){.radius = PLAYER_COLLIDER_RADIUS, .pos = V2_ZERO};
 
     player_entity->direction_indicator = malloc(sizeof(Entity));
     player_entity->direction_indicator->affected_by_light = true;
@@ -4370,8 +4340,6 @@ void player_entity_tick(PlayerEntity *player_entity, double delta) {
 
 // #TEXTURES INIT
 void init_textures() {
-    
-    hand_default = load_texture("Textures/rightHandAnim/rightHandAnim1.png");
 
     hand_shoot = get_texture_files("Textures/rightHandAnim/rightHandAnim", 6);
 
@@ -4596,7 +4564,7 @@ void projectile_tick(Node *node, double delta) {
         return;
     }
     
-    projectile->collider.pos = projectile->entity.world_node.pos;
+    // projectile->collider.pos = projectile->entity.world_node.pos;
 
     // spriteTick(projectile->entity.sprite, delta);
 
@@ -4800,18 +4768,18 @@ void bomb_on_tick(Projectile *projectile, double delta) {
     }
 }
 
-CollisionData get_circle_collision(CircleCollider col1, CircleCollider col2) {
-    double dist_sqr = v2_distance_squared(col1.pos, col2.pos);
+// CollisionData get_circle_collision(CircleCollider col1, CircleCollider col2) {
+//     double dist_sqr = v2_distance_squared(col1.pos, col2.pos);
 
-    CollisionData data = {0};
+//     CollisionData data = {0};
 
-    if (dist_sqr < (col1.radius * col1.radius + col2.radius + col2.radius)) {
-        data.didCollide = true;
-    }
+//     if (dist_sqr < (col1.radius * col1.radius + col2.radius + col2.radius)) {
+//         data.didCollide = true;
+//     }
 
 
-    return data;
-}
+//     return data;
+// }
 
 Ability ability_forcefield_create() {
     Ability ability = {
@@ -5216,11 +5184,14 @@ void init_hand_sprite() {
     Sprite *sprite = alloc(Sprite, SPRITE, true);
 
     Animation shoot_anim = create_animation(6, 1, hand_shoot);
-    Animation default_anim = create_animation(1, 0, hand_default);
+    shoot_anim.loop = false;
+    shoot_anim.fps = 12;
+
+    Animation default_anim = create_animation(1, 0, hand_shoot + 5);
     array_append(sprite->animations, shoot_anim);
     array_append(sprite->animations, default_anim);
 
-    spritePlayAnim(sprite, 0);
+    spritePlayAnim(sprite, 1);
 
     canvas_node->node.on_tick = hand_sprite_tick;
 
@@ -5251,6 +5222,13 @@ CanvasNode CanvasNode_new() {
     canvas_node.node = new(Node, NODE);
 
     return canvas_node;
+}
+
+CircleCollider CircleCollider_new(int radius) {
+    CircleCollider collider = {.radius = radius};
+    collider.world_node = new(WorldNode, WORLD_NODE);
+
+    return collider;
 }
 
 
