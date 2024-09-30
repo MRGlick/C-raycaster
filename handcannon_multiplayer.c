@@ -226,6 +226,26 @@ DEF_STRUCT(Node, NODE, {
     struct Node *parent;
     struct Node **children;
 });
+    DEF_STRUCT(Sprite, SPRITE, {
+        Node node;
+        GPU_Image *texture;  // not used if animated
+        bool isAnimated;
+        int current_anim_idx;
+        Animation *animations;
+    });
+
+    END_STRUCT(SPRITE);
+
+    DEF_STRUCT(DirectionalSprite, DIRECTIONAL_SPRITE, {
+        Node node;
+        Sprite **sprites;
+        v2 dir;  // global direction
+        int dirCount;
+        int current_anim;
+        int playing;
+        int fps;
+    });
+
     DEF_STRUCT(WorldNode, WORLD_NODE, {
         Node node;
         v2 pos;
@@ -268,7 +288,6 @@ DEF_STRUCT(Node, NODE, {
                 Entity entity;
                 v2 desired_pos;
                 double desired_height;
-                CircleCollider collider;
                 v2 dir;
                 int id;
                 Entity *direction_indicator;
@@ -281,7 +300,6 @@ DEF_STRUCT(Node, NODE, {
                 v2 vel;
                 double height_vel;
                 v2 accel;
-                CircleCollider collider;
                 double height_accel;
                 double life_time, life_timer;
                 double bounciness;
@@ -316,7 +334,6 @@ DEF_STRUCT(Node, NODE, {
             double ShootTickTimer;
             v2 handOffset;
             double health, maxHealth;
-            CircleCollider *collider;
             double tallness;
 
             Ability *primary, *secondary, *utility, *special;
@@ -366,13 +383,13 @@ DEF_STRUCT(Node, NODE, {
             SDL_Color start_color, end_color;
 
         });
-
-    END_STRUCT(WORLD_NODE);
-
     DEF_STRUCT(CircleCollider, CIRCLE_COLLIDER, {
         WorldNode world_node;
         double radius;
     });
+
+    END_STRUCT(WORLD_NODE);
+
 
     DEF_STRUCT(Tilemap, TILEMAP, {
         Node node;
@@ -380,15 +397,6 @@ DEF_STRUCT(Node, NODE, {
         int floor_tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH];
         int ceiling_tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH];
     });
-    DEF_STRUCT(Sprite, SPRITE, {
-        Node node;
-        GPU_Image *texture;  // not used if animated
-        bool isAnimated;
-        int current_anim_idx;
-        Animation *animations;
-    });
-
-    END_STRUCT(SPRITE);
 
     DEF_STRUCT(Renderer, RENDERER, {
         Node node;
@@ -400,15 +408,6 @@ DEF_STRUCT(Node, NODE, {
         double strength;
         double radius;
         SDL_Color color;
-    });
-    DEF_STRUCT(DirectionalSprite, DIRECTIONAL_SPRITE, {
-        Node node;
-        Sprite **sprites;
-        v2 dir;  // global direction
-        int dirCount;
-        int current_anim;
-        int playing;
-        int fps;
     });
 
 
@@ -479,6 +478,8 @@ typedef struct Room {
 
 // #FUNC
 
+Node *get_child_by_type(Node *parent, int child_type);
+
 CircleCollider CircleCollider_new(int radius);
 
 CanvasNode CanvasNode_new();
@@ -538,7 +539,7 @@ Projectile *projectile_forcefield_create();
 
 void ability_forcefield_activate();
 
-CollisionData get_circle_collision(CircleCollider col1, CircleCollider col2);
+CollisionData get_circle_collision(CircleCollider *col1, CircleCollider *col2);
 
 void bomb_on_tick(Projectile *projectile, double delta);
 
@@ -670,8 +671,6 @@ void update_fullscreen();
 
 void drawSkybox();
 
-void update_entity_collisions(void *val, int type);
-
 void reset_tilemap(int tilemap[TILEMAP_HEIGHT][TILEMAP_WIDTH]);
 
 void load_level(char *file);
@@ -716,8 +715,6 @@ GPU_Image *get_sprite_current_texture(Sprite *sprite);
 
 Sprite *dir_sprite_current_sprite(DirectionalSprite *dSprite, v2 spritePos);
 
-void objectTick(void *obj, int type, double delta);
-
 void player_tick(Node *node, double delta);
 
 void dSpriteTick(DirectionalSprite *dSprite, v2 spritePos, double delta);
@@ -726,7 +723,7 @@ void spriteTick(Sprite *sprite, double delta);
 
 void animation_tick(Animation *anim, double delta);
 
-void effectTick(Effect *effect, double delta);
+void Effect_tick(Node *node, double delta);
 
 DirectionalSprite *createDirSprite(int dirCount);
 
@@ -1235,15 +1232,13 @@ v2 get_key_vector(SDL_Keycode k1, SDL_Keycode k2, SDL_Keycode k3, SDL_Keycode k4
 
 void player_tick(Node *node, double delta) {
 
+    CircleCollider *collider = get_child_by_type(player, CIRCLE_COLLIDER);
+
     playerForward = get_player_forward();
 
     // why use the node when the player is global :p
 
     static double update_pos_timer = 1.0 / CLIENT_UPDATE_RATE;
-
-    if (player->collider == NULL) {
-        exit(12);
-    }
 
     //String height_str = String_from_double(player->world_node.height, 2);
 
@@ -1320,20 +1315,22 @@ void player_tick(Node *node, double delta) {
     RayCollisionData ray = castRay(player->world_node.pos, movement_dir);
     if (ray.hit) {
         double dist = v2_distance(ray.startpos, ray.collpos);
-        if (dist < movement) {
+        if (movement > dist) {
             move_without_ray = false;
             player->world_node.pos = v2_add(player->world_node.pos, v2_mul(movement_dir, to_vec(dist - 10)));
         }
     }
     
-    CollisionData player_coldata = {.didCollide = false};
+    CollisionData player_coldata = getCircleTileMapCollision(collider);
+
     if (player_coldata.didCollide) {
         player->world_node.pos = v2_add(player->world_node.pos, player_coldata.offset);
         player->vel = v2_slide(player->vel, v2_normalize(player_coldata.offset));
     }
 
-    if (move_without_ray) 
+    if (move_without_ray) {
         player->world_node.pos = v2_add(player->world_node.pos, v2_mul(finalVel, to_vec(delta)));
+    }
     
     
 
@@ -1368,40 +1365,6 @@ void spriteTick(Sprite *sprite, double delta) {
     if (sprite->animations == NULL) return;
     if (sprite->current_anim_idx == -1) return;
     animation_tick(&sprite->animations[sprite->current_anim_idx], delta);
-}
-
-void objectTick(void *obj, int type, double delta) {
-    
-    update_entity_collisions(obj, type);
-    
-    if (instanceof(type, PROJECTILE)) {
-        projectile_tick(obj, delta);
-        return;
-    }
-
-    switch (type) {
-        case (int)PLAYER:
-            //playerTick(delta);
-            break;
-        case (int)PARTICLE:
-            particle_tick(obj, delta);
-            break;
-        case (int)EFFECT:
-            effectTick(obj, delta);
-            break;
-        case (int)SPRITE:
-            spriteTick(obj, delta);
-            break;
-        case (int)PARTICLE_SPAWNER:
-            particle_spawner_tick(obj, delta);
-            break;
-        case (int)PLAYER_ENTITY:
-            player_entity_tick(obj, delta);
-            break;
-        case (int)ENTITY:
-            entity_tick(obj, delta);
-            break;
-    }
 }
 
 // #TICK
@@ -1837,8 +1800,6 @@ RenderObject *get_render_list() {
         array_append(renderList, wallStripesToRender[i]);
     }
 
-    printf("START---- \n");
-
     iter_over_all_nodes(node, {
 
         RenderObject render_object = (RenderObject){.isnull = false};
@@ -1849,9 +1810,6 @@ RenderObject *get_render_list() {
             pos = ((WorldNode *)node)->pos;
 
         }
-        
-        if (instanceof(node->type, CANVAS_NODE)) printf("מצאתי כנבס וזה מרגיש כלכך טוב \n");
-        if (instanceof(node->type, SPRITE)) printf("Sprite! \n");
 
         render_object.dist_squared = v2_distance_squared(pos, player->world_node.pos);
         render_object.val = node;
@@ -1860,8 +1818,6 @@ RenderObject *get_render_list() {
         array_append(renderList, render_object);
         
     });
-
-    printf("END-----\n");
 
     int l = array_length(renderList);
 
@@ -2199,6 +2155,10 @@ void init_player(v2 pos) {
     player->world_node = new(WorldNode, WORLD_NODE);
     player->world_node.node.on_tick = player_tick;
     player->world_node.node.type = PLAYER;
+
+    Node_add_child(player, alloc(CircleCollider, CIRCLE_COLLIDER, PLAYER_COLLIDER_RADIUS));
+
+
 
     player->angle = 0;
     player->world_node.pos = pos;
@@ -2628,7 +2588,9 @@ void ability_shoot_activate(Ability *ability) {
     printf("Your honor I shot \n");
 }
 
-void effectTick(Effect *effect, double delta) {
+void Effect_tick(Node *node, double delta) {
+
+    Effect *effect = node;
 
     effect->life_timer -= delta;
     if (effect->life_timer <= 0) {
@@ -2754,9 +2716,7 @@ bool pos_in_tile(v2 pos) {
 }
 
 CollisionData getCircleTileCollision(CircleCollider *circle, v2 tilePos) {
-    CollisionData result;
-    result.didCollide = false;
-    result.offset = (v2){0, 0};
+    CollisionData result = {0};
 
     v2 clampedPos;
     clampedPos.x = clamp(circle->world_node.pos.x, tilePos.x, tilePos.x + tileSize);
@@ -3358,14 +3318,15 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
     }
 
     double size = 8000;
-    Effect *hit_effect = alloc(Effect, EFFECT, 1);//createEffect(final_pos, to_vec(size), createSprite(true, 1), 1);
+    Effect *hit_effect = alloc(Effect, EFFECT, 1);
     hit_effect->entity.world_node.pos = final_pos;
     hit_effect->entity.world_node.height = final_height;
     hit_effect->entity.world_node.size = to_vec(size);
 
     Sprite *sprite = alloc(Sprite, SPRITE, true);
 
-    array_append(sprite->animations, create_animation(5, 0, shootHitEffectFrames));
+    array_append(sprite->animations, create_animation(5, 1, shootHitEffectFrames));
+    spritePlayAnim(sprite, 0);
 
     Node_add_child(hit_effect, sprite);
 
@@ -3559,7 +3520,7 @@ void particle_tick(Particle *particle, double delta) {
         particle->h_vel *= -particle->bounciness;
     }
 
-    effectTick((Effect *)particle, delta);
+    Effect_tick((Effect *)particle, delta);
 }
 
 Ability ability_dash_create() {
@@ -3805,7 +3766,7 @@ void generate_dungeon() {
 
 void load_room(Room *room_ptr) {
 
-    static int num_lights = 0;
+    int num_lights = 0;
 
     room_ptr->left_entrance_pos = (v2){(int)ROOM_WIDTH / 2, (int)ROOM_HEIGHT / 2};
     room_ptr->right_entrance_pos = (v2){(int)ROOM_WIDTH / 2, (int)ROOM_HEIGHT / 2};
@@ -3920,6 +3881,10 @@ void load_room(Room *room_ptr) {
                 place_entity(tile_mid, etype);
             }
         }
+    }
+
+    if (num_lights > 3) {
+        printf("adsijas \n");
     }
 
     fclose(fh);
@@ -4181,6 +4146,7 @@ void client_add_player_entity(int id) {
     player_entity->desired_pos = V2_ZERO;
     player_entity->desired_height = 0;
     // player_entity->collider = (CircleCollider){.radius = PLAYER_COLLIDER_RADIUS, .pos = V2_ZERO};
+    Node_add_child(player_entity, alloc(CircleCollider, CIRCLE_COLLIDER, PLAYER_COLLIDER_RADIUS));
 
     player_entity->direction_indicator = malloc(sizeof(Entity));
     player_entity->direction_indicator->affected_by_light = true;
@@ -4329,7 +4295,7 @@ void player_entity_tick(PlayerEntity *player_entity, double delta) {
 
     player_entity->entity.world_node.pos = v2_lerp(player_entity->entity.world_node.pos, player_entity->desired_pos, 0.1 * (delta * 144));
     player_entity->entity.world_node.height = lerp(player_entity->entity.world_node.height, real_desired_height, 0.1 * (delta * 144));
-    player_entity->collider.pos = player_entity->entity.world_node.pos;
+    //player_entity->collider.pos = player_entity->entity.world_node.pos;
     player_entity->direction_indicator->world_node.pos = v2_add(player_entity->entity.world_node.pos, v2_mul(player_entity->dir, to_vec(20)));
     player_entity->direction_indicator->world_node.height = player_entity->entity.world_node.height + player->tallness * .25;
     player_entity->dir_sprite->dir = player_entity->dir;
@@ -4594,7 +4560,9 @@ Projectile Projectile_new(double life_time) {
     projectile.life_time = life_time;
     projectile.life_timer = life_time;
     projectile.entity.color = (SDL_Color){255, 255, 255, 255};
-    projectile.collider.radius = 5;
+    
+    Node_add_child(&projectile, alloc(CircleCollider, CIRCLE_COLLIDER, 5));
+
     projectile.entity.world_node.size = to_vec(8000);
 
     return projectile;
@@ -4682,11 +4650,10 @@ void bomb_on_destroy(Projectile *projectile) {
         player->height_vel = max(height_kb, player->height_vel + height_kb);
     }
 
-    for (int i = 0; i < game_objects->length; i++) {
-        obj *object = arraylist_get(game_objects, i);
-        if (object->type != PLAYER_ENTITY) continue;
+    iter_over_all_nodes(node, {
+        if (node->type != PLAYER_ENTITY) continue;
 
-        PlayerEntity *player_entity = object->val;
+        PlayerEntity *player_entity = node;
         
         double dist_sqr = v2_distance_squared(projectile->entity.world_node.pos, player_entity->entity.world_node.pos);
         
@@ -4696,7 +4663,7 @@ void bomb_on_destroy(Projectile *projectile) {
             double dmg = inverse_lerp(MAX_DIST * MAX_DIST, 0, dist_sqr_to_player) * 8;
             player_entity_take_dmg(player_entity, dmg);
         }
-    }
+    });
 }
 
 Ability pick_random_ability_from_array(Ability arr[], int size) {
@@ -4749,8 +4716,10 @@ void entity_tick(Entity *entity, double delta) {
 
 void bomb_on_tick(Projectile *projectile, double delta) {
 
+    CircleCollider *player_collider = get_child_by_type(player, CIRCLE_COLLIDER);
+    CircleCollider *proj_collider = get_child_by_type(projectile, CIRCLE_COLLIDER);
 
-    if (get_circle_collision(projectile->collider, *player->collider).didCollide) {
+    if (get_circle_collision(player_collider, proj_collider).didCollide) {
         projectile_destroy(projectile);
         return;
     }
@@ -4760,26 +4729,27 @@ void bomb_on_tick(Projectile *projectile, double delta) {
         if (object->type != PLAYER_ENTITY) continue;
 
         PlayerEntity *player_entity = object->val;
+        CircleCollider *coll = get_child_by_type(player_entity, CIRCLE_COLLIDER);
 
-        if (get_circle_collision(projectile->collider, player_entity->collider).didCollide) {
+        if (get_circle_collision(coll, proj_collider).didCollide) {
             projectile_destroy(projectile);
             return;
         }
     }
 }
 
-// CollisionData get_circle_collision(CircleCollider col1, CircleCollider col2) {
-//     double dist_sqr = v2_distance_squared(col1.pos, col2.pos);
+CollisionData get_circle_collision(CircleCollider *col1, CircleCollider *col2) {
+    double dist_sqr = v2_distance_squared(col1->world_node.pos, col2->world_node.pos);
 
-//     CollisionData data = {0};
+    CollisionData data = {0};
 
-//     if (dist_sqr < (col1.radius * col1.radius + col2.radius + col2.radius)) {
-//         data.didCollide = true;
-//     }
+    if (dist_sqr < (col1->radius * col1->radius + col2->radius + col2->radius)) {
+        data.didCollide = true;
+    }
 
 
-//     return data;
-// }
+    return data;
+}
 
 Ability ability_forcefield_create() {
     Ability ability = {
@@ -4882,14 +4852,10 @@ void Node_delete(Node *node) {
 
     if (node == NULL) return;
 
-    for (int i = array_length(node->children) - 1; i >= 0 ; i--) {
+    if (node->on_delete != NULL) node->on_delete(node);
 
-        if (node->children[i]->on_delete != NULL) {
-            node->children[i]->on_delete(node->children[i]);
-        }
-
-        Node_delete(node->children[i]);
-        array_remove(node->children, i);
+    while (array_length(node->children) != 0) {
+        Node_delete(node->children[0]);
     }
 
     if (node->parent != NULL) {
@@ -4919,9 +4885,9 @@ void Node_tick(Node *node, double delta) {
         node->on_tick(node, delta);
     }
 
-    for (int i = 0; i < array_length(node->children); i++) {
-        Node_tick(node->children[i], delta);
-    }
+    foreach (Node *child, node->children, array_length(node->children), {
+        Node_tick(child, delta);
+    });
 }
 
 
@@ -5075,8 +5041,6 @@ void Sprite_delete(Node *node) {
 
 void Sprite_render(Node *node) {
 
-    printf("hi \n");
-
     if (node->parent == NULL) return;
 
     if (instanceof(node->parent->type, WORLD_NODE)) {
@@ -5101,8 +5065,6 @@ void Sprite_render(Node *node) {
             parent->size.y
         };
 
-        printf("Rendering using CanvasNode \n");
-
         GPU_Image *current_texture = get_sprite_current_texture((Sprite *)node);
 
         GPU_BlitRect(current_texture, NULL, hud, &rect);
@@ -5117,14 +5079,11 @@ void Sprite_tick(Node *node, double delta) {
 
     Sprite *sprite = node;
 
-    printf("Outside sprite tick \n");
-
     if (sprite == NULL) return;
     if (!sprite->isAnimated) return;
     if (sprite->animations == NULL) return;
     if (sprite->current_anim_idx == -1) return;
 
-    cd_print(true, "Reached inside tick \n");
     animation_tick(&sprite->animations[sprite->current_anim_idx], delta);
 }
 
@@ -5155,6 +5114,9 @@ Particle Particle_new(double life_time) {
 Effect Effect_new(double life_time) {
     Effect effect = {0};
     effect.entity = new(Entity, ENTITY);
+
+    effect.entity.world_node.node.on_tick = Effect_tick;
+
     effect.life_time = life_time;
     effect.life_timer = life_time;
 
@@ -5224,11 +5186,33 @@ CanvasNode CanvasNode_new() {
     return canvas_node;
 }
 
+void CircleCollider_tick(Node *node, double delta) {
+    CircleCollider *collider = node;
+
+    if (node->parent != NULL && node->parent->type == WORLD_NODE) {
+        collider->world_node.pos = ((WorldNode *)node->parent)->pos;
+        collider->world_node.height = ((WorldNode *)node->parent)->height;
+    }
+}
+
 CircleCollider CircleCollider_new(int radius) {
     CircleCollider collider = {.radius = radius};
     collider.world_node = new(WorldNode, WORLD_NODE);
+    node(&collider)->on_tick = CircleCollider_tick;
 
     return collider;
+}
+
+Node *get_child_by_type(Node *parent, int child_type) {
+
+
+    foreach (Node *child, parent->children, array_length(parent->children), {
+        if (child->type == child_type) {
+            return child;
+        }
+    });
+
+    return NULL;
 }
 
 
