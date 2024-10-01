@@ -5286,6 +5286,8 @@ void init_health_bar() {
     health_node->pos = V2(60, 50);
     health_node->size = v2_div(canvas_node->size, V2(1.47, 3.5));
 
+    health_node->node.on_tick = health_node_tick;
+
     Node_add_child(health_node, alloc(ColorRect, COLOR_RECT, Color(255, 40, 40, 255), ALIGNMENT_LEFT, ALIGNMENT_TOP));
 
     Node_add_child(canvas_node, health_node);
