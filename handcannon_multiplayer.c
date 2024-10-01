@@ -223,6 +223,8 @@ DEF_STRUCT(Node, NODE, {
 
     int type;
 
+    bool freed;
+
     struct Node *parent;
     struct Node **children;
 });
@@ -235,6 +237,12 @@ DEF_STRUCT(Node, NODE, {
     });
 
     END_STRUCT(SPRITE);
+
+    DEF_STRUCT(ColorRect, COLOR_RECT, {
+        Node node;
+        SDL_Color color;
+        int align_x, align_y;
+    });
 
     DEF_STRUCT(DirectionalSprite, DIRECTIONAL_SPRITE, {
         Node node;
@@ -477,6 +485,18 @@ typedef struct Room {
 } Room;
 
 // #FUNC
+
+void health_node_tick(Node *node, double delta);
+
+v2 world_to_screen_size(v2 size, v2 pos, double height);
+
+void ColorRect_render(Node *node);
+
+ColorRect ColorRect_new(SDL_Color color, int align_x, int align_y);
+
+void init_health_bar();
+
+void Node_queue_deletion(Node *node);
 
 Node *get_child_by_type(Node *parent, int child_type);
 
@@ -829,6 +849,8 @@ Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
 
 // #VAR
 
+Node *hand_node;
+
 bool ready_to_render = false;
 
 Node *root_node;
@@ -836,7 +858,7 @@ Node *root_node;
 Node *game_node;
 
 
-obj *game_objects_deletion_queue;
+Node **deletion_queue;
 
 SDL_Color client_self_color = {0};
 
@@ -948,6 +970,8 @@ int main(int argc, char *argv[]) {
 
     game_objects = NULL;
 
+    deletion_queue = array(Node *, 10);
+
     root_node = alloc(Node, NODE);
 
     init_textures();
@@ -1044,8 +1068,6 @@ int main(int argc, char *argv[]) {
 
 void init() {  // #INIT
 
-    game_objects_deletion_queue = array(obj, 10);
-
     bomb_explosion = create_sound("Sounds/explosion.wav");
 
     randomize();
@@ -1097,6 +1119,7 @@ void init() {  // #INIT
 
 
     init_hand_sprite();
+    init_health_bar();
 
 }  // #INIT END
 
@@ -1383,6 +1406,11 @@ void tick(double delta) {
 
     Node_tick(root_node, delta);
 
+    for (int i = array_length(deletion_queue) - 1; i >= 0; i--) {
+        Node_delete(deletion_queue[i]);
+        array_remove(deletion_queue, i);
+    }
+
     //printf("tick start");
 
     
@@ -1654,15 +1682,15 @@ void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affe
     if (v2_equal(screen_pos, OUT_OF_SCREEN_POS)) {
         return;
     }
-    double cos_angle_to_forward = v2_cos_angle_between(playerForward, v2_sub(pos, player->world_node.pos));
+    // double cos_angle_to_forward = v2_cos_angle_between(playerForward, v2_sub(pos, player->world_node.pos));
 
     double dist_to_player = v2_distance(pos, player->world_node.pos);
 
-    double dist_to_viewplane = dist_to_player * cos_angle_to_forward;
+    // double dist_to_viewplane = dist_to_player * cos_angle_to_forward;
 
-    double fov_factor = tanHalfFOV / tanHalfStartFOV;
+    // double fov_factor = tanHalfFOV / tanHalfStartFOV;
 
-    v2 final_size = v2_div(size, to_vec(dist_to_viewplane * fov_factor));
+    v2 final_size = world_to_screen_size(size, pos, height);
 
     GPU_Rect dstRect = {
         screen_pos.x - final_size.x / 2,
@@ -1809,6 +1837,11 @@ RenderObject *get_render_list() {
 
             pos = ((WorldNode *)node)->pos;
 
+        }
+        if (instanceof(node->type, SPRITE)) {
+            if (node->parent != NULL && instanceof(node->parent->type, WORLD_NODE)) {
+                pos = ((WorldNode *)node->parent)->pos;
+            }
         }
 
         render_object.dist_squared = v2_distance_squared(pos, player->world_node.pos);
@@ -2542,7 +2575,7 @@ void spritePlayAnim(Sprite *sprite, int idx) {
     && sprite->animations[sprite->current_anim_idx].priority < sprite->animations[idx].priority
     && sprite->animations[sprite->current_anim_idx].playing;
     if (less_priority) {
-        return;
+        // return;
     }
     sprite->current_anim_idx = idx;
     for (int i = 0; i < array_length(sprite->animations); i++) {
@@ -2583,9 +2616,8 @@ Effect *createEffect(v2 pos, v2 size, Sprite *sprite, double lifeTime) {
 
 // Todo: add shoot cooldown for base shooting
 void ability_shoot_activate(Ability *ability) {
-    // play_sound(player_default_shoot, 0.4);
+    play_sound(player_default_shoot, 0.4);
     _shoot(0);
-    printf("Your honor I shot \n");
 }
 
 void Effect_tick(Node *node, double delta) {
@@ -2594,7 +2626,7 @@ void Effect_tick(Node *node, double delta) {
 
     effect->life_timer -= delta;
     if (effect->life_timer <= 0) {
-        Node_delete(effect);
+        Node_queue_deletion(node);
         return;
     }
     // spriteTick(effect->entity.sprite, delta);
@@ -3293,7 +3325,7 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
 
     
     shakeCamera(10, 4, true, 1);
-    // spritePlayAnim(leftHandSprite, 1);
+    spritePlayAnim(get_child_by_type(hand_node, SPRITE), 1);
 
     v2 shoot_dir = v2_rotate(playerForward, randf_range(-PI * spread, PI * spread));
 
@@ -3325,7 +3357,13 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
 
     Sprite *sprite = alloc(Sprite, SPRITE, true);
 
-    array_append(sprite->animations, create_animation(5, 1, shootHitEffectFrames));
+    Animation anim = create_animation(5, 1, shootHitEffectFrames);
+
+    anim.fps = 12;
+    anim.loop = false;
+
+    array_append(sprite->animations, anim);
+
     spritePlayAnim(sprite, 0);
 
     Node_add_child(hit_effect, sprite);
@@ -4852,7 +4890,17 @@ void Node_delete(Node *node) {
 
     if (node == NULL) return;
 
+    if (node->freed) return;
+
     if (node->on_delete != NULL) node->on_delete(node);
+
+    node->freed = true;
+
+    node->on_delete = NULL;
+    node->on_ready = NULL;
+    node->on_render = NULL;
+    node->on_tick = NULL;
+    node->type = -1;
 
     while (array_length(node->children) != 0) {
         Node_delete(node->children[0]);
@@ -4860,6 +4908,7 @@ void Node_delete(Node *node) {
 
     if (node->parent != NULL) {
         Node_remove_child(node->parent, node);
+        node->parent = NULL;
     }
     
 
@@ -4881,11 +4930,26 @@ void Node_tick(Node *node, double delta) {
 
     if (node == NULL) return;
 
+    int a = 0;
+
+    if (node->type == SPRITE) {
+        printf("Is sprite. \n");
+        a = 1;
+    } else if (node->type == EFFECT) {
+        printf("Is effect \n");
+        a = 2;
+    } else if (node->type == NODE) {
+        printf("Is node \n");
+        a = 3;
+    }
+
     if (node->on_tick != NULL) {
         node->on_tick(node, delta);
     }
 
-    foreach (Node *child, node->children, array_length(node->children), {
+    ArrayHeader *header = array_header(node->children);
+
+    foreach (Node *child, node->children, header->length, {
         Node_tick(child, delta);
     });
 }
@@ -4950,7 +5014,7 @@ void Renderer_render(Node *node) {
     foreach(RenderObject render_obj, render_list, array_length(render_list), {
         
         if (render_obj.type == WALL_STRIPE) {
-            renderWallStripe((WallStripe *)render_obj.val);
+            renderWallStripe(render_obj.val);
         } else if (render_obj.type == NODE) {
             if (render_obj.val == renderer) continue;
             Node_render(render_obj.val);
@@ -5022,9 +5086,13 @@ int get_node_count() {
 Sprite Sprite_new(bool is_animated) {
     Sprite sprite = {0};
     sprite.node = new(Node, NODE);
-    sprite.animations = array(Animation, 2);
-    sprite.isAnimated = is_animated;
+    if (is_animated) {
+        sprite.animations = array(Animation, 2);
+    } else {
+        sprite.animations = NULL;
+    }
     sprite.texture = NULL;
+    sprite.isAnimated = is_animated;
     sprite.current_anim_idx = 0;
 
     sprite.node.on_delete = Sprite_delete;
@@ -5036,7 +5104,9 @@ Sprite Sprite_new(bool is_animated) {
 
 void Sprite_delete(Node *node) {
     Sprite *sprite = node;
-    array_free(sprite->animations);
+    if (sprite->animations != NULL) {
+        array_free(sprite->animations);
+    }
 }
 
 void Sprite_render(Node *node) {
@@ -5115,7 +5185,7 @@ Effect Effect_new(double life_time) {
     Effect effect = {0};
     effect.entity = new(Entity, ENTITY);
 
-    effect.entity.world_node.node.on_tick = Effect_tick;
+    node(&effect)->on_tick = Effect_tick;
 
     effect.life_time = life_time;
     effect.life_timer = life_time;
@@ -5150,10 +5220,10 @@ void init_hand_sprite() {
     shoot_anim.fps = 12;
 
     Animation default_anim = create_animation(1, 0, hand_shoot + 5);
-    array_append(sprite->animations, shoot_anim);
     array_append(sprite->animations, default_anim);
+    array_append(sprite->animations, shoot_anim);
 
-    spritePlayAnim(sprite, 1);
+    spritePlayAnim(sprite, 0);
 
     canvas_node->node.on_tick = hand_sprite_tick;
 
@@ -5161,21 +5231,7 @@ void init_hand_sprite() {
 
     Node_add_child(root_node, canvas_node);
 
-
-    // Node *thing = game_node->children[array_length(game_node->children) - 1];
-
-    // printf("Thing is sprite: %d \n", thing->type == SPRITE);
-    // printf("Thing is CanvasNode: %d \n", thing->type == CANVAS_NODE);
-    // printf("Thing's child is Sprite: %d \n", thing->children[0]->type == SPRITE);
-
-    // iter_over_all_nodes(node, {
-    //     if (node->type == SPRITE) {
-    //         printf("Found the kid. \n");
-    //         if (instanceof(node->type, SPRITE)) {
-    //             printf("btw instance doesnt even work \n");
-    //         }
-    //     }
-    // });
+    hand_node = canvas_node;
 }
 
 CanvasNode CanvasNode_new() {
@@ -5213,6 +5269,115 @@ Node *get_child_by_type(Node *parent, int child_type) {
     });
 
     return NULL;
+}
+
+void Node_queue_deletion(Node *node) {
+    array_append(deletion_queue, node);
+}
+
+
+void init_health_bar() {
+    CanvasNode *canvas_node = alloc(CanvasNode, CANVAS_NODE);
+
+    canvas_node->pos = V2_ZERO;
+    canvas_node->size = (v2){400, 150};
+
+    CanvasNode *health_node = alloc(CanvasNode, CANVAS_NODE);
+    health_node->pos = V2(60, 50);
+    health_node->size = v2_div(canvas_node->size, V2(1.47, 3.5));
+
+    Node_add_child(health_node, alloc(ColorRect, COLOR_RECT, Color(255, 40, 40, 255), ALIGNMENT_LEFT, ALIGNMENT_TOP));
+
+    Node_add_child(canvas_node, health_node);
+
+
+    Sprite *sprite = alloc(Sprite, SPRITE, false);
+
+    sprite->texture = healthbar_texture;
+
+    Node_add_child(canvas_node, sprite);
+
+    Node_add_child(root_node, canvas_node);
+}
+
+ColorRect ColorRect_new(SDL_Color color, int align_x, int align_y) {
+    ColorRect color_rect = {0};
+
+    color_rect.node = new(Node, NODE);
+
+    color_rect.color = color;
+    color_rect.align_x = align_x;
+    color_rect.align_y = align_y;
+
+    color_rect.node.on_render = ColorRect_render;
+
+    return color_rect;
+}
+
+void ColorRect_render(Node *node) {
+    
+    if (node->parent == NULL) return;
+
+    ColorRect *color_rect = node;
+    
+    if (instanceof(node->parent->type, WORLD_NODE)) {
+        WorldNode *wnode = node->parent;
+        v2 screen_pos = worldToScreen(wnode->pos, wnode->height, false);
+        v2 screen_size = world_to_screen_size(wnode->size, wnode->pos, wnode->height);
+        if (color_rect->align_x == ALIGNMENT_CENTER) {
+            screen_pos.x -= screen_size.x / 2;
+        } else if (color_rect->align_x == ALIGNMENT_RIGHT) {
+            screen_pos.x -= screen_size.x;
+        }
+        if (color_rect->align_y == ALIGNMENT_CENTER) {
+            screen_pos.y -= screen_size.y / 2;
+        } else if (color_rect->align_y == ALIGNMENT_RIGHT) {
+            screen_pos.y -= screen_size.y;
+        }
+
+        GPU_Rect rect = {
+            screen_pos.x,
+            screen_pos.y,
+            screen_size.x,
+            screen_size.y
+        };
+
+        GPU_RectangleFilled2(screen, rect, color_rect->color);
+    } else if (instanceof(node->parent->type, CANVAS_NODE)) {
+        CanvasNode *cnode = node->parent;
+
+        GPU_Rect rect = {
+            cnode->pos.x,
+            cnode->pos.y,
+            cnode->size.x,
+            cnode->size.y
+        };
+
+        GPU_RectangleFilled2(hud, rect, color_rect->color);
+    }
+}
+
+v2 world_to_screen_size(v2 size, v2 pos, double height) {
+
+    double cos_angle_to_forward = v2_cos_angle_between(playerForward, v2_sub(pos, player->world_node.pos));
+
+    double dist = v2_distance(player->world_node.pos, pos);
+
+    double dist_from_viewplane = dist * cos_angle_to_forward;
+
+    double fov_factor = tanHalfFOV / tanHalfStartFOV;
+
+    v2 final_size = v2_div(size, to_vec(dist_from_viewplane * fov_factor));
+
+    return final_size;
+}
+
+void health_node_tick(Node *node, double delta) {
+    CanvasNode *cnode = node;
+
+    double normalized_health = player->health / player->maxHealth;
+
+    cnode->size = v2_div(cnode->size, V2(1.47 * normalized_health, 3.5));
 }
 
 

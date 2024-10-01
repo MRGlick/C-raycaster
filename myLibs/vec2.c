@@ -20,6 +20,8 @@ typedef struct v2 {
 #define V2_RIGHT ((v2){1, 0})
 #define to_vec(a) ((v2){a, a})
 
+#define V2(a, b) (v2){a, b}
+
 #define min(a, b) a < b ? a : b
 #define max(a, b) a > b ? a : b
 
