@@ -4762,18 +4762,17 @@ void bomb_on_tick(Projectile *projectile, double delta) {
         return;
     }
 
-    for (int i = 0; i < game_objects->length; i++) {
-        obj *object = arraylist_get(game_objects, i);
-        if (object->type != PLAYER_ENTITY) continue;
+    iter_over_all_nodes(node, {
+        if (node->type != PLAYER_ENTITY) continue;
 
-        PlayerEntity *player_entity = object->val;
+        PlayerEntity *player_entity = node;
         CircleCollider *coll = get_child_by_type(player_entity, CIRCLE_COLLIDER);
 
         if (get_circle_collision(coll, proj_collider).didCollide) {
             projectile_destroy(projectile);
             return;
         }
-    }
+    });
 }
 
 CollisionData get_circle_collision(CircleCollider *col1, CircleCollider *col2) {
@@ -4858,11 +4857,10 @@ void projectile_forcefield_on_tick(Projectile *projectile, double delta) {
 
     projectile->vel = v2_lerp(projectile->vel, V2_ZERO, 0.01 * delta * 144);
 
-    for (int i = 0; i < game_objects->length; i++) {
-        obj *gameobject = arraylist_get(game_objects, i);
-        if (gameobject->type != PROJECTILE) continue;
+    iter_over_all_nodes(node, {
+        if (node->type != PROJECTILE) continue;
 
-        Projectile *proj = gameobject->val;
+        Projectile *proj = node;
         if (proj == projectile) continue;
 
         double dist_sqr = v2_distance_squared(projectile->entity.world_node.pos, proj->entity.world_node.pos);
@@ -4870,7 +4868,7 @@ void projectile_forcefield_on_tick(Projectile *projectile, double delta) {
             proj->vel = v2_add(proj->vel, v2_dir(projectile->entity.world_node.pos, proj->entity.world_node.pos));
             printf("Pushed! \n");
         }
-    }
+    });
 }
 
 Node Node_new() {
@@ -5376,10 +5374,14 @@ v2 world_to_screen_size(v2 size, v2 pos, double height) {
 
 void health_node_tick(Node *node, double delta) {
     CanvasNode *cnode = node;
+    CanvasNode *parent = node->parent;
 
     double normalized_health = player->health / player->maxHealth;
+    // div 1.47 3.5 == mul 0.68 0.285
 
-    cnode->size = v2_div(cnode->size, V2(1.47 * normalized_health, 3.5));
+    v2 scaling_factor = V2(0.68, 0.285);
+
+    cnode->size = v2_mul(parent->size, V2(scaling_factor.x * normalized_health, scaling_factor.y));
 }
 
 
