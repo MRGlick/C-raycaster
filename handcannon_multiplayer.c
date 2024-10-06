@@ -34,7 +34,7 @@
 #define BAKED_LIGHT_RESOLUTION 36
 #define BAKED_LIGHT_CALC_RESOLUTION 8
 #define CLIENT_UPDATE_RATE 20
-#define PLAYER_COLLIDER_RADIUS 10
+#define PLAYER_COLLIDER_RADIUS 8
 
 
 #define PARTICLE_GRAVITY -50000
@@ -180,6 +180,11 @@ typedef enum AbilityType {
 
 // #STRUCTS
 
+typedef struct CollisionData {
+    v2 offset;  // adjusting position by this offset makes the object only touch and not overlap
+    bool didCollide;
+} CollisionData;
+
 DEF_STRUCT(Ability, ABILITY, {
     void (*activate)(struct Ability *);
     void (*tick)(struct Ability *, double);
@@ -234,6 +239,8 @@ DEF_STRUCT(Node, NODE, {
         bool isAnimated;
         int current_anim_idx;
         Animation *animations;
+        SDL_Color color;
+        bool inherit_color;
     });
 
     END_STRUCT(SPRITE);
@@ -391,9 +398,11 @@ DEF_STRUCT(Node, NODE, {
             SDL_Color start_color, end_color;
 
         });
+
     DEF_STRUCT(CircleCollider, CIRCLE_COLLIDER, {
         WorldNode world_node;
         double radius;
+        void (*on_collide)(struct CircleCollider *, CollisionData);
     });
 
     END_STRUCT(WORLD_NODE);
@@ -468,10 +477,7 @@ typedef struct BakedLightColor {
 } BakedLightColor;
 
 
-typedef struct CollisionData {
-    v2 offset;  // adjusting position by this offset makes the object only touch and not overlap
-    bool didCollide;
-} CollisionData;
+
 
 typedef struct Room {
     v2 room_idx; // 0, 0 -> 3, 3
@@ -485,6 +491,12 @@ typedef struct Room {
 } Room;
 
 // #FUNC
+
+void init_ability_hud();
+
+void init_crosshair();
+
+void CircleCollider_default_on_collide(CircleCollider *collider, CollisionData data);
 
 void health_node_tick(Node *node, double delta);
 
@@ -563,7 +575,7 @@ CollisionData get_circle_collision(CircleCollider *col1, CircleCollider *col2);
 
 void bomb_on_tick(Projectile *projectile, double delta);
 
-void entity_tick(Entity *entity, double delta);
+void Entity_tick(Entity *entity, double delta);
 
 void randomize_player_abilities();
 
@@ -592,7 +604,7 @@ PlayerEntity *find_player_entity_by_id(int id);
 
 void init_textures();
 
-void player_entity_tick(PlayerEntity *player_entity, double delta);
+void PlayerEntity_tick(PlayerEntity *player_entity, double delta);
 
 void init_player(v2 pos);
 
@@ -720,8 +732,6 @@ void key_released(SDL_Keycode key);
 void tick(double delta);
 
 void handle_input(SDL_Event event);
-
-void add_game_object(void *val, int type);
 
 double mili_to_sec(u64 mili);
 
@@ -894,7 +904,6 @@ double loading_progress = 0;
 BakedLightColor baked_light_grid[TILEMAP_HEIGHT * BAKED_LIGHT_RESOLUTION][TILEMAP_WIDTH * BAKED_LIGHT_RESOLUTION] = {0};
 bool fullscreen = false;
 bool running = true;
-arraylist *game_objects = NULL;
 
 Player *player = NULL;
 
@@ -965,10 +974,6 @@ int main(int argc, char *argv[]) {
     _MP_on_client_connected = on_player_connect;
     _MP_on_client_disconnected = on_player_disconnect;
     _MP_server_handle_recv = on_server_recv;
-
-    
-
-    game_objects = NULL;
 
     deletion_queue = array(Node *, 10);
 
@@ -1120,7 +1125,8 @@ void init() {  // #INIT
 
     init_hand_sprite();
     init_health_bar();
-
+    init_crosshair();
+    init_ability_hud();
 }  // #INIT END
 
 v2 get_player_forward() {
@@ -1335,25 +1341,18 @@ void player_tick(Node *node, double delta) {
 
     v2 movement_dir = v2_normalize(finalVel);
 
-    RayCollisionData ray = castRay(player->world_node.pos, movement_dir);
-    if (ray.hit) {
-        double dist = v2_distance(ray.startpos, ray.collpos);
-        if (movement > dist) {
-            move_without_ray = false;
-            player->world_node.pos = v2_add(player->world_node.pos, v2_mul(movement_dir, to_vec(dist - 10)));
-        }
-    }
+    // RayCollisionData ray = castRay(player->world_node.pos, movement_dir);
+    // if (ray.hit) {
+    //     double dist = v2_distance(ray.startpos, ray.collpos);
+    //     if (movement > dist) {
+    //         move_without_ray = false;
+    //         player->world_node.pos = v2_add(player->world_node.pos, v2_mul(movement_dir, to_vec(dist - 10)));
+    //     }
+    // }
+
+   
+    player->world_node.pos = v2_add(player->world_node.pos, v2_mul(finalVel, to_vec(delta)));
     
-    CollisionData player_coldata = getCircleTileMapCollision(collider);
-
-    if (player_coldata.didCollide) {
-        player->world_node.pos = v2_add(player->world_node.pos, player_coldata.offset);
-        player->vel = v2_slide(player->vel, v2_normalize(player_coldata.offset));
-    }
-
-    if (move_without_ray) {
-        player->world_node.pos = v2_add(player->world_node.pos, v2_mul(finalVel, to_vec(delta)));
-    }
     
     
 
@@ -2164,17 +2163,17 @@ void render(double delta) {  // #RENDER
     // screen_modulate_g = lerp(screen_modulate_g, 1, delta / 2);
     // screen_modulate_b = lerp(screen_modulate_b, 1, delta / 2);
 
-    // GPU_ActivateShaderProgram(bloom_shader, &bloom_shader_block);
+    GPU_ActivateShaderProgram(bloom_shader, &bloom_shader_block);
 
-    // GPU_SetShaderImage(screen_image, GPU_GetUniformLocation(bloom_shader, "tex"), 1);
+    GPU_SetShaderImage(screen_image, GPU_GetUniformLocation(bloom_shader, "tex"), 1);
     
-    // float res[2] = {WINDOW_WIDTH, WINDOW_HEIGHT};
+    float res[2] = {WINDOW_WIDTH, WINDOW_HEIGHT};
 
-    // GPU_SetUniformfv(GPU_GetUniformLocation(bloom_shader, "texResolution"), 2, 1, res);
+    GPU_SetUniformfv(GPU_GetUniformLocation(bloom_shader, "texResolution"), 2, 1, res);
 
     GPU_Blit(screen_image, NULL, actual_screen, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
 
-    // GPU_DeactivateShaderProgram();
+    GPU_DeactivateShaderProgram();
 
     GPU_Blit(hud_image, NULL, actual_screen, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
 
@@ -2315,13 +2314,11 @@ RayCollisionData castRay(v2 pos, v2 dir) {
 RayCollisionData ray_circle(Raycast ray, CircleCollider *collider) {
     
     RayCollisionData data;
-    
+
     if (v2_distance(ray.pos, collider->world_node.pos) <= collider->radius || v2_dot(ray.dir, v2_dir(ray.pos, collider->world_node.pos)) < 0) {
         data.hit = false;
         return data;
     }
-
-    
 
     v2 rayToCircle = v2_sub(collider->world_node.pos, ray.pos);
     double a = v2_dot(rayToCircle, ray.dir);
@@ -2346,9 +2343,7 @@ RayCollisionData ray_circle(Raycast ray, CircleCollider *collider) {
     data.wallWidth = collider->radius * PI;
     data.collider = node(collider)->parent;
     
-
     data.collIdx = collIdx;
-    
 
     return data;
 }
@@ -2362,14 +2357,6 @@ void shakeCamera(double strength, int ticks, bool fade, int priority) {
     cameraShakeFadeActive = fade;
     cameraShakeTicks = ticks;
     cameraShakeTicksLeft = ticks;
-}
-
-void add_game_object(void *val, int type) {
-    switch (type) {
-        default:
-            arraylist_add(game_objects, val, type);
-            break;
-    }
 }
 
 void reset_tilemap(int t[TILEMAP_HEIGHT][TILEMAP_WIDTH]) { 
@@ -4327,7 +4314,7 @@ void on_client_recv(MPPacket packet, void *data) {
     }
 }
 
-void player_entity_tick(PlayerEntity *player_entity, double delta) {
+void PlayerEntity_tick(PlayerEntity *player_entity, double delta) {
 
     double real_desired_height = player_entity->desired_height + get_max_height() * 0.5 - player_entity->entity.world_node.size.y / 2;
 
@@ -4584,7 +4571,7 @@ void projectile_destroy(Projectile *projectile) {
         projectile->on_destruction(projectile);
     }
 
-    Node_delete(projectile);
+    Node_queue_deletion(projectile);
 }
 
 Projectile Projectile_new(double life_time) {
@@ -4621,6 +4608,7 @@ Projectile *create_bomb_projectile(v2 pos, v2 start_vel) {
     projectile->on_destruction = bomb_on_destroy;
     projectile->on_tick = bomb_on_tick;
 
+    Node_add_child(projectile, alloc(ParticleSpawner, PARTICLE_SPAWNER, V2_ZERO, 0));
 
     Sprite *sprite = alloc(Sprite, SPRITE, true);
     array_append(sprite->animations, create_animation(2, 1, bomb_anim));
@@ -4635,36 +4623,38 @@ void bomb_on_destroy(Projectile *projectile) {
 
     static const int MAX_DIST = 80;
 
+    ParticleSpawner *p_spawner = get_child_by_type(projectile, PARTICLE_SPAWNER);
+
     shakeCamera(30, 15, true, 10);
-    bomb_explode_particles->min_size = to_vec(15000);
-    bomb_explode_particles->max_size = to_vec(28000);
-    bomb_explode_particles->height_accel = -PARTICLE_GRAVITY * 0.1;
-    bomb_explode_particles->fade_scale = true;
-    bomb_explode_particles->affected_by_light = false;
-    bomb_explode_particles->min_speed = 30;
-    bomb_explode_particles->max_speed = 80;
-    bomb_explode_particles->spread = 2;
-    bomb_explode_particles->height_dir = 0.2;
-    bomb_explode_particles->explode_particle_amount = 20;
-    bomb_explode_particles->particle_lifetime = 1.3;
-    bomb_explode_particles->floor_drag = 0.3;
+    p_spawner->min_size = to_vec(15000);
+    p_spawner->max_size = to_vec(28000);
+    p_spawner->height_accel = -PARTICLE_GRAVITY * 0.1;
+    p_spawner->fade_scale = true;
+    p_spawner->affected_by_light = false;
+    p_spawner->min_speed = 30;
+    p_spawner->max_speed = 80;
+    p_spawner->spread = 2;
+    p_spawner->height_dir = 0.2;
+    p_spawner->explode_particle_amount = 20;
+    p_spawner->particle_lifetime = 1.3;
+    p_spawner->floor_drag = 0.3;
     
-    bomb_explode_particles->start_color = GPU_MakeColor(255, 230, 120, 255);
-    bomb_explode_particles->end_color = GPU_MakeColor(255, 230, 120, 255);
+    p_spawner->start_color = GPU_MakeColor(255, 230, 120, 255);
+    p_spawner->end_color = GPU_MakeColor(255, 230, 120, 255);
 
-    bomb_explode_particles->world_node.pos = projectile->entity.world_node.pos;
-    bomb_explode_particles->world_node.height = get_max_height() / 2;
-    particle_spawner_explode(bomb_explode_particles);
+    p_spawner->world_node.pos = projectile->entity.world_node.pos;
+    p_spawner->world_node.height = get_max_height() / 2;
+    particle_spawner_explode(p_spawner);
 
-    bomb_explode_particles->particle_lifetime = 2.5;
-    bomb_explode_particles->start_color = GPU_MakeColor(120, 120, 120, 255);
-    bomb_explode_particles->end_color = GPU_MakeColor(0, 0, 0, 0);
-    bomb_explode_particles->min_size = to_vec(15000);
-    bomb_explode_particles->max_size = to_vec(19000);
-    bomb_explode_particles->min_speed = 100;
-    bomb_explode_particles->max_speed = 150;
+    p_spawner->particle_lifetime = 2.5;
+    p_spawner->start_color = GPU_MakeColor(120, 120, 120, 255);
+    p_spawner->end_color = GPU_MakeColor(0, 0, 0, 0);
+    p_spawner->min_size = to_vec(15000);
+    p_spawner->max_size = to_vec(19000);
+    p_spawner->min_speed = 100;
+    p_spawner->max_speed = 150;
 
-    particle_spawner_explode(bomb_explode_particles);
+    particle_spawner_explode(p_spawner);
 
     play_spatial_sound(bomb_explosion, 0.5, player->world_node.pos, projectile->entity.world_node.pos, 500);
 
@@ -4748,7 +4738,7 @@ void randomize_player_abilities() {
     player->special = NULL;
 }
 
-void entity_tick(Entity *entity, double delta) {
+void Entity_tick(Entity *entity, double delta) {
     // spriteTick(entity->sprite, delta);
 }
 
@@ -5063,12 +5053,15 @@ Entity Entity_new() {
     entity.world_node = new(WorldNode, WORLD_NODE);
     entity.color = Color(255, 255, 255, 255);
 
+    node(&entity)->on_tick = Entity_tick;
+
     return entity;
 }
 
 PlayerEntity PlayerEntity_new() {
     PlayerEntity player_entity = {0};
     player_entity.entity = new(Entity, ENTITY);
+    node(&player_entity)->on_tick = PlayerEntity_tick;
 
     return player_entity;
 }
@@ -5092,6 +5085,8 @@ Sprite Sprite_new(bool is_animated) {
     sprite.texture = NULL;
     sprite.isAnimated = is_animated;
     sprite.current_anim_idx = 0;
+    sprite.color = Color(255, 255, 255, 255);
+    sprite.inherit_color = true;
 
     sprite.node.on_delete = Sprite_delete;
     sprite.node.on_tick = Sprite_tick;
@@ -5111,6 +5106,18 @@ void Sprite_render(Node *node) {
 
     if (node->parent == NULL) return;
 
+    Sprite *sprite = node;
+    SDL_Color color = sprite->color;
+
+    if (sprite->inherit_color) {
+        if (node->parent->type == ENTITY) {
+            Entity *entity = node->parent;
+            color = entity->color;
+        }
+    }
+
+    GPU_SetRGBA(get_sprite_current_texture(sprite), color.r, color.g, color.b, color.a);
+
     if (instanceof(node->parent->type, WORLD_NODE)) {
         WorldNode *parent = node->parent;
 
@@ -5121,6 +5128,9 @@ void Sprite_render(Node *node) {
             affected_by_light = ((Entity *)parent)->affected_by_light;
             custom_color = ((Entity *)parent)->color;
         }
+
+        
+
         renderTexture(get_sprite_current_texture((Sprite *)node), parent->pos, parent->size, parent->height, affected_by_light, custom_color);
     
     } else if (instanceof(node->parent->type, CANVAS_NODE)) {
@@ -5202,7 +5212,35 @@ void ability_tick(Ability *ability, double delta) {
 }
 
 void hand_sprite_tick(Node *node, double delta) {
-    printf("");
+    CanvasNode *self = node;
+
+    Sprite *sprite = get_child_by_type(node, SPRITE);
+
+    sprite->inherit_color = false;
+    
+    BakedLightColor bl_color;
+
+    bool first_check = sprite->current_anim_idx == 0;
+    bool second_check = sprite->current_anim_idx == 1 && sprite->animations[sprite->current_anim_idx].frame > 1;
+    if (first_check || second_check) {
+        bl_color = get_light_color_by_pos(player->world_node.pos, 0, 0);
+        bl_color.r = 0.3 + bl_color.r * 0.7;
+        bl_color.g = 0.3 + bl_color.g * 0.7;
+        bl_color.b = 0.3 + bl_color.b * 0.7;
+    } else {
+        bl_color.r = 2;
+        bl_color.g = 1.8;
+        bl_color.b = 1.5;
+    }
+
+    sprite->color = Color(clamp(bl_color.r * 125, 0, 255), clamp(bl_color.g * 125, 0, 255), clamp(bl_color.b * 125, 0, 255), 255);
+
+    static v2 start_pos = V2(-10000, -10000);
+    if (v2_equal(start_pos, V2(-10000, -10000))) {
+        start_pos = self->pos;
+    }
+
+    self->pos = v2_add(start_pos, player->handOffset);
 }
 
 void init_hand_sprite() {
@@ -5243,15 +5281,26 @@ CanvasNode CanvasNode_new() {
 void CircleCollider_tick(Node *node, double delta) {
     CircleCollider *collider = node;
 
-    if (node->parent != NULL && node->parent->type == WORLD_NODE) {
-        collider->world_node.pos = ((WorldNode *)node->parent)->pos;
-        collider->world_node.height = ((WorldNode *)node->parent)->height;
+    if (node->parent == NULL || !instanceof(node->parent->type, WORLD_NODE)) return;
+
+    collider->world_node.pos = ((WorldNode *)node->parent)->pos;
+    collider->world_node.height = ((WorldNode *)node->parent)->height;
+
+    WorldNode *parent = node->parent;
+
+    CollisionData data = getCircleTileMapCollision(collider);
+
+    if (data.didCollide) {
+        if (collider->on_collide != NULL) {
+            collider->on_collide(collider, data);
+        }
     }
 }
 
 CircleCollider CircleCollider_new(int radius) {
     CircleCollider collider = {.radius = radius};
     collider.world_node = new(WorldNode, WORLD_NODE);
+    collider.on_collide = CircleCollider_default_on_collide;
     node(&collider)->on_tick = CircleCollider_tick;
 
     return collider;
@@ -5382,6 +5431,48 @@ void health_node_tick(Node *node, double delta) {
     v2 scaling_factor = V2(0.68, 0.285);
 
     cnode->size = v2_mul(parent->size, V2(scaling_factor.x * normalized_health, scaling_factor.y));
+}
+
+void CircleCollider_default_on_collide(CircleCollider *collider, CollisionData data) {
+    if (node(collider)->parent == NULL || !instanceof(node(collider)->parent->type, WORLD_NODE)) return;
+
+    WorldNode *parent = node(collider)->parent;
+
+    if (data.didCollide) {
+        parent->pos = v2_add(parent->pos, data.offset);
+    }
+}
+
+
+
+void init_crosshair() {
+    CanvasNode *cnode = alloc(CanvasNode, CANVAS_NODE);
+
+    double s = 16;
+    cnode->size = to_vec(s);
+    cnode->pos = V2(WINDOW_WIDTH / 2 - s / 2, WINDOW_HEIGHT / 2 - s / 2);
+
+    Sprite *sprite = alloc(Sprite, SPRITE, false);
+    sprite->texture = crosshair;
+
+    Node_add_child(cnode, sprite);
+
+    Node_add_child(root_node, cnode);
+}
+
+void _abilities_render(Node *node) {
+    render_ability_helper((v2){WINDOW_WIDTH * 1/16      , WINDOW_HEIGHT * 5/6}, player->primary);
+    render_ability_helper((v2){WINDOW_WIDTH * 1/16 + 80 , WINDOW_HEIGHT * 5/6}, player->secondary);
+    render_ability_helper((v2){WINDOW_WIDTH * 1/16 + 160, WINDOW_HEIGHT * 5/6}, player->utility);
+    render_ability_helper((v2){WINDOW_WIDTH * 1/16 + 240, WINDOW_HEIGHT * 5/6}, player->special);
+}
+
+void init_ability_hud() {
+    CanvasNode *cnode = alloc(CanvasNode, CANVAS_NODE);
+    cnode->node.on_render = _abilities_render;
+
+    Node_add_child(root_node, cnode);
+    
 }
 
 
