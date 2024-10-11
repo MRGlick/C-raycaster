@@ -15,8 +15,8 @@
 
 #define SERVER_IP "127.0.0.1"
 #define SERVER_PORT 1155
-#define TPS 60
-#define FPS 60
+#define TPS 120
+#define FPS 120
 #define WINDOW_WIDTH 1024
 #define WINDOW_HEIGHT 580
 #define RESOLUTION_X 720
@@ -228,7 +228,7 @@ DEF_STRUCT(Node, NODE, {
 
     int type;
 
-    bool freed;
+    bool freed, queued_for_deletion;
 
     struct Node *parent;
     struct Node **children;
@@ -587,7 +587,7 @@ Projectile Projectile_new(double life_time);
 
 void projectile_destroy(Projectile *projectile);
 
-void projectile_tick(Node *node, double delta);
+void Projectile_tick(Node *node, double delta);
 
 void ability_bomb_activate();
 
@@ -3401,9 +3401,6 @@ ParticleSpawner ParticleSpawner_new(v2 pos, double height) {
         .height_dir = 0,
         .accel = (v2){0, 0},
         .height_accel = PARTICLE_GRAVITY,
-        .world_node = new(WorldNode, WORLD_NODE),
-        .world_node.pos = pos,
-        .world_node.height = height,
         .spawn_rate = 20,
         .spread = 0.1,
         .min_speed = 10,
@@ -3420,6 +3417,10 @@ ParticleSpawner ParticleSpawner_new(v2 pos, double height) {
         .affected_by_light = true,
         .explode_particle_amount = 20
     };
+
+    spawner.world_node = new(WorldNode, WORLD_NODE);
+    spawner.world_node.pos = pos;
+    spawner.world_node.height = height;
 
     Sprite sprite;
     sprite.animations = NULL;
@@ -4295,7 +4296,7 @@ void on_client_recv(MPPacket packet, void *data) {
             PlayerEntity *player_entity = node;
 
             if (player_entity->id == packet_data->id) {
-                Node_delete(node);
+                Node_queue_deletion(node);
                 return;
             }
         });
@@ -4494,11 +4495,12 @@ void ability_bomb_activate() {
 
     Node_add_child(game_node, bomb);
 
-    MPPacket packet = {.type = PACKET_ABILITY_BOMB, .len = sizeof(struct ability_bomb_packet), .is_broadcast = true};
 
-    struct ability_bomb_packet packet_data = {.pos = bomb->entity.world_node.pos, .height = bomb->entity.world_node.height, .vel = bomb->vel, .height_vel = bomb->height_vel, .sender_id = client_self_id};
+    // MPPacket packet = {.type = PACKET_ABILITY_BOMB, .len = sizeof(struct ability_bomb_packet), .is_broadcast = true};
 
-    MPClient_send(packet, &packet_data);
+    // struct ability_bomb_packet packet_data = {.pos = bomb->entity.world_node.pos, .height = bomb->entity.world_node.height, .vel = bomb->vel, .height_vel = bomb->height_vel, .sender_id = client_self_id};
+
+    // MPClient_send(packet, &packet_data);
 
 
 }
@@ -4520,7 +4522,7 @@ Ability ability_bomb_create() {
     return ability;
 }
 
-void projectile_tick(Node *node, double delta) {
+void Projectile_tick(Node *node, double delta) {
 
     Projectile *projectile = node;
 
@@ -4551,7 +4553,8 @@ void projectile_tick(Node *node, double delta) {
 
     projectile->life_timer -= delta;
     if (projectile->life_timer <= 0) {
-        projectile_destroy(projectile);
+        //projectile_destroy(projectile);
+        Node_delete(node);
         return;
     }
     
@@ -4559,14 +4562,16 @@ void projectile_tick(Node *node, double delta) {
 
     // spriteTick(projectile->entity.sprite, delta);
 
-    if (projectile->on_tick != NULL) {
+    if (projectile->on_tick != NULL && !node->queued_for_deletion) {
         projectile->on_tick(projectile, delta);
     }
-
 
 }
 
 void projectile_destroy(Projectile *projectile) {
+
+    if (node(projectile)->freed || node(projectile)->queued_for_deletion) return;
+
     if (projectile->on_destruction != NULL) {
         projectile->on_destruction(projectile);
     }
@@ -4579,7 +4584,7 @@ Projectile Projectile_new(double life_time) {
 
     projectile.entity = new(Entity, ENTITY);
 
-    node(&projectile)->on_tick = projectile_tick;
+    node(&projectile)->on_tick = Projectile_tick;
     
 
     projectile.life_time = life_time;
@@ -4605,13 +4610,15 @@ Projectile *create_bomb_projectile(v2 pos, v2 start_vel) {
     projectile->vel = v2_add(start_vel, v2_mul(player->vel, to_vec(0.5)));
     projectile->height_vel = (is_player_on_floor()? 0 : player->height_vel * 0.5) + player->pitch * -3;
     projectile->entity.world_node.size = to_vec(8000);
-    projectile->on_destruction = bomb_on_destroy;
-    projectile->on_tick = bomb_on_tick;
+    projectile->on_destruction = NULL;//bomb_on_destroy;
+    projectile->on_tick = NULL;//bomb_on_tick;
 
-    Node_add_child(projectile, alloc(ParticleSpawner, PARTICLE_SPAWNER, V2_ZERO, 0));
+    //Node_add_child(projectile, alloc(ParticleSpawner, PARTICLE_SPAWNER, V2_ZERO, 0));
 
     Sprite *sprite = alloc(Sprite, SPRITE, true);
     array_append(sprite->animations, create_animation(2, 1, bomb_anim));
+    sprite->animations[0].loop = true;
+    sprite->animations[0].fps = 12;
     spritePlayAnim(sprite, 0);
 
     Node_add_child(projectile, sprite);
@@ -4623,38 +4630,41 @@ void bomb_on_destroy(Projectile *projectile) {
 
     static const int MAX_DIST = 80;
 
-    ParticleSpawner *p_spawner = get_child_by_type(projectile, PARTICLE_SPAWNER);
+    // ParticleSpawner *p_spawner = get_child_by_type(projectile, PARTICLE_SPAWNER);
+    // if (p_spawner == NULL) {
+    //     commit_sudoku();
+    // }
 
-    shakeCamera(30, 15, true, 10);
-    p_spawner->min_size = to_vec(15000);
-    p_spawner->max_size = to_vec(28000);
-    p_spawner->height_accel = -PARTICLE_GRAVITY * 0.1;
-    p_spawner->fade_scale = true;
-    p_spawner->affected_by_light = false;
-    p_spawner->min_speed = 30;
-    p_spawner->max_speed = 80;
-    p_spawner->spread = 2;
-    p_spawner->height_dir = 0.2;
-    p_spawner->explode_particle_amount = 20;
-    p_spawner->particle_lifetime = 1.3;
-    p_spawner->floor_drag = 0.3;
+    // shakeCamera(30, 15, true, 10);
+    // p_spawner->min_size = to_vec(15000);
+    // p_spawner->max_size = to_vec(28000);
+    // p_spawner->height_accel = -PARTICLE_GRAVITY * 0.1;
+    // p_spawner->fade_scale = true;
+    // p_spawner->affected_by_light = false;
+    // p_spawner->min_speed = 30;
+    // p_spawner->max_speed = 80;
+    // p_spawner->spread = 2;
+    // p_spawner->height_dir = 0.2;
+    // p_spawner->explode_particle_amount = 20;
+    // p_spawner->particle_lifetime = 1.3;
+    // p_spawner->floor_drag = 0.3;
     
-    p_spawner->start_color = GPU_MakeColor(255, 230, 120, 255);
-    p_spawner->end_color = GPU_MakeColor(255, 230, 120, 255);
+    // p_spawner->start_color = GPU_MakeColor(255, 230, 120, 255);
+    // p_spawner->end_color = GPU_MakeColor(255, 230, 120, 255);
 
-    p_spawner->world_node.pos = projectile->entity.world_node.pos;
-    p_spawner->world_node.height = get_max_height() / 2;
-    particle_spawner_explode(p_spawner);
+    // p_spawner->world_node.pos = projectile->entity.world_node.pos;
+    // p_spawner->world_node.height = get_max_height() / 2;
+    // particle_spawner_explode(p_spawner);
 
-    p_spawner->particle_lifetime = 2.5;
-    p_spawner->start_color = GPU_MakeColor(120, 120, 120, 255);
-    p_spawner->end_color = GPU_MakeColor(0, 0, 0, 0);
-    p_spawner->min_size = to_vec(15000);
-    p_spawner->max_size = to_vec(19000);
-    p_spawner->min_speed = 100;
-    p_spawner->max_speed = 150;
+    // p_spawner->particle_lifetime = 2.5;
+    // p_spawner->start_color = GPU_MakeColor(120, 120, 120, 255);
+    // p_spawner->end_color = GPU_MakeColor(0, 0, 0, 0);
+    // p_spawner->min_size = to_vec(15000);
+    // p_spawner->max_size = to_vec(19000);
+    // p_spawner->min_speed = 100;
+    // p_spawner->max_speed = 150;
 
-    particle_spawner_explode(p_spawner);
+    // particle_spawner_explode(p_spawner);
 
     play_spatial_sound(bomb_explosion, 0.5, player->world_node.pos, projectile->entity.world_node.pos, 500);
 
@@ -4692,6 +4702,8 @@ void bomb_on_destroy(Projectile *projectile) {
             player_entity_take_dmg(player_entity, dmg);
         }
     });
+
+    printf("Hello,m world! \n");
 }
 
 Ability pick_random_ability_from_array(Ability arr[], int size) {
@@ -4708,8 +4720,8 @@ void randomize_player_abilities() {
     //Ability *default_special = malloc(sizeof(Ability));
 
     Ability primary_choices[] = {ability_primary_shoot_create()};
-    Ability secondary_choices[] = {ability_secondary_shoot_create(), ability_bomb_create()};
-    Ability utility_choices[] = {ability_dash_create(), ability_forcefield_create()};
+    Ability secondary_choices[] = {ability_bomb_create()};
+    Ability utility_choices[] = {ability_dash_create()};
     //Ability speical_choices[] = {};
 
     *default_primary = pick_random_ability_from_array(primary_choices, sizeof(primary_choices) / sizeof(Ability));
@@ -4743,7 +4755,11 @@ void Entity_tick(Entity *entity, double delta) {
 }
 
 void bomb_on_tick(Projectile *projectile, double delta) {
-
+    
+    
+    return;
+    
+    
     CircleCollider *player_collider = get_child_by_type(player, CIRCLE_COLLIDER);
     CircleCollider *proj_collider = get_child_by_type(projectile, CIRCLE_COLLIDER);
 
@@ -4881,6 +4897,16 @@ void Node_delete(Node *node) {
     if (node->freed) return;
 
     if (node->on_delete != NULL) node->on_delete(node);
+    
+    
+    for (int i = array_length(node->children) - 1; i >= 0; i--) {
+        Node_delete(node->children[i]);
+    }
+
+    if (node->parent != NULL) {
+        Node_remove_child(node->parent, node);
+        node->parent = NULL;
+    }
 
     node->freed = true;
 
@@ -4890,17 +4916,10 @@ void Node_delete(Node *node) {
     node->on_tick = NULL;
     node->type = -1;
 
-    while (array_length(node->children) != 0) {
-        Node_delete(node->children[0]);
-    }
 
-    if (node->parent != NULL) {
-        Node_remove_child(node->parent, node);
-        node->parent = NULL;
-    }
     
 
-    free(node->children);
+    array_free(node->children);
     node->children = NULL;
     free(node);
 }
@@ -4916,20 +4935,7 @@ void Node_add_child(Node *parent, Node *child) {
 
 void Node_tick(Node *node, double delta) {
 
-    if (node == NULL) return;
-
-    int a = 0;
-
-    if (node->type == SPRITE) {
-        printf("Is sprite. \n");
-        a = 1;
-    } else if (node->type == EFFECT) {
-        printf("Is effect \n");
-        a = 2;
-    } else if (node->type == NODE) {
-        printf("Is node \n");
-        a = 3;
-    }
+    if (node == NULL || node->freed || node->queued_for_deletion) return;
 
     if (node->on_tick != NULL) {
         node->on_tick(node, delta);
@@ -4944,15 +4950,12 @@ void Node_tick(Node *node, double delta) {
 
 
 void Node_render(Node *node) {
-    if (node != NULL && node->on_render != NULL) {
+    if (node == NULL || node->freed || node->queued_for_deletion) return;
+    
+    
+    if (node->on_render != NULL) {
         node->on_render(node);
     }
-
-    // for (int i = 0; i < array_length(node->children); i++) {
-    //     if (node->children[i]->on_render != NULL) {
-    //         node->children[i]->on_render(node->children[i]);
-    //     }
-    // }
 }
 
 Tilemap Tilemap_new() {
@@ -4971,12 +4974,20 @@ Tilemap Tilemap_new() {
 }
 
 void Node_remove_child(Node *parent, Node *child) {
-    for (int i = 0; i < array_length(parent->children); i++) {
+
+    ArrayHeader *header = array_header(parent->children);
+
+    int l = header->length;
+
+    for (int i = 0; i < l; i++) {
         if (parent->children[i] == child) {
             array_remove(parent->children, i);
+            child->parent = NULL;
             return;
         }
     }
+    // Child doesnt exist
+    commit_sudoku();
 }
 
 Renderer Renderer_new() {
@@ -5319,6 +5330,8 @@ Node *get_child_by_type(Node *parent, int child_type) {
 }
 
 void Node_queue_deletion(Node *node) {
+    if (node->queued_for_deletion) return;
+    node->queued_for_deletion = true;
     array_append(deletion_queue, node);
 }
 
