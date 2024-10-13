@@ -432,6 +432,7 @@ DEF_STRUCT(Node, NODE, {
     DEF_STRUCT(CanvasNode, CANVAS_NODE, {
         Node node;
         v2 pos, size;
+        int z_index;
     });
 
     END_STRUCT(CANVAS_NODE);
@@ -648,11 +649,11 @@ void ability_dash_tick(Ability *ability, double delta);
 
 void place_entity(v2 pos, int type);
 
-void particle_tick(Particle *particle, double delta);
+void Particle_tick(Node *node, double delta);
 
 void particle_spawner_spawn(ParticleSpawner *spawner);
 
-void particle_spawner_tick(ParticleSpawner *spawner, double delta);
+void particle_spawner_tick(Node *node, double delta);
 
 ParticleSpawner ParticleSpawner_new(v2 pos, double height);
 
@@ -850,7 +851,6 @@ int bloom_shader;
 GPU_ShaderBlock bloom_shader_block;
 
 // #PARTICLES (the global ones)
-ParticleSpawner *player_hit_particles;
 ParticleSpawner *bomb_explode_particles;
 
 // #ROOMGEN
@@ -942,6 +942,22 @@ const double PLAYER_SHOOT_COOLDOWN = 0.5;
 // #VAR END
 
 // #DEBUG VAR
+
+void test1() {
+    Node *node = alloc(Node, NODE);
+
+    int count = 0;
+    while (count++ < 5900) {
+
+        
+        Node_add_child(node, alloc(Node, NODE));
+        
+        printf("Node has %d remaining children. \n", array_length(node->children));
+    }
+
+
+    exit(1);
+}
 
 
 // #MAIN
@@ -1073,6 +1089,8 @@ int main(int argc, char *argv[]) {
 
 void init() {  // #INIT
 
+    //test1();
+
     bomb_explosion = create_sound("Sounds/explosion.wav");
 
     randomize();
@@ -1089,22 +1107,22 @@ void init() {  // #INIT
     bomb_explode_particles = malloc(sizeof(ParticleSpawner));
     *bomb_explode_particles = ParticleSpawner_new(V2_ZERO, 0);
 
-    player_hit_particles = malloc(sizeof(ParticleSpawner));
-    *player_hit_particles = ParticleSpawner_new(V2_ZERO, 0);
-    player_hit_particles->spread = 2;
-    player_hit_particles->dir = (v2){0.5, 1};
-    player_hit_particles->min_size = to_vec(1000);
-    player_hit_particles->max_size = to_vec(2000);
-    player_hit_particles->min_speed = 70;
-    player_hit_particles->max_speed = 160;
-    player_hit_particles->target = NULL;
-    player_hit_particles->sprite = (Sprite){.isAnimated = false, .texture = blood_particle};
-    player_hit_particles->start_color = (SDL_Color){255, 255, 255, 255};
-    player_hit_particles->end_color = (SDL_Color){255, 180, 180, 255};
-    player_hit_particles->height_dir = 1;
-    player_hit_particles->particle_lifetime = 1.5;
-    player_hit_particles->bounciness = 0.1;
-    player_hit_particles->floor_drag = 0.4;
+    // player_hit_particles = malloc(sizeof(ParticleSpawner));
+    // *player_hit_particles = ParticleSpawner_new(V2_ZERO, 0);
+    // player_hit_particles->spread = 2;
+    // player_hit_particles->dir = (v2){0.5, 1};
+    // player_hit_particles->min_size = to_vec(1000);
+    // player_hit_particles->max_size = to_vec(2000);
+    // player_hit_particles->min_speed = 70;
+    // player_hit_particles->max_speed = 160;
+    // player_hit_particles->target = NULL;
+    // player_hit_particles->sprite = (Sprite){.isAnimated = false, .texture = blood_particle};
+    // player_hit_particles->start_color = (SDL_Color){255, 255, 255, 255};
+    // player_hit_particles->end_color = (SDL_Color){255, 180, 180, 255};
+    // player_hit_particles->height_dir = 1;
+    // player_hit_particles->particle_lifetime = 1.5;
+    // player_hit_particles->bounciness = 0.1;
+    // player_hit_particles->floor_drag = 0.4;
 
 
     rapidfire_sound = create_sound("Sounds/shotgun_ability.wav");
@@ -1405,9 +1423,10 @@ void tick(double delta) {
 
     Node_tick(root_node, delta);
 
-    for (int i = array_length(deletion_queue) - 1; i >= 0; i--) {
-        Node_delete(deletion_queue[i]);
-        array_remove(deletion_queue, i);
+    // printf("Deletion queue length: %d \n", array_length(deletion_queue));
+
+    while (array_length(deletion_queue) > 0) {
+        Node_delete(deletion_queue[0]);
     }
 
     //printf("tick start");
@@ -1459,14 +1478,6 @@ void tick(double delta) {
     // cameraOffset = v2_lerp(cameraOffset, to_vec(0), 0.2);
 
 
-    // spriteTick(leftHandSprite, delta);
-
-    // for (int i = 0; i < game_objects->length; i++) {
-    //     obj *object = arraylist_get(game_objects, i);
-    //     objectTick(object->val, object->type, delta);
-    // }
-
-
     // if (queued_player_death) {
     //     queued_player_death = false;
     //     _player_die();
@@ -1476,26 +1487,6 @@ void tick(double delta) {
 // for slower decay, make 'a' smaller.
 double distance_to_color(double distance, double a) {
     return exp(-a * distance);
-}
-
-void renderDebug() {  // #DEBUG
-    int tile_size = WINDOW_HEIGHT / (ROOM_HEIGHT * DUNGEON_SIZE);
-
-    for (int r = 0; r < ROOM_HEIGHT * DUNGEON_SIZE; r++) {
-        for (int c = 0; c < ROOM_WIDTH * DUNGEON_SIZE; c++) {
-            bool is_wall = tilemap->level_tilemap[r][c] == -1? 0 : 1;
-            bool is_floor_light = tilemap->floor_tilemap[r][c] == P_FLOOR_LIGHT? true : false;
-
-            if (is_wall) {
-                GPU_RectangleFilled2(screen, (GPU_Rect){c * tile_size / 2, r * tile_size / 2, tile_size / 2, tile_size / 2}, GPU_MakeColor(255 * is_floor_light, 255, 255, 255));
-            } else {
-                GPU_RectangleFilled2(screen, (GPU_Rect){c * tile_size / 2, r * tile_size / 2, tile_size, tile_size / 2}, GPU_MakeColor(255 * is_floor_light, 0, 0, 255));
-            }  
-        }
-    }
-
-    GPU_RectangleFilled2(screen, (GPU_Rect){player->world_node.pos.x / tileSize * tile_size, player->world_node.pos.y / tileSize * tile_size, tile_size / 2, tile_size / 2}, GPU_MakeColor(255, 0, 0, 255));
-    
 }
 
 v2 getRayDirByIdx(int i) {
@@ -1557,7 +1548,7 @@ v2 worldToScreen(v2 pos, double height, bool allow_out_of_screen) { // gotta ref
 
     double fov_factor = tanHalfStartFOV / tanHalfFOV;
     double wallSize = WALL_HEIGHT * WALL_HEIGHT_MULTIPLIER * WINDOW_HEIGHT / dist_to_viewplane * fov_factor;
-    double y_pos = WINDOW_HEIGHT / 2 + wallSize / 2 - ((height - get_player_height()) + WINDOW_HEIGHT / 2) / dist_to_viewplane;
+    double y_pos = WINDOW_HEIGHT / 2 + wallSize / 2 - ((height - get_player_height() + get_max_height() / 2) + WINDOW_HEIGHT / 2) / dist_to_viewplane;
 
     x_pos += cameraOffset.x;
     y_pos += -player->pitch + cameraOffset.y;
@@ -1663,14 +1654,6 @@ void render_floor_and_ceiling() {
 
 
     GPU_DeactivateShaderProgram();
-    return;
-
-
-
-    
-    
-    
-    //GPU_DeactivateShaderProgram();
 }
 
 void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affected_by_light, SDL_Color custom_color) {
@@ -1681,13 +1664,8 @@ void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affe
     if (v2_equal(screen_pos, OUT_OF_SCREEN_POS)) {
         return;
     }
-    // double cos_angle_to_forward = v2_cos_angle_between(playerForward, v2_sub(pos, player->world_node.pos));
 
     double dist_to_player = v2_distance(pos, player->world_node.pos);
-
-    // double dist_to_viewplane = dist_to_player * cos_angle_to_forward;
-
-    // double fov_factor = tanHalfFOV / tanHalfStartFOV;
 
     v2 final_size = world_to_screen_size(size, pos, height);
 
@@ -1737,14 +1715,6 @@ void renderDirSprite(DirectionalSprite *dSprite, v2 pos, v2 size, double height)
     renderTexture(texture, pos, size, height, true, (SDL_Color){255, 255, 255, 255});
 }
 
-void renderEntity(Entity entity) {  // RENDER ENTITY
-    // GPU_Image *texture = get_sprite_current_texture(entity.sprite);
-
-    // GPU_SetRGBA(texture, entity.color.r, entity.color.g, entity.color.b, 20);
-
-    // renderTexture(texture, entity.world_node.pos, entity.world_node.size, entity.world_node.height, entity.affected_by_light, entity.color);
-}
-
 RenderObject getWallStripe(int i) {
     v2 ray_dir = getRayDirByIdx(i);
 
@@ -1781,11 +1751,6 @@ RenderObject getWallStripe(int i) {
 
     return currentRenderObj;
 }
-
-typedef struct WallThreadData {
-    int idx;
-    arraylist *targetlist;
-} WallThreadData;
 
 int addWallStripes_Threaded(void *data) {
     int idx = *(int *)data;
@@ -1827,29 +1792,84 @@ RenderObject *get_render_list() {
         array_append(renderList, wallStripesToRender[i]);
     }
 
-    iter_over_all_nodes(node, {
-
-        RenderObject render_object = (RenderObject){.isnull = false};
-        v2 pos = V2_ZERO;
-        
-        if (instanceof(node->type, WORLD_NODE)) {
-
-            pos = ((WorldNode *)node)->pos;
-
+    do { 
+        Node **node_arr = get_all_nodes_array(); 
+        for (int name_i_wont_use = 0; name_i_wont_use < array_length(node_arr); name_i_wont_use++) { 
+            Node *node = node_arr[name_i_wont_use]; 
+            { 
+                RenderObject render_object = (RenderObject){.isnull = 0}; 
+                v2 pos = ((v2){0, 0}); 
+                bool custom_dist = 0; 
+                if ((node->type >= WORLD_NODE && node->type <= WORLD_NODE_END)) { 
+                    pos = ((WorldNode *)node)->pos; 
+                } 
+                if ((node->type >= SPRITE && node->type <= SPRITE_END)) { 
+                    if (node->parent != ((void *)0)) { 
+                        if ((node->parent->type >= WORLD_NODE && node->parent->type <= WORLD_NODE_END)) { 
+                            pos = ((WorldNode *)node->parent)->pos; 
+                        } else if ((node->parent->type >= CANVAS_NODE && node->parent->type <= CANVAS_NODE_END)) { 
+                            custom_dist = 1; 
+                            render_object.dist_squared = ((CanvasNode *)node->parent)->z_index + 9999; 
+                        } 
+                    } 
+                } 
+                if ((node->type >= CANVAS_NODE && node->type <= CANVAS_NODE_END) && node->parent == ((void*)0)) { 
+                    custom_dist = 1; 
+                    render_object.dist_squared = ((CanvasNode *)node->parent)->z_index + 9999; 
+                }
+                 if (!custom_dist) { 
+                    render_object.dist_squared = v2_distance_squared(pos, player->world_node.pos); 
+                } render_object.val = node; 
+                render_object.type = NODE; 
+                do { 
+                    _array_ensure_capacity((void **)&(renderList)); 
+                    renderList[array_length(renderList)] = render_object; 
+                    array_header(renderList)->length++; 
+                } while (0); 
+            } 
         }
-        if (instanceof(node->type, SPRITE)) {
-            if (node->parent != NULL && instanceof(node->parent->type, WORLD_NODE)) {
-                pos = ((WorldNode *)node->parent)->pos;
-            }
-        }
+        array_free(node_arr); 
+    } while(0);
 
-        render_object.dist_squared = v2_distance_squared(pos, player->world_node.pos);
-        render_object.val = node;
-        render_object.type = NODE;
+    // iter_over_all_nodes(node, {
+
+    //     RenderObject render_object = (RenderObject){.isnull = false};
+    //     v2 pos = V2_ZERO;
+
+    //     bool custom_dist = false;
         
-        array_append(renderList, render_object);
+    //     if (instanceof(node->type, WORLD_NODE)) {
+
+    //         pos = ((WorldNode *)node)->pos;
+
+    //     }
+    //     if (instanceof(node->type, SPRITE)) {
+    //         if (node->parent != NULL) {
+                
+    //             if (instanceof(node->parent->type, WORLD_NODE)) {
+    //                 pos = ((WorldNode *)node->parent)->pos;
+    //             } else if (instanceof(node->parent->type, CANVAS_NODE)) {
+    //                 custom_dist = true;
+    //                 render_object.dist_squared = ((CanvasNode *)node->parent)->z_index + 9999; // for negative z index, will probably do something about this later
+    //             }
+                
+    //         }
+    //     }
+
+    //     if (instanceof(node->type, CANVAS_NODE)) {
+    //         custom_dist = true;
+    //         render_object.dist_squared = ((CanvasNode *)node->parent)->z_index + 9999; // for negative z index, will probably do something about this later
+    //     }
+
+    //     if (!custom_dist) {
+    //         render_object.dist_squared = v2_distance_squared(pos, player->world_node.pos);
+    //     }
+    //     render_object.val = node;
+    //     render_object.type = NODE;
         
-    });
+    //     array_append(renderList, render_object);
+        
+    // });
 
     int l = array_length(renderList);
 
@@ -1859,14 +1879,18 @@ RenderObject *get_render_list() {
 }
 
 void clampColors(int rgb[3]) {
-    int max_idx = 0;
-    for (int i = 1; i < 3; i++) if (rgb[i] > rgb[max_idx]) max_idx = i;
+    // int max_idx = 0;
+    // for (int i = 1; i < 3; i++) if (rgb[i] > rgb[max_idx]) max_idx = i;
 
-    if (rgb[max_idx] >= 255) {
-        double divisor = (double)rgb[max_idx] / 255;
-        for (int i = 0; i < 3; i++) {
-            rgb[i] /= divisor;   
-        }
+    // if (rgb[max_idx] >= 255) {
+    //     double divisor = (double)rgb[max_idx] / 255;
+    //     for (int i = 0; i < 3; i++) {
+    //         rgb[i] /= divisor;   
+    //     }
+    // }
+
+    for (int i = 0; i < 3; i++) {
+        rgb[i] = SDL_clamp(rgb[i], 0, 255);
     }
 }
 
@@ -1890,7 +1914,7 @@ void renderWallStripe(WallStripe *stripe) {
         WINDOW_WIDTH / RESOLUTION_X + 1,
         stripe->size
     };
-    
+
 
     BakedLightColor baked_light_color = get_light_color_by_pos(v2_add(stripe->pos, v2_mul(stripe->normal, to_vec(0.5))), 0, 0);
 
@@ -1899,10 +1923,13 @@ void renderWallStripe(WallStripe *stripe) {
     double brightness = SDL_clamp(stripe->brightness + baked_light_brightness / 2, 0, 1);
     // baked lights
     
+    // because it looks kinda ass
+    double normal_modifier = 0;//v2_get_angle(stripe->normal) * 10;
+
     int rgb[3] = {
-        125 * baked_light_color.r * brightness,
-        125 * baked_light_color.g * brightness,
-        125 * baked_light_color.b * brightness
+        125 * baked_light_color.r * brightness + normal_modifier,
+        125 * baked_light_color.g * brightness + normal_modifier,
+        125 * baked_light_color.b * brightness + normal_modifier
     };
     
     clampColors(rgb);
@@ -1913,10 +1940,6 @@ void renderWallStripe(WallStripe *stripe) {
     GPU_SetRGB(texture, rgb[0], rgb[1], rgb[2]);
     GPU_BlitRect(texture, &srcRect, screen, &dstRect);
 
-    // GPU_Rectangle(screen, dstRect.x, dstRect.y, dstRect.x + dstRect.w, dstRect.y + dstRect.h, GPU_MakeColor(255, 0, 0, 255));
-
-    // SDL_SetTextureColorMod(texture, rgb[0], rgb[1], rgb[2]);
-    // GPU_BlitRect(texture, &srcRect, &dstRect);
     free(stripe);
 }
 
@@ -1932,82 +1955,6 @@ BakedLightColor get_light_color_by_pos(v2 pos, int row_offset, int col_offset) {
     } else {
         return (BakedLightColor){ambient_light, ambient_light, ambient_light};
     }
-}
-
-void render_hand() {
-
-    GPU_Rect leftHandRect = {player->handOffset.x + cameraOffset.x, player->handOffset.y + cameraOffset.y, WINDOW_WIDTH, WINDOW_HEIGHT};
-
-    BakedLightColor baked_light_color;
-
-    Animation current_anim = leftHandSprite->animations[leftHandSprite->current_anim_idx];
-    int current_anim_idx = leftHandSprite->current_anim_idx;
-
-    bool first_check = current_anim_idx == 0;
-    bool second_check = current_anim_idx == 1 && current_anim.frame > 1;
-    if (first_check || second_check) {
-        baked_light_color = get_light_color_by_pos(player->world_node.pos, 0, 0);
-        baked_light_color.r = 0.3 + baked_light_color.r * 0.7;
-        baked_light_color.g = 0.3 + baked_light_color.g * 0.7;
-        baked_light_color.b = 0.3 + baked_light_color.b * 0.7;
-    } else {
-        baked_light_color.r = 2;
-        baked_light_color.g = 1.8;
-        baked_light_color.b = 1.5;
-    }
-
-    GPU_Image *texture = get_sprite_current_texture(leftHandSprite);
-    
-
-    if (texture != NULL) {
-        int rgb[3] = {
-            baked_light_color.r * 125,
-            baked_light_color.g * 125,
-            baked_light_color.b * 125
-        };
-
-        clampColors(rgb);
- 
-        GPU_SetRGB(texture, rgb[0], rgb[1], rgb[2]);
-        GPU_BlitRect(texture, NULL, hud, &leftHandRect);
-    }
-}
-
-void render_health_bar() {
-    
-    v2 tex_size = get_texture_size(healthbar_texture);
-
-    v2 scale = {3, 3};
-
-    GPU_Rect outline_rect = {
-        0,
-        0,
-        tex_size.x * scale.x,
-        tex_size.y * scale.y 
-    };
-
-    GPU_Rect health_rect = {
-        16 * scale.x,
-        18 * scale.y,
-        78 * scale.x * ((double)player->health / player->maxHealth),
-        11 * scale.y
-    };
-
-    GPU_Rect health_bg_rect = {
-        16 * scale.x,
-        18 * scale.y,
-        78 * scale.x,
-        11 * scale.y
-    };
-
-    // SDL_SetRenderDrawColor(renderer, 200, 0, 0, 255);
-
-    // 180d2f
-
-    GPU_RectangleFilled2(screen, health_bg_rect, (SDL_Color){24, 13, 47, 255});
-    GPU_RectangleFilled2(screen, health_rect, (SDL_Color){200, 0, 0, 255});
-
-    GPU_BlitRect(healthbar_texture, NULL, hud, &outline_rect);
 }
 
 void render_ability_helper(v2 pos, Ability *ability) {
@@ -2054,33 +2001,6 @@ void render_ability_hud() {
     render_ability_helper((v2){WINDOW_WIDTH * 1/16 + 240, WINDOW_HEIGHT * 5/6}, player->special);
 }
 
-
-void renderHUD() {
-
-    // GPU_BlitRect(get_sprite_current_texture(dash_anim_sprite), NULL, hud, NULL);
-    // spriteTick(dash_anim_sprite, delta);
-
-    // GPU_SetRGB(vignette_texture, vignette_color.r, vignette_color.g, vignette_color.b);
-    // GPU_BlitRect(vignette_texture, NULL, hud, NULL);
-
-    render_hand();
-
-    render_health_bar();
-
-    render_ability_hud();
-
-    GPU_Rect crosshairRect = {WINDOW_WIDTH / 2 - 8, WINDOW_HEIGHT / 2 - 8, 16, 16};
-
-    GPU_BlitRect(crosshair, NULL, hud, &crosshairRect);
-
-    int shots = max(player->pendingShots, (int)(player->shootChargeTimer * 3));
-
-    GPU_Rect playerPendingShotsRect = {WINDOW_WIDTH / 2 + -10 * shots, WINDOW_HEIGHT * 0.8, 20 * shots, WINDOW_HEIGHT * 0.05};
-
-    UI_render(hud, UI_get_root());
-
-}
-
 void drawSkybox() {
     GPU_Image *tex = skybox_texture;
 
@@ -2115,54 +2035,6 @@ void render(double delta) {  // #RENDER
 
     Node_render(renderer);
 
-    // //printf("render start \n");
-
-
-
-    // // SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-
-    // RenderObject *renderList = get_render_list();
-
-    // render_floor_and_ceiling();
-
-    // for (int i = 0; i < array_length(renderList); i++) {
-    //     RenderObject rObj = renderList[i];
-    //     if (rObj.isnull) {
-    //         continue;
-    //     }
-
-    //     switch (rObj.type) {
-    //         case (int)ENTITY:
-    //             renderEntity(*(Entity *)rObj.val);
-    //             break;
-    //         case (int)WALL_STRIPE:
-    //             renderWallStripe((WallStripe *)rObj.val);
-    //             break;
-    //         case (int)BULLET:;
-    //             Bullet *bullet = rObj.val;
-    //             if (bullet->dirSprite != NULL) {
-    //                 renderDirSprite(bullet->dirSprite, bullet->entity.world_node.pos, bullet->entity.world_node.size, bullet->entity.world_node.height);
-    //             } else {
-    //                 renderEntity(bullet->entity);
-    //             }
-    //             break;
-    //         case (int)PLAYER_ENTITY: ;
-    //             PlayerEntity *player_entity = rObj.val;
-    //             renderDirSprite(player_entity->dir_sprite, player_entity->entity.world_node.pos, player_entity->entity.world_node.size, player_entity->entity.world_node.height);
-    //             break;
-    //     }
-    // }
-
-    // array_free(renderList);
-
-    // if (render_debug) renderDebug();
-
-    // renderHUD(delta);
-
-    // screen_modulate_r = lerp(screen_modulate_r, 1, delta / 2);
-    // screen_modulate_g = lerp(screen_modulate_g, 1, delta / 2);
-    // screen_modulate_b = lerp(screen_modulate_b, 1, delta / 2);
-
     GPU_ActivateShaderProgram(bloom_shader, &bloom_shader_block);
 
     GPU_SetShaderImage(screen_image, GPU_GetUniformLocation(bloom_shader, "tex"), 1);
@@ -2171,7 +2043,9 @@ void render(double delta) {  // #RENDER
 
     GPU_SetUniformfv(GPU_GetUniformLocation(bloom_shader, "texResolution"), 2, 1, res);
 
+
     GPU_Blit(screen_image, NULL, actual_screen, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
+
 
     GPU_DeactivateShaderProgram();
 
@@ -2187,6 +2061,19 @@ void init_player(v2 pos) {
     player->world_node = new(WorldNode, WORLD_NODE);
     player->world_node.node.on_tick = player_tick;
     player->world_node.node.type = PLAYER;
+
+    ParticleSpawner *s = alloc(ParticleSpawner, PARTICLE_SPAWNER, V2_ZERO, 0);
+    s->particle_lifetime = 5;
+    s->active = true;
+    s->min_size = to_vec(8000);
+    s->max_size = to_vec(8000);
+    s->height_accel = 0;
+    s->start_color = Color(255, 255, 255, 255);
+    s->end_color = Color(255, 255, 255, 255);
+    s->spawn_rate = 1;
+    s->affected_by_light = true;
+
+    Node_add_child(player, s);
 
     Node_add_child(player, alloc(CircleCollider, CIRCLE_COLLIDER, PLAYER_COLLIDER_RADIUS));
 
@@ -2211,6 +2098,14 @@ void init_player(v2 pos) {
     player->world_node.height = player->tallness;
     player->height_vel = 0;
     player->crouching = false;
+
+    player->handOffset = V2_ZERO;
+    player->pitch = 0;
+
+    player->primary = NULL;
+    player->secondary = NULL;
+    player->utility = NULL;
+    player->special = NULL;
 
     randomize_player_abilities();
 }
@@ -2613,6 +2508,7 @@ void Effect_tick(Node *node, double delta) {
 
     effect->life_timer -= delta;
     if (effect->life_timer <= 0) {
+        printf("effect ran out \n");
         Node_queue_deletion(node);
         return;
     }
@@ -2897,52 +2793,60 @@ void bake_lights() {
             const int calc_tile_size = BAKED_LIGHT_RESOLUTION / CALC_RES;
 
             int k = array_length(game_node->children);
+            
+            int light_count = 0;
+            int total_nodes_count = 0;
 
             iter_over_all_nodes(node, {
 
-                    if (node->type != LIGHT_POINT) {
-                        continue;
-                    }
-                    LightPoint *point = node;
+                total_nodes_count++;
 
-                    v2 current_pos = v2_mul(v2_div((v2){c, r}, to_vec(BAKED_LIGHT_RESOLUTION)), to_vec(tileSize));
-                    if (abs(current_pos.x - point->pos.x) > point->radius || abs(current_pos.y - point->pos.y) > point->radius) continue;
-
-                    double dist_to_point = v2_distance(point->pos, current_pos);
-
-                    if (dist_to_point > point->radius) continue;
-
-                    v2 dir = v2_div(v2_sub(point->pos, current_pos), to_vec(dist_to_point));
-
-                    RayCollisionData data = castRay(current_pos, dir);
-
-                    BakedLightColor col = {0, 0, 0};
-
-                    if (!data.hit) {
-                        double s = clamp(lerp(1, 0, dist_to_point / point->radius), 0, 1);
-                        s *= s * s; // cubic
-                        double helper = s * point->strength;
-                        col.r += helper * (double)point->color.r / 255;
-                        col.g += helper * (double)point->color.g / 255;
-                        col.b += helper * (double)point->color.b / 255;
-                    } else {
-                        double dist_squared = v2_distance_squared(data.collpos, current_pos);
-
-                        if (dist_squared <= dist_to_point * dist_to_point) continue;
-
-                        double s = clamp(lerp(1, 0, dist_to_point / point->radius), 0, 1);
-                        s *= s * s; // cubic
-                        double helper = s * point->strength;
-                        col.r += helper * (double)point->color.r / 255;
-                        col.g += helper * (double)point->color.g / 255;
-                        col.b += helper * (double)point->color.b / 255;
-                    }
-
-                    baked_light_grid[r][c].r = SDL_clamp(baked_light_grid[r][c].r + col.r, ambient_light, MAX_LIGHT);
-                    baked_light_grid[r][c].g = SDL_clamp(baked_light_grid[r][c].g + col.g, ambient_light, MAX_LIGHT);
-                    baked_light_grid[r][c].b = SDL_clamp(baked_light_grid[r][c].b + col.b, ambient_light, MAX_LIGHT);
+                if (node->type != LIGHT_POINT) {
+                    continue;
                 }
-            );
+                LightPoint *point = node;
+                light_count += 1;
+
+                v2 current_pos = v2_mul(v2_div((v2){c, r}, to_vec(BAKED_LIGHT_RESOLUTION)), to_vec(tileSize));
+                if (abs(current_pos.x - point->pos.x) > point->radius || abs(current_pos.y - point->pos.y) > point->radius) continue;
+
+                double dist_to_point = v2_distance(point->pos, current_pos);
+
+                if (dist_to_point > point->radius) continue;
+
+                v2 dir = v2_div(v2_sub(point->pos, current_pos), to_vec(dist_to_point));
+
+                RayCollisionData data = castRay(current_pos, dir);
+
+                BakedLightColor col = {0, 0, 0};
+
+                if (!data.hit) {
+                    double s = clamp(lerp(1, 0, dist_to_point / point->radius), 0, 1);
+                    s *= s * s; // cubic
+                    double helper = s * point->strength;
+                    col.r += helper * (double)point->color.r / 255;
+                    col.g += helper * (double)point->color.g / 255;
+                    col.b += helper * (double)point->color.b / 255;
+                } else {
+                    double dist_squared = v2_distance_squared(data.collpos, current_pos);
+
+                    if (dist_squared <= dist_to_point * dist_to_point) continue;
+
+                    double s = clamp(lerp(1, 0, dist_to_point / point->radius), 0, 1);
+                    s *= s * s; // cubic
+                    double helper = s * point->strength;
+                    col.r += helper * (double)point->color.r / 255;
+                    col.g += helper * (double)point->color.g / 255;
+                    col.b += helper * (double)point->color.b / 255;
+                }
+
+                baked_light_grid[r][c].r = SDL_clamp(baked_light_grid[r][c].r + col.r, ambient_light, MAX_LIGHT);
+                baked_light_grid[r][c].g = SDL_clamp(baked_light_grid[r][c].g + col.g, ambient_light, MAX_LIGHT);
+                baked_light_grid[r][c].b = SDL_clamp(baked_light_grid[r][c].b + col.b, ambient_light, MAX_LIGHT);
+            });
+
+
+
             
         }
     }  
@@ -3082,10 +2986,10 @@ void player_take_dmg(double dmg) {
     play_sound(player_default_hurt, 0.1);
     shakeCamera(20, 10, true, 2);
 
-    player_hit_particles->world_node.pos = player->world_node.pos;
-    player_hit_particles->world_node.height = player->world_node.height;
-    player_hit_particles->target = NULL;
-    particle_spawner_explode(player_hit_particles);
+    // player_hit_particles->world_node.pos = player->world_node.pos;
+    // player_hit_particles->world_node.height = player->world_node.height;
+    // player_hit_particles->target = NULL;
+    // particle_spawner_explode(player_hit_particles);
 
     double progress_to_death = (double)(player->maxHealth - player->health) / player->maxHealth; // when it reaches 1, youre cooked
     vignette_color = (SDL_Color){255 * progress_to_death, 0, 0, 255};
@@ -3253,9 +3157,6 @@ Ability ability_primary_shoot_create() {
 void default_ability_tick(Ability *ability, double delta) {
     if (!ability->can_use) {
         ability->timer -= delta;
-        if (ability == player->primary) {
-            printf("shoot timer: %.2f \n", ability->timer);
-        }
         if (ability->timer <= 0) {
             ability->timer = ability->cooldown;
             ability->can_use = true;
@@ -3428,16 +3329,22 @@ ParticleSpawner ParticleSpawner_new(v2 pos, double height) {
     sprite.isAnimated = false;
     sprite.texture = default_particle_texture;
 
+    spawner.active = true;
+
     spawner.sprite = sprite;
 
     spawner.target = NULL;
 
     spawner.spawn_timer = 1.0 / spawner.spawn_rate;
 
+    node(&spawner)->on_tick = particle_spawner_tick;
+
     return spawner;
 }
 
-void particle_spawner_tick(ParticleSpawner *spawner, double delta) {
+void particle_spawner_tick(Node *node, double delta) {
+
+    ParticleSpawner *spawner = node;
 
     if (!spawner->active) return;
     spawner->spawn_timer -= delta;
@@ -3453,9 +3360,10 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
     
     v2 pos = spawner->world_node.pos;
     double height = spawner->world_node.height;
-    if (spawner->target != NULL) {
-        pos = v2_add(pos, spawner->target->world_node.pos);
-        height += spawner->target->world_node.height;
+
+    if (node(spawner)->parent != NULL && instanceof(node(spawner)->parent->type, WORLD_NODE)) {
+        pos = v2_add(pos, ((WorldNode *)node(spawner)->parent)->pos);
+        height += ((WorldNode *)node(spawner)->parent)->height;
     }
 
     double speed = randf_range(spawner->min_speed, spawner->max_speed);
@@ -3484,7 +3392,7 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
     particle->floor_drag = spawner->floor_drag;
 
     particle->effect.entity.world_node.pos = pos; // change later with emission
-    particle->effect.entity.world_node.height = spawner->world_node.height;
+    particle->effect.entity.world_node.height = height;
     
     particle->fade = spawner->fade;
     particle->fade_scale = spawner->fade_scale;
@@ -3494,8 +3402,14 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
     
     particle->initial_size = size;
 
-    Node_add_child(game_node, particle);
+    Sprite *particle_sprite = alloc(Sprite, SPRITE, false);
+    particle_sprite->texture = default_particle_texture;
+    Node_add_child(particle, particle_sprite);
 
+    Node_add_child(game_node, particle);
+    printf("Spawned particle! \n");
+
+    
     // particle->effect.entity.sprite = malloc(sizeof(Sprite));
     // *particle->effect.entity.sprite = spawner->sprite;
 
@@ -3508,7 +3422,9 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
 }
 
 
-void particle_tick(Particle *particle, double delta) {
+void Particle_tick(Node *node, double delta) {
+
+    Particle *particle = node;
 
     SDL_Color current_color;
 
@@ -3534,17 +3450,21 @@ void particle_tick(Particle *particle, double delta) {
     particle->effect.entity.world_node.size = v2_lerp(particle->initial_size, V2_ZERO, inverse_lerp(particle->effect.life_time, 0, particle->effect.life_timer));
     particle->effect.entity.world_node.pos = v2_add(particle->effect.entity.world_node.pos, v2_mul(particle->vel, to_vec(delta)));
     particle->effect.entity.world_node.height += particle->h_vel * delta;
-    double floor_bound = get_max_height() / 2 + particle->effect.entity.world_node.size.y / 2;
-    double ceil_bound = get_max_height() / 2 + get_max_height() - particle->effect.entity.world_node.size.y / 2;
+    double floor_bound = particle->effect.entity.world_node.size.y / 2;
+    double ceil_bound = get_max_height() - particle->effect.entity.world_node.size.y / 2;
     if (particle->effect.entity.world_node.height < floor_bound) {
+        printf("Hit floor bound! height: %.2f \n", particle->effect.entity.world_node.height);
         particle->effect.entity.world_node.height = floor_bound;
         particle->h_vel *= -particle->bounciness;
         particle->vel = v2_mul(particle->vel, to_vec(1 - particle->floor_drag));
     }
     if (particle->effect.entity.world_node.height > ceil_bound) {
+        printf("Hit ceiling bound! \n");
         particle->effect.entity.world_node.height = ceil_bound;
         particle->h_vel *= -particle->bounciness;
     }
+
+   
 
     Effect_tick((Effect *)particle, delta);
 }
@@ -3605,7 +3525,6 @@ void ability_dash_activate(Ability *ability) {
 void activate_ability(Ability *ability) {
     
     if (ability == NULL || !ability->can_use || paused) {
-        printf("bruh %d, %d, %d\n", ability == NULL, !ability->can_use, paused);
         if (ability == NULL) {
             commit_sudoku();
         }
@@ -3792,7 +3711,6 @@ void generate_dungeon() {
 
 void load_room(Room *room_ptr) {
 
-    int num_lights = 0;
 
     room_ptr->left_entrance_pos = (v2){(int)ROOM_WIDTH / 2, (int)ROOM_HEIGHT / 2};
     room_ptr->right_entrance_pos = (v2){(int)ROOM_WIDTH / 2, (int)ROOM_HEIGHT / 2};
@@ -3841,10 +3759,12 @@ void load_room(Room *room_ptr) {
         return;
     }
 
+    int num_lights = 0;
+    
     for (int r = 0; r < ROOM_HEIGHT; r++) {
         for (int c = 0; c < ROOM_WIDTH; c++) {
-            tilemap->floor_tilemap[offset_r + r][offset_c + c ] = data[data_ptr++];
-            if (tilemap->floor_tilemap[offset_r + r][offset_c + c ] == P_FLOOR_LIGHT) {
+            tilemap->floor_tilemap[offset_r + r][offset_c + c] = data[data_ptr++];
+            if (tilemap->floor_tilemap[offset_r + r][offset_c + c] == P_FLOOR_LIGHT) {
                 v2 tile_mid = (v2){(offset_c + c + 0.5) * tileSize, (offset_r + r + 0.5) * tileSize};
                 spawn_floor_light(tile_mid);
                 num_lights++;
@@ -3909,11 +3829,9 @@ void load_room(Room *room_ptr) {
         }
     }
 
-    if (num_lights > 3) {
-        printf("adsijas \n");
-    }
-
     fclose(fh);
+
+    printf("Loaded room with %d lights \n", num_lights);
 
 }
 
@@ -4174,14 +4092,14 @@ void client_add_player_entity(int id) {
     // player_entity->collider = (CircleCollider){.radius = PLAYER_COLLIDER_RADIUS, .pos = V2_ZERO};
     Node_add_child(player_entity, alloc(CircleCollider, CIRCLE_COLLIDER, PLAYER_COLLIDER_RADIUS));
 
-    player_entity->direction_indicator = malloc(sizeof(Entity));
-    player_entity->direction_indicator->affected_by_light = true;
-    player_entity->direction_indicator->color = GPU_MakeColor(255, 255, 255, 255);
-    // player_entity->direction_indicator->sprite = createSprite(false, 0);
-    // player_entity->direction_indicator->sprite->texture = default_particle_texture;
-    player_entity->direction_indicator->world_node.height = get_max_height() / 2 + player->tallness / 2;
-    player_entity->direction_indicator->world_node.pos = V2_ZERO;
-    player_entity->direction_indicator->world_node.size = to_vec(1600);
+    // player_entity->direction_indicator = malloc(sizeof(Entity));
+    // player_entity->direction_indicator->affected_by_light = true;
+    // player_entity->direction_indicator->color = GPU_MakeColor(255, 255, 255, 255);
+    // // player_entity->direction_indicator->sprite = createSprite(false, 0);
+    // // player_entity->direction_indicator->sprite->texture = default_particle_texture;
+    // player_entity->direction_indicator->world_node.height = get_max_height() / 2 + player->tallness / 2;
+    // player_entity->direction_indicator->world_node.pos = V2_ZERO;
+    // player_entity->direction_indicator->world_node.size = to_vec(1600);
     
     player_entity->dir_sprite = createDirSprite(16);
     for (int i = 0; i < 16; i++) {
@@ -4480,18 +4398,17 @@ PlayerEntity *find_or_add_player_entity_by_id(int id) {
 
 
 void player_entity_take_dmg(PlayerEntity *player_entity, double dmg) {
-    // actually damage the player
 
-    player_hit_particles->world_node.pos = player_entity->entity.world_node.pos;
-    player_hit_particles->world_node.height = player_entity->entity.world_node.height;
-    player_hit_particles->target = NULL;
-    particle_spawner_explode(player_hit_particles);
+    // player_hit_particles->world_node.pos = player_entity->entity.world_node.pos;
+    // player_hit_particles->world_node.height = player_entity->entity.world_node.height;
+    // player_hit_particles->target = NULL;
+    // particle_spawner_explode(player_hit_particles);
 
 }
 
 void ability_bomb_activate() {
     Projectile *bomb = create_bomb_projectile(v2_add(player->world_node.pos, v2_mul(playerForward, to_vec(15))), v2_mul(playerForward, to_vec(1.4)));
-    bomb->entity.world_node.height = get_max_height() / 2 + get_player_height();
+    bomb->entity.world_node.height = get_player_height();
 
     Node_add_child(game_node, bomb);
 
@@ -4537,27 +4454,19 @@ void Projectile_tick(Node *node, double delta) {
     projectile->entity.world_node.pos = v2_add(projectile->entity.world_node.pos, v2_mul(projectile->vel, to_vec(delta * 144)));
     projectile->entity.world_node.height += projectile->height_vel * delta * 144;
 
-    if (projectile->entity.world_node.height - projectile->entity.world_node.size.y / 2 <= get_max_height() / 2) {
+    if (projectile->entity.world_node.height - projectile->entity.world_node.size.y / 2 <= 0) {
         if (projectile->destroy_on_floor) {
             projectile_destroy(projectile);
             return;
         }
 
         projectile->height_vel *= -projectile->bounciness;
-        projectile->entity.world_node.height = get_max_height() / 2 + projectile->entity.world_node.size.y / 2;
+        projectile->entity.world_node.height = projectile->entity.world_node.size.y / 2;
     }
-    if (projectile->entity.world_node.height + projectile->entity.world_node.size.y / 2 >= get_max_height() * 1.5) {
+    if (projectile->entity.world_node.height + projectile->entity.world_node.size.y / 2 >= get_max_height()) {
         projectile->height_vel *= -projectile->bounciness;
-        projectile->entity.world_node.height = get_max_height() * 1.5 - projectile->entity.world_node.size.y / 2;
+        projectile->entity.world_node.height = get_max_height() - projectile->entity.world_node.size.y / 2;
     }
-
-    projectile->life_timer -= delta;
-    if (projectile->life_timer <= 0) {
-        //projectile_destroy(projectile);
-        Node_delete(node);
-        return;
-    }
-    
     // projectile->collider.pos = projectile->entity.world_node.pos;
 
     // spriteTick(projectile->entity.sprite, delta);
@@ -4565,6 +4474,13 @@ void Projectile_tick(Node *node, double delta) {
     if (projectile->on_tick != NULL && !node->queued_for_deletion) {
         projectile->on_tick(projectile, delta);
     }
+
+    projectile->life_timer -= delta;
+    if (projectile->life_timer <= 0) {
+        projectile_destroy(projectile);
+        return;
+    }
+    
 
 }
 
@@ -4590,8 +4506,6 @@ Projectile Projectile_new(double life_time) {
     projectile.life_time = life_time;
     projectile.life_timer = life_time;
     projectile.entity.color = (SDL_Color){255, 255, 255, 255};
-    
-    Node_add_child(&projectile, alloc(CircleCollider, CIRCLE_COLLIDER, 5));
 
     projectile.entity.world_node.size = to_vec(8000);
 
@@ -4601,6 +4515,8 @@ Projectile Projectile_new(double life_time) {
 Projectile *create_bomb_projectile(v2 pos, v2 start_vel) {
     Projectile *projectile = alloc(Projectile, PROJECTILE, 1.6);
     
+    Node_add_child(&projectile, alloc(CircleCollider, CIRCLE_COLLIDER, 5));
+
     projectile->type = PROJ_BOMB;
 
     projectile->height_accel = PROJECTILE_GRAVITY;
@@ -4610,10 +4526,10 @@ Projectile *create_bomb_projectile(v2 pos, v2 start_vel) {
     projectile->vel = v2_add(start_vel, v2_mul(player->vel, to_vec(0.5)));
     projectile->height_vel = (is_player_on_floor()? 0 : player->height_vel * 0.5) + player->pitch * -3;
     projectile->entity.world_node.size = to_vec(8000);
-    projectile->on_destruction = NULL;//bomb_on_destroy;
-    projectile->on_tick = NULL;//bomb_on_tick;
+    projectile->on_destruction = bomb_on_destroy;
+    projectile->on_tick = bomb_on_tick;
 
-    //Node_add_child(projectile, alloc(ParticleSpawner, PARTICLE_SPAWNER, V2_ZERO, 0));
+    Node_add_child(projectile, alloc(ParticleSpawner, PARTICLE_SPAWNER, V2_ZERO, 0));
 
     Sprite *sprite = alloc(Sprite, SPRITE, true);
     array_append(sprite->animations, create_animation(2, 1, bomb_anim));
@@ -4630,41 +4546,41 @@ void bomb_on_destroy(Projectile *projectile) {
 
     static const int MAX_DIST = 80;
 
-    // ParticleSpawner *p_spawner = get_child_by_type(projectile, PARTICLE_SPAWNER);
-    // if (p_spawner == NULL) {
-    //     commit_sudoku();
-    // }
+    ParticleSpawner *p_spawner = get_child_by_type(projectile, PARTICLE_SPAWNER);
+    if (p_spawner == NULL) {
+        commit_sudoku();
+    }
+    p_spawner->world_node.pos = V2_ZERO;
+    p_spawner->world_node.height = 0;
 
-    // shakeCamera(30, 15, true, 10);
-    // p_spawner->min_size = to_vec(15000);
-    // p_spawner->max_size = to_vec(28000);
-    // p_spawner->height_accel = -PARTICLE_GRAVITY * 0.1;
-    // p_spawner->fade_scale = true;
-    // p_spawner->affected_by_light = false;
-    // p_spawner->min_speed = 30;
-    // p_spawner->max_speed = 80;
-    // p_spawner->spread = 2;
-    // p_spawner->height_dir = 0.2;
-    // p_spawner->explode_particle_amount = 20;
-    // p_spawner->particle_lifetime = 1.3;
-    // p_spawner->floor_drag = 0.3;
+    shakeCamera(30, 15, true, 10);
+    p_spawner->min_size = to_vec(15000);
+    p_spawner->max_size = to_vec(28000);
+    p_spawner->height_accel = -PARTICLE_GRAVITY * 0.1;
+    p_spawner->fade_scale = true;
+    p_spawner->affected_by_light = false;
+    p_spawner->min_speed = 30;
+    p_spawner->max_speed = 80;
+    p_spawner->spread = 2;
+    p_spawner->height_dir = 0.2;
+    p_spawner->explode_particle_amount = 20;
+    p_spawner->particle_lifetime = 1.3;
+    p_spawner->floor_drag = 0.3;
     
-    // p_spawner->start_color = GPU_MakeColor(255, 230, 120, 255);
-    // p_spawner->end_color = GPU_MakeColor(255, 230, 120, 255);
+    p_spawner->start_color = GPU_MakeColor(255, 230, 120, 255);
+    p_spawner->end_color = GPU_MakeColor(255, 230, 120, 255);
 
-    // p_spawner->world_node.pos = projectile->entity.world_node.pos;
-    // p_spawner->world_node.height = get_max_height() / 2;
-    // particle_spawner_explode(p_spawner);
+    particle_spawner_explode(p_spawner);
 
-    // p_spawner->particle_lifetime = 2.5;
-    // p_spawner->start_color = GPU_MakeColor(120, 120, 120, 255);
-    // p_spawner->end_color = GPU_MakeColor(0, 0, 0, 0);
-    // p_spawner->min_size = to_vec(15000);
-    // p_spawner->max_size = to_vec(19000);
-    // p_spawner->min_speed = 100;
-    // p_spawner->max_speed = 150;
+    p_spawner->particle_lifetime = 2.5;
+    p_spawner->start_color = GPU_MakeColor(120, 120, 120, 255);
+    p_spawner->end_color = GPU_MakeColor(0, 0, 0, 0);
+    p_spawner->min_size = to_vec(15000);
+    p_spawner->max_size = to_vec(19000);
+    p_spawner->min_speed = 100;
+    p_spawner->max_speed = 150;
 
-    // particle_spawner_explode(p_spawner);
+    particle_spawner_explode(p_spawner);
 
     play_spatial_sound(bomb_explosion, 0.5, player->world_node.pos, projectile->entity.world_node.pos, 500);
 
@@ -4702,8 +4618,6 @@ void bomb_on_destroy(Projectile *projectile) {
             player_entity_take_dmg(player_entity, dmg);
         }
     });
-
-    printf("Hello,m world! \n");
 }
 
 Ability pick_random_ability_from_array(Ability arr[], int size) {
@@ -4819,7 +4733,7 @@ void ability_forcefield_activate() {
     // ((ParticleSpawner *)proj->extra_data)->target = proj;
 
     proj->entity.world_node.pos = player->world_node.pos;
-    proj->entity.world_node.height = get_max_height() / 2 + get_player_height();
+    proj->entity.world_node.height = get_player_height();
     // ((ParticleSpawner *)proj->extra_data)->world_node.height = proj->entity.world_node.height;
     proj->vel = playerForward;
     Node_add_child(game_node, proj);
@@ -4881,6 +4795,12 @@ Node Node_new() {
     Node node = {0};
     node.parent = NULL;
     node.children = array(Node *, 2);
+
+    if ((int)node.children < 10) {
+        printf("Invalid children! \n");
+        commit_sudoku();
+    }
+
     node.type = -1;
     node.on_tick = NULL;
     node.on_render = NULL;
@@ -4898,9 +4818,16 @@ void Node_delete(Node *node) {
 
     if (node->on_delete != NULL) node->on_delete(node);
     
+    for (int i = 0 ; i < array_length(deletion_queue); i++) {
+        if (deletion_queue[i] == node) {
+            array_remove(deletion_queue, i);
+            break;
+        }
+    }
     
-    for (int i = array_length(node->children) - 1; i >= 0; i--) {
-        Node_delete(node->children[i]);
+    while (array_length(node->children) > 0) { // ACCESS OF UNADDRESSABLE MEMORY
+        Node *child = node->children[0]; // for debug
+        Node_delete(child); // ACCESS OF UNADDRESSABLE MEMORY
     }
 
     if (node->parent != NULL) {
@@ -4915,8 +4842,6 @@ void Node_delete(Node *node) {
     node->on_render = NULL;
     node->on_tick = NULL;
     node->type = -1;
-
-
     
 
     array_free(node->children);
@@ -4925,9 +4850,9 @@ void Node_delete(Node *node) {
 }
 
 void Node_add_child(Node *parent, Node *child) {
-    if (parent == NULL || child == NULL) return;
+    if (parent == NULL || child == NULL || parent->children == NULL) return;
 
-
+    
     child->parent = parent;
     array_append(parent->children, child);
 }
@@ -4935,17 +4860,21 @@ void Node_add_child(Node *parent, Node *child) {
 
 void Node_tick(Node *node, double delta) {
 
-    if (node == NULL || node->freed || node->queued_for_deletion) return;
+    if (node == NULL) return;
 
     if (node->on_tick != NULL) {
         node->on_tick(node, delta);
     }
 
-    ArrayHeader *header = array_header(node->children);
+    if (node->children == NULL) {
+        printf("Node_tick: Node children are null! \n");
+        commit_sudoku();
+        return;
+    }
 
-    foreach (Node *child, node->children, header->length, {
-        Node_tick(child, delta);
-    });
+    for (int i = 0; i < array_length(node->children); i++) {
+        Node_tick(node->children[i], delta);
+    }
 }
 
 
@@ -5020,6 +4949,8 @@ void Renderer_render(Node *node) {
         }
     });
 
+    UI_render(hud, UI_get_root());
+
     array_free(render_list);
 
 }
@@ -5037,14 +4968,14 @@ LightPoint LightPoint_new() {
     return l;
 }
 
-void _GANA_helper(Node *root, Node **arr) {
+void _GANA_helper(Node *root, Node ***arr) {
 
     int i = 0;
     int len = array_length(root->children);
 
     //printf("Node has %d children \n", len);
     
-    array_append(arr, root);
+    array_append((*arr), root);
 
     for (i = 0; i < len; i++) {
         _GANA_helper(root->children[i], arr);
@@ -5052,9 +4983,9 @@ void _GANA_helper(Node *root, Node **arr) {
 }
 
 Node **get_all_nodes_array() {
-    Node **arr = array(Node *, 190);
+    Node **arr = array(Node *, 10);
 
-    _GANA_helper(root_node, arr);
+    _GANA_helper(root_node, &arr);
 
     return arr;
 }
@@ -5196,6 +5127,7 @@ Particle Particle_new(double life_time) {
     particle.end_color = Color(255, 255, 255, 255);
     particle.h_accel = -PARTICLE_GRAVITY;
 
+    node(&particle)->on_tick = Particle_tick;
 
     return particle;
 }
@@ -5294,6 +5226,8 @@ void CircleCollider_tick(Node *node, double delta) {
 
     if (node->parent == NULL || !instanceof(node->parent->type, WORLD_NODE)) return;
 
+    if (node(collider)->parent->type == PROJECTILE) printf("Projectile collider tick");
+
     collider->world_node.pos = ((WorldNode *)node->parent)->pos;
     collider->world_node.height = ((WorldNode *)node->parent)->height;
 
@@ -5320,11 +5254,11 @@ CircleCollider CircleCollider_new(int radius) {
 Node *get_child_by_type(Node *parent, int child_type) {
 
 
-    foreach (Node *child, parent->children, array_length(parent->children), {
-        if (child->type == child_type) {
-            return child;
+    for (int i = 0; i < array_length(parent->children); i++) {
+        if (parent->children[i]->type == child_type) {
+            return parent->children[i];
         }
-    });
+    }
 
     return NULL;
 }
@@ -5345,8 +5279,10 @@ void init_health_bar() {
     CanvasNode *health_node = alloc(CanvasNode, CANVAS_NODE);
     health_node->pos = V2(60, 50);
     health_node->size = v2_div(canvas_node->size, V2(1.47, 3.5));
-
+    health_node->z_index = -1;
     health_node->node.on_tick = health_node_tick;
+
+
 
     Node_add_child(health_node, alloc(ColorRect, COLOR_RECT, Color(255, 40, 40, 255), ALIGNMENT_LEFT, ALIGNMENT_TOP));
 
@@ -5448,6 +5384,8 @@ void health_node_tick(Node *node, double delta) {
 
 void CircleCollider_default_on_collide(CircleCollider *collider, CollisionData data) {
     if (node(collider)->parent == NULL || !instanceof(node(collider)->parent->type, WORLD_NODE)) return;
+
+    
 
     WorldNode *parent = node(collider)->parent;
 

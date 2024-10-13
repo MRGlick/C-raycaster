@@ -320,6 +320,11 @@ void UILabel_update(UIComponent *component) {
 
     SDL_Surface *text_surface = TTF_RenderText_Blended(label->font, label->text.data, current_style.fg_color);
 
+    if (text_surface == NULL) {
+        printf("Text surface is null! \n");
+        return;
+    }
+
     // TTF_SetFontSize(label->font, DEFAULT_FONT_SIZE); // other stuff might use this font so ill be a good label and reset it
     // nvm.
 

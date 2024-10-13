@@ -1,6 +1,14 @@
 #define SDL_MAIN_HANDLED
 #include "array.c"
 
+void print_int_arr(int *arr) {
+    int len = array_length(arr);
+
+    for (int i =0 ; i < len; i++) {
+        printf("%d \n", arr[i]);
+    }
+}
+
 int main(int argc, char *argv[]) {
     
     int *arr = array(int, 6);
@@ -9,17 +17,12 @@ int main(int argc, char *argv[]) {
     array_append(arr, 3);
     array_append(arr, 4);
 
-    array_insert(arr, 7, 0);
+    // array_insert(arr, 7, 0);
 
-    int a = 5, b = 3;
+    print_int_arr(arr);
 
-    _swap(&a, &b, sizeof(int));
+    array_remove(arr, 0);
 
-    printf("a: %d, b: %d \n", a, b);
-
-
-    for (int i = 0; i < array_length(arr); i++) {
-        printf("%d \n", arr[i]);
-    }
+    print_int_arr(arr);
 
 }

@@ -20,6 +20,12 @@ ArrayHeader *array_header(void *array) {
 
 void * _create_array(int item_size, int size) {
     void *m = malloc(item_size * size + sizeof(ArrayHeader));
+
+    if (m == NULL) {
+        printf("_create_array: couldn't allocate memory! \n");
+        return NULL;
+    }
+
     ArrayHeader *header = m;
     header->size = size;
     header->length = 0;
@@ -59,8 +65,9 @@ void array_remove(void *array, int i) {
     memmove(
         (char *)array + i * header->item_size,
         (char *)array + (i + 1) * header->item_size,
-        header->item_size * (header->length - i)
+        header->item_size * (header->length - i - 1)
     );
+    // 1 2 3 4
 
     
     
@@ -96,8 +103,10 @@ void _array_ensure_capacity(void **array) {
 
 #define array(type, size) _create_array(sizeof(type), size)
 
+
+// MIGHT CHANGE THE ADDRESS OF THE ARRAY
 #define array_append(array, val) do { \
-    _array_ensure_capacity((void **)&array); \
+    _array_ensure_capacity((void **)&(array)); \
     array[array_length(array)] = val; \
     array_header(array)->length++; \
 } while (0)
