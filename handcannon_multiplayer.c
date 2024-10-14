@@ -493,6 +493,8 @@ typedef struct Room {
 
 // #FUNC
 
+void Projectile_on_collide(CircleCollider *collider, CollisionData data);
+
 void init_ability_hud();
 
 void init_crosshair();
@@ -655,7 +657,7 @@ void particle_spawner_spawn(ParticleSpawner *spawner);
 
 void particle_spawner_tick(Node *node, double delta);
 
-ParticleSpawner ParticleSpawner_new(v2 pos, double height);
+ParticleSpawner ParticleSpawner_new(bool active);
 
 void draw_3d_line(v2 pos1, double h1, v2 pos2, double h2);
 
@@ -1105,7 +1107,7 @@ void init() {  // #INIT
     //exit(1);
 
     bomb_explode_particles = malloc(sizeof(ParticleSpawner));
-    *bomb_explode_particles = ParticleSpawner_new(V2_ZERO, 0);
+    *bomb_explode_particles = ParticleSpawner_new(false);
 
     // player_hit_particles = malloc(sizeof(ParticleSpawner));
     // *player_hit_particles = ParticleSpawner_new(V2_ZERO, 0);
@@ -2062,19 +2064,6 @@ void init_player(v2 pos) {
     player->world_node.node.on_tick = player_tick;
     player->world_node.node.type = PLAYER;
 
-    ParticleSpawner *s = alloc(ParticleSpawner, PARTICLE_SPAWNER, V2_ZERO, 0);
-    s->particle_lifetime = 5;
-    s->active = true;
-    s->min_size = to_vec(8000);
-    s->max_size = to_vec(8000);
-    s->height_accel = 0;
-    s->start_color = Color(255, 255, 255, 255);
-    s->end_color = Color(255, 255, 255, 255);
-    s->spawn_rate = 1;
-    s->affected_by_light = true;
-
-    Node_add_child(player, s);
-
     Node_add_child(player, alloc(CircleCollider, CIRCLE_COLLIDER, PLAYER_COLLIDER_RADIUS));
 
 
@@ -2476,24 +2465,6 @@ GPU_Image *get_sprite_current_texture(Sprite *sprite) {
         Animation current = sprite->animations[sprite->current_anim_idx];
         return current.frames[current.frame];
     }
-}
-
-Effect *createEffect(v2 pos, v2 size, Sprite *sprite, double lifeTime) {
-    Effect *effect = malloc(sizeof(Effect));
-
-    if (effect == NULL) {
-        printf("Failed to malloc effect \n");
-    }
-
-    effect->entity.world_node.pos = pos;
-    effect->entity.world_node.size = size;
-    // effect->entity.sprite = sprite;
-    effect->entity.color = (SDL_Color){255, 255, 255, 255};
-    effect->entity.world_node.height = get_max_height() * 0.5;
-    effect->life_time = lifeTime;
-    effect->life_timer = effect->life_time;
-
-    return effect;
 }
 
 // Todo: add shoot cooldown for base shooting
@@ -3227,12 +3198,12 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
 
     v2 final_pos;
     bool is_ceiling = pitch < 0;
-    double final_height = is_ceiling? get_max_height() * 1.5 : get_max_height() * 0.5;
+    double final_height = is_ceiling? get_max_height() : 0;
 
 
     if (distance_to_coll_pos < distance_to_hit_pos) {
         final_pos = ray_data.collpos;
-        final_height = lerp( get_max_height() * 0.5 + get_player_height(), final_height, inverse_lerp(0, distance_to_hit_pos, distance_to_coll_pos));
+        final_height = lerp( get_player_height(), final_height, inverse_lerp(0, distance_to_hit_pos, distance_to_coll_pos));
     } else {
         final_pos = hit_pos;
     }
@@ -3296,7 +3267,7 @@ void draw_3d_line(v2 pos1, double h1, v2 pos2, double h2) {
     // SDL_RenderDrawLine(renderer, screen_pos_1.x, screen_pos_1.y, screen_pos_2.x, screen_pos_2.y);
 }
 
-ParticleSpawner ParticleSpawner_new(v2 pos, double height) {
+ParticleSpawner ParticleSpawner_new(bool active) {
     ParticleSpawner spawner = {
         .dir = (v2){1, 0},
         .height_dir = 0,
@@ -3311,7 +3282,6 @@ ParticleSpawner ParticleSpawner_new(v2 pos, double height) {
         .floor_drag = 0.01,
         .bounciness = 0.5,
         .particle_lifetime = 1,
-        .active = true,
         .target = NULL,
         .fade = true,
         .fade_scale = true,
@@ -3320,16 +3290,14 @@ ParticleSpawner ParticleSpawner_new(v2 pos, double height) {
     };
 
     spawner.world_node = new(WorldNode, WORLD_NODE);
-    spawner.world_node.pos = pos;
-    spawner.world_node.height = height;
+    spawner.world_node.pos = V2_ZERO;
+    spawner.world_node.height = 0;
 
     Sprite sprite;
     sprite.animations = NULL;
     sprite.current_anim_idx = 0;
     sprite.isAnimated = false;
     sprite.texture = default_particle_texture;
-
-    spawner.active = true;
 
     spawner.sprite = sprite;
 
@@ -3338,6 +3306,8 @@ ParticleSpawner ParticleSpawner_new(v2 pos, double height) {
     spawner.spawn_timer = 1.0 / spawner.spawn_rate;
 
     node(&spawner)->on_tick = particle_spawner_tick;
+
+    spawner.active = active;
 
     return spawner;
 }
@@ -3453,13 +3423,11 @@ void Particle_tick(Node *node, double delta) {
     double floor_bound = particle->effect.entity.world_node.size.y / 2;
     double ceil_bound = get_max_height() - particle->effect.entity.world_node.size.y / 2;
     if (particle->effect.entity.world_node.height < floor_bound) {
-        printf("Hit floor bound! height: %.2f \n", particle->effect.entity.world_node.height);
         particle->effect.entity.world_node.height = floor_bound;
         particle->h_vel *= -particle->bounciness;
         particle->vel = v2_mul(particle->vel, to_vec(1 - particle->floor_drag));
     }
     if (particle->effect.entity.world_node.height > ceil_bound) {
-        printf("Hit ceiling bound! \n");
         particle->effect.entity.world_node.height = ceil_bound;
         particle->h_vel *= -particle->bounciness;
     }
@@ -4165,7 +4133,7 @@ void on_client_recv(MPPacket packet, void *data) {
             
 
         // create the effect at the pos and height
-        Effect *hit_effect = alloc(Effect, EFFECT, 1);//createEffect(packet_data->hit_pos, to_vec(8000), createSprite(true, 1), 1);
+        Effect *hit_effect = alloc(Effect, EFFECT, 1);
 
         hit_effect->entity.world_node.pos = packet_data->hit_pos;
         hit_effect->entity.world_node.size = to_vec(8000);
@@ -4235,7 +4203,7 @@ void on_client_recv(MPPacket packet, void *data) {
 
 void PlayerEntity_tick(PlayerEntity *player_entity, double delta) {
 
-    double real_desired_height = player_entity->desired_height + get_max_height() * 0.5 - player_entity->entity.world_node.size.y / 2;
+    double real_desired_height = player_entity->desired_height - player_entity->entity.world_node.size.y / 2;
 
     player_entity->entity.world_node.pos = v2_lerp(player_entity->entity.world_node.pos, player_entity->desired_pos, 0.1 * (delta * 144));
     player_entity->entity.world_node.height = lerp(player_entity->entity.world_node.height, real_desired_height, 0.1 * (delta * 144));
@@ -4515,7 +4483,10 @@ Projectile Projectile_new(double life_time) {
 Projectile *create_bomb_projectile(v2 pos, v2 start_vel) {
     Projectile *projectile = alloc(Projectile, PROJECTILE, 1.6);
     
-    Node_add_child(&projectile, alloc(CircleCollider, CIRCLE_COLLIDER, 5));
+    CircleCollider *collider = alloc(CircleCollider, CIRCLE_COLLIDER, 5);
+    collider->on_collide = Projectile_on_collide;
+
+    Node_add_child(projectile, collider);
 
     projectile->type = PROJ_BOMB;
 
@@ -4529,7 +4500,9 @@ Projectile *create_bomb_projectile(v2 pos, v2 start_vel) {
     projectile->on_destruction = bomb_on_destroy;
     projectile->on_tick = bomb_on_tick;
 
-    Node_add_child(projectile, alloc(ParticleSpawner, PARTICLE_SPAWNER, V2_ZERO, 0));
+    ParticleSpawner *p_spawner = alloc(ParticleSpawner, PARTICLE_SPAWNER, false);
+
+    Node_add_child(projectile, p_spawner);
 
     Sprite *sprite = alloc(Sprite, SPRITE, true);
     array_append(sprite->animations, create_animation(2, 1, bomb_anim));
@@ -5424,6 +5397,13 @@ void init_ability_hud() {
 
     Node_add_child(root_node, cnode);
     
+}
+
+void Projectile_on_collide(CircleCollider *collider, CollisionData data) {
+    Projectile *projectile = node(collider)->parent;
+
+    projectile->entity.world_node.pos = v2_add(projectile->entity.world_node.pos, data.offset);
+    projectile->vel = v2_mul(v2_reflect(projectile->vel, v2_normalize(data.offset)), to_vec(projectile->bounciness));
 }
 
 
