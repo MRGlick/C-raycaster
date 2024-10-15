@@ -506,6 +506,8 @@ typedef struct Room {
 
 // #FUNC
 
+void render_textured_quad(GPU_Image *texture, v2 top_left, v2 top_right, v2 bot_left, v2 bot_right);
+
 void Node_queue_add_to_game_node(Node *node);
 
 void DirSprite_on_delete(Node *node);
@@ -2257,7 +2259,7 @@ RayCollisionData ray_circle(Raycast ray, CircleCollider *collider) {
     data.startpos = ray.pos;
     data.collpos = collision_pos;
     data.wallWidth = collider->radius * PI;
-    data.collider = node(collider)->parent;
+    data.collider = collider;
     
     data.collIdx = collIdx;
 
@@ -2525,14 +2527,10 @@ RayCollisionData castRayForEntities(v2 pos, v2 dir) {
 
     iter_over_all_nodes(node, {
 
-        RayCollisionData newData = ray_node(ray, node);
-        if (!newData.hit) continue;
+        if (node->type != CIRCLE_COLLIDER) continue;
 
-        double currentSquaredDist = v2_distance_squared(pos, newData.collpos);
-        if (currentSquaredDist < minSquaredDist) {
-            minSquaredDist = currentSquaredDist;
-            data = newData;
-        }
+        RayCollisionData coll_data = ray_circle(ray, node);
+
     }); 
 
     return data;
@@ -3123,7 +3121,7 @@ Ability ability_primary_shoot_create() {
         .tick = NULL,
         .before_activate = NULL,
         .can_use = false,
-        .cooldown = 0.2,
+        .cooldown = 0.5,
         .timer = 0.2,
         .type = A_PRIMARY,
         .texture = shoot_icon,
@@ -4083,7 +4081,7 @@ void client_add_player_entity(int id) {
 
     Node_add_child(player_entity, temp_sprite);
 
-    // Node_add_child(player_entity, alloc(CircleCollider, CIRCLE_COLLIDER, PLAYER_COLLIDER_RADIUS));
+    Node_add_child(player_entity, alloc(CircleCollider, CIRCLE_COLLIDER, PLAYER_COLLIDER_RADIUS));
 
     // DirSprite *dir_sprite = alloc(DirSprite, DIR_SPRITE, 16);
 
@@ -4156,11 +4154,19 @@ void on_client_recv(MPPacket packet, void *data) {
         Effect *hit_effect = alloc(Effect, EFFECT, 1);
 
         hit_effect->entity.world_node.pos = packet_data->hit_pos;
+        hit_effect->entity.world_node.height = packet_data->hit_height;
         hit_effect->entity.world_node.size = to_vec(8000);
 
         Sprite *sprite = alloc(Sprite, SPRITE, true);
 
-        array_append(sprite->animations, create_animation(5, 0, shootHitEffectFrames));
+        Animation anim = create_animation(5, 0, shootHitEffectFrames);
+
+        anim.fps = 12;
+        anim.loop = false;
+
+        array_append(sprite->animations, anim);
+
+        spritePlayAnim(sprite, 0);
 
         Node_add_child(hit_effect, sprite);
 
@@ -5100,9 +5106,6 @@ void Sprite_render(Node *node) {
         GPU_BlitRect(current_texture, NULL, hud, &rect);
     }
 
-    
-
-
 }
 
 void Sprite_tick(Node *node, double delta) { // NO NODE SHENANIGANS WITHOUT EDITING DIRSPRITE
@@ -5508,6 +5511,29 @@ void DirSprite_on_delete(Node *node) {
 
 void Node_queue_add_to_game_node(Node *node) {
     array_append(add_queue, node);
+}
+
+struct vertex {
+    float x, y;
+    float s, t;
+    float r, g, b, a;
+};
+
+void render_textured_quad(GPU_Image *texture, v2 top_left, v2 top_right, v2 bot_left, v2 bot_right) {
+    float vertices[] = {
+        // Triangle 1 (Top-left, Top-right, Bottom-right)
+        top_left.x, top_left.y,  0.0f, 0.0f,  1, 1, 1, 1,   // Top-left
+        top_right.x, top_right.y,  1.0f, 0.0f,  1, 1, 1, 1,   // Top-right
+        bot_right.x, bot_right.y,  1.0f, 1.0f,  1, 1, 1, 1,   // Bottom-right
+        
+        // Triangle 2 (Top-left, Bottom-right, Bottom-left)
+        top_left.x, top_left.y,  0.0f, 0.0f,  1, 1, 1, 1,   // Top-left
+        bot_right.x, bot_right.y,  1.0f, 1.0f,  1, 1, 1, 1,   // Bottom-right
+        bot_left.x, bot_left.y,  0.0f, 1.0f,  1, 1, 1, 1    // Bottom-left
+    };
+
+    // Render the two triangles
+    GPU_TriangleBatch(texture, screen, 6, vertices, 0, NULL, GPU_BATCH_XY_ST_RGBA);
 }
 
 
