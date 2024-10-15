@@ -16,7 +16,7 @@ typedef struct v2 {
 #define V2_LEFT ((v2){-1, 0})
 #define V2_UP ((v2){0, -1})
 #define V2_DOWN ((v2){0, 1})
-
+#define V2_ONE ((v2){1, 1})
 #define V2_RIGHT ((v2){1, 0})
 #define to_vec(a) ((v2){a, a})
 
@@ -157,11 +157,11 @@ v2 v2_dir(v2 vec1, v2 vec2) {
 }
 
 v2 v2_floor(v2 vec) {
-    return (v2){floor(vec.x), floor(vec.y)};
+    return (v2){(int)vec.x, (int)vec.y};
 }
 
 v2 v2_ceil(v2 vec) {
-    return (v2){ceil(vec.x), ceil(vec.y)};
+    return (v2){(int)vec.x + 1, (int)vec.y + 1};
 }
 
 v2 v2_limit_length(v2 vec, double thresh) {
@@ -218,6 +218,8 @@ v2 v2_rotate_to(v2 vec, double angle) {
 }
 
 v2 v2_rotate(v2 vec, double angle) {
+
+    if (v2_equal(vec, V2_ZERO)) return V2_ZERO;
 
     double cosAngle = cos(angle);
     double sinAngle = sin(angle);

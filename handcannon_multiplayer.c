@@ -11,14 +11,17 @@
 
 // #DEFINITIONS
 
-#define DEBUG_FLAG true
+#define DEBUG_FLAG false
 
 #define SERVER_IP "127.0.0.1"
 #define SERVER_PORT 1155
-#define TPS 120
-#define FPS 120
+#define TPS 300
+#define FPS 300
 #define WINDOW_WIDTH 1024
 #define WINDOW_HEIGHT 580
+
+// ^^^ The two most OG lines of the project ^^^
+
 #define RESOLUTION_X 720
 #define RESOLUTION_Y 360
 #define X_SENSITIVITY .1
@@ -241,6 +244,7 @@ DEF_STRUCT(Node, NODE, {
         Animation *animations;
         SDL_Color color;
         bool inherit_color;
+        v2 scale;
     });
 
     END_STRUCT(SPRITE);
@@ -251,9 +255,9 @@ DEF_STRUCT(Node, NODE, {
         int align_x, align_y;
     });
 
-    DEF_STRUCT(DirectionalSprite, DIRECTIONAL_SPRITE, {
+    DEF_STRUCT(DirSprite, DIR_SPRITE, {
         Node node;
-        Sprite **sprites;
+        Sprite *sprites;
         v2 dir;  // global direction
         int dirCount;
         int current_anim;
@@ -290,9 +294,16 @@ DEF_STRUCT(Node, NODE, {
                     double h_accel;
                     double bounciness;
                     double floor_drag;
+                    v2 initial_pos;
+                    double initial_height;
                     v2 initial_size;
                     bool fade;
                     bool fade_scale;
+
+                    v2 radial_accel;
+                    double height_radial_accel;
+                    double damp;
+
                     SDL_Color start_color, end_color;
 
                 });
@@ -305,8 +316,6 @@ DEF_STRUCT(Node, NODE, {
                 double desired_height;
                 v2 dir;
                 int id;
-                Entity *direction_indicator;
-                DirectionalSprite *dir_sprite;
             });
 
             DEF_STRUCT(Projectile, PROJECTILE, {
@@ -366,6 +375,10 @@ DEF_STRUCT(Node, NODE, {
 
             v2 accel;
             double height_accel;
+            
+            v2 radial_accel;
+            double height_radial_accel;
+            double damp;
 
             double min_speed, max_speed;
 
@@ -492,6 +505,18 @@ typedef struct Room {
 } Room;
 
 // #FUNC
+
+void Node_queue_add_to_game_node(Node *node);
+
+void DirSprite_on_delete(Node *node);
+
+void DirSprite_add_animation(DirSprite *dir_sprite, int frame_count, GPU_Image **textures);
+
+void DirSprite_tick(Node *node, double delta);
+
+void DirSprite_render(Node *node);
+
+DirSprite DirSprite_new(int dir_count);
 
 void Projectile_on_collide(CircleCollider *collider, CollisionData data);
 
@@ -674,7 +699,7 @@ Ability ability_primary_shoot_create();
 void default_ability_tick(Ability *ability, double delta);
 
 
-void dir_sprite_play_anim(DirectionalSprite *dir_sprite, int anim);
+void dir_sprite_play_anim(DirSprite *dir_sprite, int anim);
 
 int charge_time_to_shots(double charge_time);
 
@@ -746,11 +771,11 @@ void freeAnimation(Animation *anim);
 
 GPU_Image *get_sprite_current_texture(Sprite *sprite);
 
-Sprite *dir_sprite_current_sprite(DirectionalSprite *dSprite, v2 spritePos);
+Sprite *dir_sprite_current_sprite(DirSprite *dSprite, v2 spritePos);
 
 void player_tick(Node *node, double delta);
 
-void dSpriteTick(DirectionalSprite *dSprite, v2 spritePos, double delta);
+void dSpriteTick(DirSprite *dSprite, v2 spritePos, double delta);
 
 void spriteTick(Sprite *sprite, double delta);
 
@@ -758,7 +783,7 @@ void animation_tick(Animation *anim, double delta);
 
 void Effect_tick(Node *node, double delta);
 
-DirectionalSprite *createDirSprite(int dirCount);
+DirSprite *createDirSprite(int dirCount);
 
 void spritePlayAnim(Sprite *sprite, int idx);
 
@@ -766,7 +791,7 @@ void ability_shoot_activate(Ability *ability);
 
 void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affected_by_light, SDL_Color custom_color);
 
-void renderDirSprite(DirectionalSprite *dSprite, v2 pos, v2 size, double height);
+void renderDirSprite(DirSprite *dSprite, v2 pos, v2 size, double height);
 
 double angleDist(double a1, double a2);
 
@@ -791,6 +816,7 @@ UIComponent *pause_menu;
 UILabel *debug_label;
 
 // #TEXTURES
+GPU_Image **forcefield_field;
 GPU_Image *hand_default;
 GPU_Image **hand_shoot;
 GPU_Image **forcefield_anim;
@@ -871,6 +897,7 @@ Node *game_node;
 
 
 Node **deletion_queue;
+Node **add_queue;
 
 SDL_Color client_self_color = {0};
 
@@ -928,6 +955,8 @@ double tanHalfStartFOV;
 double ambient_light = 0.6;
 int floorRenderStart;
 const int tileSize = WINDOW_WIDTH / 30;
+int HEIGHT_TO_XY;
+int XY_TO_HEIGHT;
 double realFps;
 bool isCameraShaking = false;
 int camerashake_current_priority = 0;
@@ -993,7 +1022,11 @@ int main(int argc, char *argv[]) {
     _MP_on_client_disconnected = on_player_disconnect;
     _MP_server_handle_recv = on_server_recv;
 
-    deletion_queue = array(Node *, 10);
+    deletion_queue = array(Node *, 100);
+    add_queue = array(Node *, 10);
+
+    HEIGHT_TO_XY = (tileSize * 2) / get_max_height();
+    XY_TO_HEIGHT = get_max_height() / (tileSize * 2);
 
     root_node = alloc(Node, NODE);
 
@@ -1066,21 +1099,17 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // struct player_left_packet packet_data = {.id = client_self_id};
+    struct player_left_packet packet_data = {.id = client_self_id};
 
-    // MPPacket packet = {.type = PACKET_PLAYER_LEFT, .is_broadcast = true, .len = sizeof(packet_data)};
+    MPPacket packet = {.type = PACKET_PLAYER_LEFT, .is_broadcast = true, .len = sizeof(packet_data)};
 
-    // MPClient_send(packet, &packet_data);
+    MPClient_send(packet, &packet_data);
 
 
-    // if (MP_is_server) {
-    //     MPPacket hl_packet = {.type = PACKET_HOST_LEFT, .len = 0, .is_broadcast = true};
-    //     MPServer_send(hl_packet, NULL);
-    // }
-
-    // while (!can_exit) {
-
-    // }
+    if (MP_is_server) {
+        MPPacket hl_packet = {.type = PACKET_HOST_LEFT, .len = 0, .is_broadcast = true};
+        MPServer_send(hl_packet, NULL);
+    }
 
     GPU_FreeImage(screen_image);
 
@@ -1396,9 +1425,6 @@ void player_tick(Node *node, double delta) {
         MPClient_send(packet, &packet_data);
     }
 
-    
-    
-
 }
 
 void spriteTick(Sprite *sprite, double delta) {
@@ -1425,23 +1451,45 @@ void tick(double delta) {
 
     Node_tick(root_node, delta);
 
+    if (isCameraShaking) {
+        cameraShakeTimeToNextTick -= delta;
+        if (cameraShakeTimeToNextTick <= 0) {
+            cameraShakeTicksLeft -= 1;
+            cameraShakeTimeToNextTick = 0.02;
+            if (cameraShakeTicksLeft <= 0) {
+                isCameraShaking = false;
+                camerashake_current_priority = -9999;
+            } else {
+                v2 rawShake = {randf_range(-cameraShakeCurrentStrength, cameraShakeCurrentStrength), randf_range(-cameraShakeCurrentStrength, cameraShakeCurrentStrength)};
+                double fade_factor = cameraShakeFadeActive? (double)cameraShakeTicksLeft / cameraShakeTicks : 1;
+                cameraOffset = v2_mul(rawShake, to_vec(fade_factor));
+            }
+        }
+    }
+    cameraOffset = v2_lerp(cameraOffset, to_vec(0), 0.2);
+
+    if (client_dungeon_seed == -1) {
+        client_dungeon_seed_request_timer -= delta;
+        if (client_dungeon_seed_request_timer <= 0) {
+            MPClient_send((MPPacket){.type = PACKET_REQUEST_DUNGEON_SEED, .len = 0, .is_broadcast = false}, NULL);
+            client_dungeon_seed_request_timer = 0.5;
+        }
+    }
     // printf("Deletion queue length: %d \n", array_length(deletion_queue));
 
     while (array_length(deletion_queue) > 0) {
         Node_delete(deletion_queue[0]);
     }
 
+    for (int i = array_length(add_queue) - 1; i >= 0; i--) {
+        Node_add_child(game_node, add_queue[i]);
+        array_remove(add_queue, i);
+    }
+
     //printf("tick start");
 
     
 
-    // if (client_dungeon_seed == -1) {
-    //     client_dungeon_seed_request_timer -= delta;
-    //     if (client_dungeon_seed_request_timer <= 0) {
-    //         MPClient_send((MPPacket){.type = PACKET_REQUEST_DUNGEON_SEED, .len = 0, .is_broadcast = false}, NULL);
-    //         client_dungeon_seed_request_timer = 0.5;
-    //     }
-    // }
 
 
     // if (game_speed_duration_timer <= 0) {
@@ -1462,22 +1510,7 @@ void tick(double delta) {
 
     
 
-    // if (isCameraShaking) {
-    //     cameraShakeTimeToNextTick -= delta;
-    //     if (cameraShakeTimeToNextTick <= 0) {
-    //         cameraShakeTicksLeft -= 1;
-    //         cameraShakeTimeToNextTick = 0.02;
-    //         if (cameraShakeTicksLeft <= 0) {
-    //             isCameraShaking = false;
-    //             camerashake_current_priority = -9999;
-    //         } else {
-    //             v2 rawShake = {randf_range(-cameraShakeCurrentStrength, cameraShakeCurrentStrength), randf_range(-cameraShakeCurrentStrength, cameraShakeCurrentStrength)};
-    //             double fade_factor = cameraShakeFadeActive? (double)cameraShakeTicksLeft / cameraShakeTicks : 1;
-    //             cameraOffset = v2_mul(rawShake, to_vec(fade_factor));
-    //         }
-    //     }
-    // }
-    // cameraOffset = v2_lerp(cameraOffset, to_vec(0), 0.2);
+    
 
 
     // if (queued_player_death) {
@@ -1712,7 +1745,7 @@ void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affe
     GPU_SetRGB(texture, 255, 255, 255);
 }
 
-void renderDirSprite(DirectionalSprite *dSprite, v2 pos, v2 size, double height) {
+void renderDirSprite(DirSprite *dSprite, v2 pos, v2 size, double height) {
     GPU_Image *texture = get_sprite_current_texture(dir_sprite_current_sprite(dSprite, pos));
     renderTexture(texture, pos, size, height, true, (SDL_Color){255, 255, 255, 255});
 }
@@ -2118,7 +2151,6 @@ RayCollisionData ray_node(Raycast ray, Node *node) {
 
 RayCollisionData castRay(v2 pos, v2 dir) {
     // use DDA stupid
-
     // set tilesize to 1
 
     v2 start = v2_div(pos, to_vec(tileSize));
@@ -2479,7 +2511,6 @@ void Effect_tick(Node *node, double delta) {
 
     effect->life_timer -= delta;
     if (effect->life_timer <= 0) {
-        printf("effect ran out \n");
         Node_queue_deletion(node);
         return;
     }
@@ -2521,8 +2552,8 @@ RayCollisionData castRayForAll(v2 pos, v2 dir) {
     return wall_ray_data;
 }
 
-DirectionalSprite *createDirSprite(int dirCount) {
-    DirectionalSprite *dSprite = malloc(sizeof(DirectionalSprite));
+DirSprite *createDirSprite(int dirCount) {
+    DirSprite *dSprite = malloc(sizeof(DirSprite));
     dSprite->dir = (v2){1, 0};
     dSprite->dirCount = dirCount;
     dSprite->sprites = malloc(sizeof(Sprite *) * dirCount);
@@ -2533,11 +2564,11 @@ DirectionalSprite *createDirSprite(int dirCount) {
     return dSprite;
 }
 
-Sprite *dir_sprite_current_sprite(DirectionalSprite *dSprite, v2 spritePos) {
+Sprite *dir_sprite_current_sprite(DirSprite *dSprite, v2 spritePos) {
     double player_angle_to_sprite = v2_get_angle(v2_dir(player->world_node.pos, spritePos));
 
     if (dSprite->dirCount < 2) {
-        return dSprite->sprites[0];
+        return &dSprite->sprites[0];
     } else {
 
         double relative_angle = rad_to_deg(v2_get_angle(dSprite->dir)) - rad_to_deg(player_angle_to_sprite);
@@ -2555,28 +2586,10 @@ Sprite *dir_sprite_current_sprite(DirectionalSprite *dSprite, v2 spritePos) {
             }
         }
 
-        return dSprite->sprites[min_idx];
+        return &dSprite->sprites[min_idx];
     }
 
     return NULL;
-}
-
-void dSpriteTick(DirectionalSprite *dSprite, v2 spritePos, double delta) {
-
-    if (dSprite == NULL) return;
-
-    for (int i = 0; i < dSprite->dirCount; i++) {
-
-        Animation *anim = &(dSprite->sprites[i]->animations[dSprite->current_anim]);
-        if (anim == NULL) {
-            continue;
-        }
-        anim->fps = dSprite->fps;
-        anim->playing = dSprite->playing;
-        animation_tick(anim, delta);
-    }
-
-    // spriteTick(dir_sprite_current_sprite(dSprite, spritePos), delta);
 }
 
 double angleDist(double a1, double a2) {
@@ -2972,16 +2985,10 @@ void player_take_dmg(double dmg) {
 
 void player_die() {
     // play some dramatic ahh animation
-    queued_player_death = true;
-}
-
-void _player_die() {
-    
     player->world_node.pos = spawn_point;
     player->vel = V2_ZERO;
     player->height_vel = 0;
     player->health = player->maxHealth;
-
 }
 
 void init_loading_screen() {
@@ -3090,12 +3097,12 @@ int charge_time_to_shots(double charge_time) {
     return (int)(charge_time * 3);
 }
 
-void dir_sprite_play_anim(DirectionalSprite *dir_sprite, int anim) {
+void dir_sprite_play_anim(DirSprite *dir_sprite, int anim) {
     if (dir_sprite->current_anim == anim) return;
     
     for (int i = 0; i < dir_sprite->dirCount; i++) {
-        dir_sprite->sprites[i]->animations[anim].frame = 0;
-        dir_sprite->sprites[i]->current_anim_idx = anim;
+        dir_sprite->sprites[i].animations[anim].frame = 0;
+        dir_sprite->sprites[i].current_anim_idx = anim;
     }
 
     dir_sprite->current_anim = anim;
@@ -3286,7 +3293,10 @@ ParticleSpawner ParticleSpawner_new(bool active) {
         .fade = true,
         .fade_scale = true,
         .affected_by_light = true,
-        .explode_particle_amount = 20
+        .explode_particle_amount = 20,
+        .damp = 1,
+        .radial_accel = V2_ZERO,
+        .height_radial_accel = 0
     };
 
     spawner.world_node = new(WorldNode, WORLD_NODE);
@@ -3317,10 +3327,14 @@ void particle_spawner_tick(Node *node, double delta) {
     ParticleSpawner *spawner = node;
 
     if (!spawner->active) return;
-    spawner->spawn_timer -= delta;
-    if (spawner->spawn_timer <= 0) {
-        spawner->spawn_timer = 1.0 / spawner->spawn_rate;
-        particle_spawner_spawn(spawner);
+    spawner->spawn_timer += delta;
+    double thresh = 1.0 / spawner->spawn_rate;
+    if (spawner->spawn_timer >= thresh) {
+        int amount = spawner->spawn_timer / thresh;
+        spawner->spawn_timer = 0;
+        for (int i = 0; i < amount; i++) { // i do it this way so low fps still outputs more than 30 particles/frame
+            particle_spawner_spawn(spawner);
+        }
     }
 }
 
@@ -3361,11 +3375,18 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
     particle->bounciness = spawner->bounciness;
     particle->floor_drag = spawner->floor_drag;
 
+    particle->damp = spawner->damp;
+    particle->radial_accel = spawner->radial_accel;
+    particle->height_radial_accel = spawner->height_radial_accel;
+
     particle->effect.entity.world_node.pos = pos; // change later with emission
     particle->effect.entity.world_node.height = height;
     
     particle->fade = spawner->fade;
     particle->fade_scale = spawner->fade_scale;
+
+    particle->initial_pos = pos;
+    particle->initial_height = height;
 
     double size_rand = randf_range(0, 1);
     v2 size = v2_lerp(spawner->min_size, spawner->max_size, size_rand);
@@ -3377,22 +3398,11 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
     Node_add_child(particle, particle_sprite);
 
     Node_add_child(game_node, particle);
-    printf("Spawned particle! \n");
-
-    
-    // particle->effect.entity.sprite = malloc(sizeof(Sprite));
-    // *particle->effect.entity.sprite = spawner->sprite;
-
-    // if (particle->effect.entity.sprite->texture == NULL) {
-    //     particle->effect.entity.sprite->texture = default_particle_texture;
-    //     particle->effect.entity.sprite->isAnimated = false;
-    //     printf("Error! switching to default texture! \n");
-    // }
 
 }
 
 
-void Particle_tick(Node *node, double delta) {
+void Particle_tick(Node *node, double delta) { // #PT
 
     Particle *particle = node;
 
@@ -3416,10 +3426,18 @@ void Particle_tick(Node *node, double delta) {
 
     particle->vel = v2_add(particle->vel, v2_mul(particle->accel, to_vec(delta)));
     particle->h_vel += particle->h_accel * delta;
+    particle->vel = v2_add(particle->vel, v2_mul(v2_rotate(particle->radial_accel, v2_get_angle(v2_dir(particle->effect.entity.world_node.pos, particle->initial_pos))), to_vec(delta)));
+   
+    particle->h_vel += particle->height_radial_accel * XY_TO_HEIGHT * sign(particle->initial_height - particle->effect.entity.world_node.height);
+   
+    particle->vel = v2_mul(particle->vel, to_vec((1.0 / particle->damp)));
+    particle->h_vel *= (1.0 / particle->damp);
 
     particle->effect.entity.world_node.size = v2_lerp(particle->initial_size, V2_ZERO, inverse_lerp(particle->effect.life_time, 0, particle->effect.life_timer));
     particle->effect.entity.world_node.pos = v2_add(particle->effect.entity.world_node.pos, v2_mul(particle->vel, to_vec(delta)));
     particle->effect.entity.world_node.height += particle->h_vel * delta;
+
+
     double floor_bound = particle->effect.entity.world_node.size.y / 2;
     double ceil_bound = get_max_height() - particle->effect.entity.world_node.size.y / 2;
     if (particle->effect.entity.world_node.height < floor_bound) {
@@ -3431,6 +3449,7 @@ void Particle_tick(Node *node, double delta) {
         particle->effect.entity.world_node.height = ceil_bound;
         particle->h_vel *= -particle->bounciness;
     }
+
 
    
 
@@ -4057,24 +4076,23 @@ void client_add_player_entity(int id) {
     player_entity->entity.color = (SDL_Color){255, 255, 255,  255};
     player_entity->desired_pos = V2_ZERO;
     player_entity->desired_height = 0;
-    // player_entity->collider = (CircleCollider){.radius = PLAYER_COLLIDER_RADIUS, .pos = V2_ZERO};
-    Node_add_child(player_entity, alloc(CircleCollider, CIRCLE_COLLIDER, PLAYER_COLLIDER_RADIUS));
 
-    // player_entity->direction_indicator = malloc(sizeof(Entity));
-    // player_entity->direction_indicator->affected_by_light = true;
-    // player_entity->direction_indicator->color = GPU_MakeColor(255, 255, 255, 255);
-    // // player_entity->direction_indicator->sprite = createSprite(false, 0);
-    // // player_entity->direction_indicator->sprite->texture = default_particle_texture;
-    // player_entity->direction_indicator->world_node.height = get_max_height() / 2 + player->tallness / 2;
-    // player_entity->direction_indicator->world_node.pos = V2_ZERO;
-    // player_entity->direction_indicator->world_node.size = to_vec(1600);
-    
-    player_entity->dir_sprite = createDirSprite(16);
-    for (int i = 0; i < 16; i++) {
-        Sprite *sprite = alloc(Sprite, SPRITE, false);
-        sprite->texture = player_textures[i];
-        player_entity->dir_sprite->sprites[i] = sprite;
-    }
+
+    Sprite *temp_sprite = alloc(Sprite, SPRITE, false);
+    temp_sprite->texture = entityTexture;
+
+    Node_add_child(player_entity, temp_sprite);
+
+    // Node_add_child(player_entity, alloc(CircleCollider, CIRCLE_COLLIDER, PLAYER_COLLIDER_RADIUS));
+
+    // DirSprite *dir_sprite = alloc(DirSprite, DIR_SPRITE, 16);
+
+    // DirSprite_add_animation(dir_sprite, 1, player_textures);
+
+    // dir_sprite_play_anim(dir_sprite, 0);
+
+    // Node_add_child(player_entity, dir_sprite);
+
 
     printf("Player joined! ID: %d \n", player_entity->id);
     write_to_debug_label(String_from_int(player_entity->id));
@@ -4096,6 +4114,8 @@ void on_client_recv(MPPacket packet, void *data) {
         if (packet_data.id == client_self_id) {
             return;
         }
+
+        printf("Received pos packet! sender id: %d, pos: (%.2f, %.2f)\n", packet_data.id, packet_data.pos.x, packet_data.pos.y);
 
         PlayerEntity *player_entity = find_or_add_player_entity_by_id(packet_data.id);
 
@@ -4207,17 +4227,13 @@ void PlayerEntity_tick(PlayerEntity *player_entity, double delta) {
 
     player_entity->entity.world_node.pos = v2_lerp(player_entity->entity.world_node.pos, player_entity->desired_pos, 0.1 * (delta * 144));
     player_entity->entity.world_node.height = lerp(player_entity->entity.world_node.height, real_desired_height, 0.1 * (delta * 144));
-    //player_entity->collider.pos = player_entity->entity.world_node.pos;
-    player_entity->direction_indicator->world_node.pos = v2_add(player_entity->entity.world_node.pos, v2_mul(player_entity->dir, to_vec(20)));
-    player_entity->direction_indicator->world_node.height = player_entity->entity.world_node.height + player->tallness * .25;
-    player_entity->dir_sprite->dir = player_entity->dir;
-
-    dSpriteTick(player_entity->dir_sprite, player_entity->entity.world_node.pos, delta);
 }
 
 
 // #TEXTURES INIT
 void init_textures() {
+
+    forcefield_field = get_texture_files("Textures/Abilities/Forcefield/pulsate", 5);
 
     hand_shoot = get_texture_files("Textures/rightHandAnim/rightHandAnim", 6);
 
@@ -4229,7 +4245,7 @@ void init_textures() {
 
     bomb_icon = load_texture("Textures/Abilities/Icons/bomb_icon.png");
 
-    bomb_anim = get_texture_files("Textures/Abilities/Bomb/bomb", 2);
+    bomb_anim = get_texture_files("Textures/Abilities/Bomb/bomb", 4);
    
 
     blood_particle = load_texture("Textures/BloodParticle.png");
@@ -4381,11 +4397,11 @@ void ability_bomb_activate() {
     Node_add_child(game_node, bomb);
 
 
-    // MPPacket packet = {.type = PACKET_ABILITY_BOMB, .len = sizeof(struct ability_bomb_packet), .is_broadcast = true};
+    MPPacket packet = {.type = PACKET_ABILITY_BOMB, .len = sizeof(struct ability_bomb_packet), .is_broadcast = true};
 
-    // struct ability_bomb_packet packet_data = {.pos = bomb->entity.world_node.pos, .height = bomb->entity.world_node.height, .vel = bomb->vel, .height_vel = bomb->height_vel, .sender_id = client_self_id};
+    struct ability_bomb_packet packet_data = {.pos = bomb->entity.world_node.pos, .height = bomb->entity.world_node.height, .vel = bomb->vel, .height_vel = bomb->height_vel, .sender_id = client_self_id};
 
-    // MPClient_send(packet, &packet_data);
+    MPClient_send(packet, &packet_data);
 
 
 }
@@ -4492,7 +4508,7 @@ Projectile *create_bomb_projectile(v2 pos, v2 start_vel) {
 
     projectile->height_accel = PROJECTILE_GRAVITY;
     projectile->bounciness = 1.0;
-    projectile->destroy_on_floor = false;
+    projectile->destroy_on_floor = true;
     projectile->entity.world_node.pos = pos;
     projectile->vel = v2_add(start_vel, v2_mul(player->vel, to_vec(0.5)));
     projectile->height_vel = (is_player_on_floor()? 0 : player->height_vel * 0.5) + player->pitch * -3;
@@ -4505,7 +4521,7 @@ Projectile *create_bomb_projectile(v2 pos, v2 start_vel) {
     Node_add_child(projectile, p_spawner);
 
     Sprite *sprite = alloc(Sprite, SPRITE, true);
-    array_append(sprite->animations, create_animation(2, 1, bomb_anim));
+    array_append(sprite->animations, create_animation(4, 1, bomb_anim));
     sprite->animations[0].loop = true;
     sprite->animations[0].fps = 12;
     spritePlayAnim(sprite, 0);
@@ -4533,7 +4549,7 @@ void bomb_on_destroy(Projectile *projectile) {
     p_spawner->fade_scale = true;
     p_spawner->affected_by_light = false;
     p_spawner->min_speed = 30;
-    p_spawner->max_speed = 80;
+    p_spawner->max_speed = 50;
     p_spawner->spread = 2;
     p_spawner->height_dir = 0.2;
     p_spawner->explode_particle_amount = 20;
@@ -4550,7 +4566,7 @@ void bomb_on_destroy(Projectile *projectile) {
     p_spawner->end_color = GPU_MakeColor(0, 0, 0, 0);
     p_spawner->min_size = to_vec(15000);
     p_spawner->max_size = to_vec(19000);
-    p_spawner->min_speed = 100;
+    p_spawner->min_speed = 90;
     p_spawner->max_speed = 150;
 
     particle_spawner_explode(p_spawner);
@@ -4608,7 +4624,7 @@ void randomize_player_abilities() {
 
     Ability primary_choices[] = {ability_primary_shoot_create()};
     Ability secondary_choices[] = {ability_bomb_create()};
-    Ability utility_choices[] = {ability_dash_create()};
+    Ability utility_choices[] = {ability_forcefield_create()};
     //Ability speical_choices[] = {};
 
     *default_primary = pick_random_ability_from_array(primary_choices, sizeof(primary_choices) / sizeof(Ability));
@@ -4687,7 +4703,7 @@ Ability ability_forcefield_create() {
         .before_activate = NULL,
         .can_use = false,
         .cooldown = 10,
-        .timer = 10,
+        .timer = 0,
         .delay_timer = 0,
         .delay = 0,
         .texture = entityTexture,
@@ -4712,41 +4728,57 @@ void ability_forcefield_activate() {
     Node_add_child(game_node, proj);
 }
 
-Projectile *projectile_forcefield_create() {
+Projectile *projectile_forcefield_create() { // #PFC
     Projectile *projectile = alloc(Projectile, PROJECTILE, 10);
     projectile->type = PROJ_FORCEFIELD;
     projectile->on_tick = projectile_forcefield_on_tick;
-    // projectile.entity.sprite = createSprite(true, 1);
-    // projectile.entity.sprite->animations[0] = create_animation(2, 1, forcefield_anim);
-    // projectile.entity.sprite->animations[0].loop = true;
+
+    Sprite *other_sprite = alloc(Sprite, SPRITE, true);
+    Animation anim1 = create_animation(5, 1, forcefield_field);
+    anim1.fps = 12;
+    anim1.loop = true;
+    array_append(other_sprite->animations, anim1);
+    spritePlayAnim(other_sprite, 0);
+    other_sprite->scale = V2(4, 4);
+    Node_add_child(projectile, other_sprite);
+
+
+
+    Sprite *sprite = alloc(Sprite, SPRITE, true);
+    Animation anim = create_animation(2, 1, forcefield_anim);
+    anim.fps = 5;
+    anim.loop = true;
+    array_append(sprite->animations, anim);
+    Node_add_child(projectile, sprite);
     projectile->entity.world_node.size = to_vec(8000);
 
-    // ParticleSpawner *particle_spawner = malloc(sizeof(ParticleSpawner));
-    // *particle_spawner = ParticleSpawner_new(V2_ZERO, 0);
-    // particle_spawner->spread = 2;
-    // particle_spawner->min_size = to_vec(4000);
-    // particle_spawner->max_size = to_vec(7000);
-    // particle_spawner->height_dir = 1;
-    // particle_spawner->start_color = Color(200, 255, 255, 255);
-    // particle_spawner->end_color = Color(255, 255, 255, 255);
-    // particle_spawner->active = true;
-    // particle_spawner->height_accel = 0;
-    // particle_spawner->particle_lifetime = 0.8;
-    // particle_spawner->bounciness = 1;
-    // particle_spawner->dir = (v2){10, 0};
-    // particle_spawner->affected_by_light = false;
-    // // particle_spawner->min_speed = 90;
-    // // particle_spawner->min_speed = 290;
-    // // set the target later
-
-    // projectile->extra_data = particle_spawner;
-
-    // add_game_object(particle_spawner, PARTICLE_SPAWNER);
+    ParticleSpawner *particle_spawner = alloc(ParticleSpawner, PARTICLE_SPAWNER, true);
+    particle_spawner->spread = 2;
+    particle_spawner->min_size = to_vec(2000);
+    particle_spawner->max_size = to_vec(5000);
+    particle_spawner->height_dir = 1;
+    particle_spawner->start_color = Color(200, 255, 255, 255);
+    particle_spawner->end_color = Color(255, 255, 255, 255);
+    particle_spawner->active = true;
+    particle_spawner->height_accel = 0;
+    particle_spawner->particle_lifetime = .8;
+    particle_spawner->bounciness = 1;
+    particle_spawner->dir = (v2){10, 0};
+    particle_spawner->affected_by_light = false;
+    particle_spawner->min_speed = 2;
+    particle_spawner->max_speed = 10;
+    particle_spawner->spawn_rate = 32;
+    particle_spawner->damp = 1;
+    particle_spawner->radial_accel = V2(50, 0);
+    particle_spawner->height_radial_accel = 7500 * XY_TO_HEIGHT;
+    Node_add_child(projectile, particle_spawner);
 
     return projectile;
 }
 
 void projectile_forcefield_on_tick(Projectile *projectile, double delta) {
+
+    const int REPEL_DIST = 75;
 
     projectile->vel = v2_lerp(projectile->vel, V2_ZERO, 0.01 * delta * 144);
 
@@ -4757,8 +4789,9 @@ void projectile_forcefield_on_tick(Projectile *projectile, double delta) {
         if (proj == projectile) continue;
 
         double dist_sqr = v2_distance_squared(projectile->entity.world_node.pos, proj->entity.world_node.pos);
-        if (dist_sqr < 50 * 50) {
+        if (dist_sqr < REPEL_DIST * REPEL_DIST) {
             proj->vel = v2_add(proj->vel, v2_dir(projectile->entity.world_node.pos, proj->entity.world_node.pos));
+            proj->height_vel -= proj->height_accel * 1.2 * delta;
             printf("Pushed! \n");
         }
     });
@@ -4767,7 +4800,7 @@ void projectile_forcefield_on_tick(Projectile *projectile, double delta) {
 Node Node_new() {
     Node node = {0};
     node.parent = NULL;
-    node.children = array(Node *, 2);
+    node.children = array(Node *, 3);
 
     if ((int)node.children < 10) {
         printf("Invalid children! \n");
@@ -4956,7 +4989,7 @@ void _GANA_helper(Node *root, Node ***arr) {
 }
 
 Node **get_all_nodes_array() {
-    Node **arr = array(Node *, 10);
+    Node **arr = array(Node *, 200);
 
     _GANA_helper(root_node, &arr);
 
@@ -4975,7 +5008,10 @@ Entity Entity_new() {
 
 PlayerEntity PlayerEntity_new() {
     PlayerEntity player_entity = {0};
+    
+    
     player_entity.entity = new(Entity, ENTITY);
+    
     node(&player_entity)->on_tick = PlayerEntity_tick;
 
     return player_entity;
@@ -5002,6 +5038,7 @@ Sprite Sprite_new(bool is_animated) {
     sprite.current_anim_idx = 0;
     sprite.color = Color(255, 255, 255, 255);
     sprite.inherit_color = true;
+    sprite.scale = V2_ONE;
 
     sprite.node.on_delete = Sprite_delete;
     sprite.node.on_tick = Sprite_tick;
@@ -5046,7 +5083,7 @@ void Sprite_render(Node *node) {
 
         
 
-        renderTexture(get_sprite_current_texture((Sprite *)node), parent->pos, parent->size, parent->height, affected_by_light, custom_color);
+        renderTexture(get_sprite_current_texture((Sprite *)node), parent->pos, v2_mul(parent->size, sprite->scale), parent->height, affected_by_light, custom_color);
     
     } else if (instanceof(node->parent->type, CANVAS_NODE)) {
         CanvasNode *parent = node->parent;
@@ -5054,8 +5091,8 @@ void Sprite_render(Node *node) {
         GPU_Rect rect = {
             parent->pos.x,
             parent->pos.y,
-            parent->size.x,
-            parent->size.y
+            parent->size.x * sprite->scale.x,
+            parent->size.y * sprite->scale.y
         };
 
         GPU_Image *current_texture = get_sprite_current_texture((Sprite *)node);
@@ -5068,7 +5105,7 @@ void Sprite_render(Node *node) {
 
 }
 
-void Sprite_tick(Node *node, double delta) {
+void Sprite_tick(Node *node, double delta) { // NO NODE SHENANIGANS WITHOUT EDITING DIRSPRITE
 
     Sprite *sprite = node;
 
@@ -5099,6 +5136,8 @@ Particle Particle_new(double life_time) {
     particle.start_color = Color(255, 255, 255, 255);
     particle.end_color = Color(255, 255, 255, 255);
     particle.h_accel = -PARTICLE_GRAVITY;
+    particle.initial_pos = V2(-10000, -10000);
+    particle.damp = 1;
 
     node(&particle)->on_tick = Particle_tick;
 
@@ -5404,6 +5443,71 @@ void Projectile_on_collide(CircleCollider *collider, CollisionData data) {
 
     projectile->entity.world_node.pos = v2_add(projectile->entity.world_node.pos, data.offset);
     projectile->vel = v2_mul(v2_reflect(projectile->vel, v2_normalize(data.offset)), to_vec(projectile->bounciness));
+}
+
+void DirSprite_tick(Node *node, double delta) {
+    DirSprite *dir_sprite = node;
+
+    for (int i = 0; i < dir_sprite->dirCount; i++) {
+        Sprite_tick(&dir_sprite->sprites[i], delta);
+    }
+}
+
+void DirSprite_render(Node *node) {
+    DirSprite *dir_sprite = node;
+
+    if (node->parent == NULL || !instanceof(node->parent->type, WORLD_NODE)) return;
+    // no support for canvas node bc how tf would that work
+
+    WorldNode *parent = node->parent;
+
+    GPU_Image *current_texture = get_sprite_current_texture(dir_sprite_current_sprite(dir_sprite, parent->pos));
+
+    bool affected_by_light = true;
+    SDL_Color custom_color = Color(255, 255, 255, 255);
+    if (instanceof(node->parent->type, ENTITY)) {
+        Entity *parent_e = parent;
+        affected_by_light = parent_e->affected_by_light;
+        custom_color = parent_e->color;
+    }
+
+    renderTexture(current_texture, parent->pos, parent->size, parent->height, affected_by_light, custom_color);
+
+}
+
+DirSprite DirSprite_new(int dir_count) {
+    DirSprite dir_sprite = {0};
+    dir_sprite.dirCount = dir_count;
+    dir_sprite.sprites = malloc(sizeof(Sprite) * dir_count);
+    for (int i = 0; i < dir_count; i++) {
+        dir_sprite.sprites[i] = new(Sprite, SPRITE, true);
+    }
+
+    node(&dir_sprite)->on_tick = DirSprite_tick;
+    node(&dir_sprite)->on_delete = DirSprite_on_delete;
+    node(&dir_sprite)->on_render = DirSprite_render;
+
+    return dir_sprite;
+}
+
+void DirSprite_add_animation(DirSprite *dir_sprite, int frame_count, GPU_Image **textures) {
+    for (int i = 0; i < dir_sprite->dirCount; i++) {
+        
+        Animation anim = create_animation(frame_count, 1, textures + i * frame_count);
+        
+        array_append(dir_sprite->sprites[i].animations, anim);
+    }
+}
+
+void DirSprite_on_delete(Node *node) {
+    DirSprite *dir_sprite = node;
+
+    free(dir_sprite->sprites);
+    dir_sprite->sprites = NULL;
+}
+
+void Node_queue_add_to_game_node(Node *node) {
+    array_append(add_queue, node);
 }
 
 
