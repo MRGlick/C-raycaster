@@ -20,6 +20,9 @@ void main()
    
     vec2 Radius = size / texResolution;
     
+    //vec2 targetResolution = vec2(256, 192);
+    //vec2 uvSnapped = floor(texCoord * targetResolution) / targetResolution;
+
     // Normalized pixel coordinates (from 0 to 1)
     vec2 uv = texCoord;
     // pixel colour
@@ -44,6 +47,6 @@ void main()
     fragColor = Color;
 
     // Combine the original color with the blurred color for the bloom effect
-    fragColor = texture(tex, texCoord) + Color * 0.8;
+    fragColor = texture(tex, uv) + Color * 0.8;
 }
 

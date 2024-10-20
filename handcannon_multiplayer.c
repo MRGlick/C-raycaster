@@ -11,7 +11,7 @@
 
 // #DEFINITIONS
 
-#define DEBUG_FLAG false
+#define DEBUG_FLAG true
 
 #define SERVER_IP "127.0.0.1"
 #define SERVER_PORT 1155
@@ -236,6 +236,17 @@ DEF_STRUCT(Node, NODE, {
     struct Node *parent;
     struct Node **children;
 });
+    DEF_STRUCT(Line, LINE, {
+        Node node;
+        GPU_Image *texture;
+        v2 p1, p2;
+        double h1, h2;
+        double width;
+        bool fade;
+    });
+
+    END_STRUCT(LINE);
+
     DEF_STRUCT(Sprite, SPRITE, {
         Node node;
         GPU_Image *texture;  // not used if animated
@@ -264,6 +275,8 @@ DEF_STRUCT(Node, NODE, {
         int playing;
         int fps;
     });
+
+    END_STRUCT(DIR_SPRITE);
 
     DEF_STRUCT(WorldNode, WORLD_NODE, {
         Node node;
@@ -467,7 +480,7 @@ typedef struct Raycast {
 
 typedef struct RayCollisionData {
     v2 startpos, collpos, normal;
-    void *collider;
+    Node *collider;
     int colliderType;
     GPU_Image *colliderTexture;
     bool hit;
@@ -505,6 +518,12 @@ typedef struct Room {
 } Room;
 
 // #FUNC
+
+void Line_tick(Node *node, double delta);
+
+void Line_render(Node *node);
+
+Line Line_new();
 
 void render_textured_quad(GPU_Image *texture, v2 top_left, v2 top_right, v2 bot_left, v2 bot_right);
 
@@ -818,8 +837,10 @@ UIComponent *pause_menu;
 UILabel *debug_label;
 
 // #TEXTURES
+GPU_Image *shoot_ray;
 GPU_Image **forcefield_field;
 GPU_Image *hand_default;
+GPU_Image *shoot_ray;
 GPU_Image **hand_shoot;
 GPU_Image **forcefield_anim;
 GPU_Image **player_textures;
@@ -1178,6 +1199,19 @@ void init() {  // #INIT
     init_health_bar();
     init_crosshair();
     init_ability_hud();
+
+
+
+    // Line *line = alloc(Line, LINE);
+
+    // line->p1 = V2(500, 800);
+    // line->h1 = player->world_node.height;
+    // line->p2 = v2_add(line->p1, to_vec(100));
+    // line->h2 = line->h1 + 100 * XY_TO_HEIGHT;
+    // line->texture = entityTexture;
+
+    // Node_add_child(root_node, line);
+
 }  // #INIT END
 
 v2 get_player_forward() {
@@ -1404,7 +1438,7 @@ void player_tick(Node *node, double delta) {
    
     player->world_node.pos = v2_add(player->world_node.pos, v2_mul(finalVel, to_vec(delta)));
     
-    
+    cd_print(true, "pos: (%.2f, %.2f) \n", player->world_node.pos.x, player->world_node.pos.y);
     
 
     update_pos_timer -= delta;
@@ -1829,84 +1863,53 @@ RenderObject *get_render_list() {
         array_append(renderList, wallStripesToRender[i]);
     }
 
-    do { 
-        Node **node_arr = get_all_nodes_array(); 
-        for (int name_i_wont_use = 0; name_i_wont_use < array_length(node_arr); name_i_wont_use++) { 
-            Node *node = node_arr[name_i_wont_use]; 
-            { 
-                RenderObject render_object = (RenderObject){.isnull = 0}; 
-                v2 pos = ((v2){0, 0}); 
-                bool custom_dist = 0; 
-                if ((node->type >= WORLD_NODE && node->type <= WORLD_NODE_END)) { 
-                    pos = ((WorldNode *)node)->pos; 
-                } 
-                if ((node->type >= SPRITE && node->type <= SPRITE_END)) { 
-                    if (node->parent != ((void *)0)) { 
-                        if ((node->parent->type >= WORLD_NODE && node->parent->type <= WORLD_NODE_END)) { 
-                            pos = ((WorldNode *)node->parent)->pos; 
-                        } else if ((node->parent->type >= CANVAS_NODE && node->parent->type <= CANVAS_NODE_END)) { 
-                            custom_dist = 1; 
-                            render_object.dist_squared = ((CanvasNode *)node->parent)->z_index + 9999; 
-                        } 
-                    } 
-                } 
-                if ((node->type >= CANVAS_NODE && node->type <= CANVAS_NODE_END) && node->parent == ((void*)0)) { 
-                    custom_dist = 1; 
-                    render_object.dist_squared = ((CanvasNode *)node->parent)->z_index + 9999; 
-                }
-                 if (!custom_dist) { 
-                    render_object.dist_squared = v2_distance_squared(pos, player->world_node.pos); 
-                } render_object.val = node; 
-                render_object.type = NODE; 
-                do { 
-                    _array_ensure_capacity((void **)&(renderList)); 
-                    renderList[array_length(renderList)] = render_object; 
-                    array_header(renderList)->length++; 
-                } while (0); 
-            } 
+    iter_over_all_nodes(node, {
+
+        RenderObject render_object = (RenderObject){.isnull = false};
+        v2 pos = V2_ZERO;
+
+        bool custom_dist = false;
+        
+        if (instanceof(node->type, WORLD_NODE)) {
+
+            pos = ((WorldNode *)node)->pos;
+
         }
-        array_free(node_arr); 
-    } while(0);
-
-    // iter_over_all_nodes(node, {
-
-    //     RenderObject render_object = (RenderObject){.isnull = false};
-    //     v2 pos = V2_ZERO;
-
-    //     bool custom_dist = false;
-        
-    //     if (instanceof(node->type, WORLD_NODE)) {
-
-    //         pos = ((WorldNode *)node)->pos;
-
-    //     }
-    //     if (instanceof(node->type, SPRITE)) {
-    //         if (node->parent != NULL) {
+        if (instanceof(node->type, SPRITE) || instanceof(node->type, DIR_SPRITE)) {
+            if (node->parent != NULL) {
                 
-    //             if (instanceof(node->parent->type, WORLD_NODE)) {
-    //                 pos = ((WorldNode *)node->parent)->pos;
-    //             } else if (instanceof(node->parent->type, CANVAS_NODE)) {
-    //                 custom_dist = true;
-    //                 render_object.dist_squared = ((CanvasNode *)node->parent)->z_index + 9999; // for negative z index, will probably do something about this later
-    //             }
+                if (instanceof(node->parent->type, WORLD_NODE)) {
+                    pos = ((WorldNode *)node->parent)->pos;
+                } else if (instanceof(node->parent->type, CANVAS_NODE)) {
+                    custom_dist = true;
+                    render_object.dist_squared = ((CanvasNode *)node->parent)->z_index + 9999; // for negative z index, will probably do something about this later
+                }
                 
-    //         }
-    //     }
+            }
+        }
+        if (instanceof(node->type, LINE)) {// this is the last edge case i swear
+            Line *line = node;
+            double d1 = v2_distance_squared(line->p1, player->world_node.pos);
+            double d2 = v2_distance_squared(line->p2, player->world_node.pos);
 
-    //     if (instanceof(node->type, CANVAS_NODE)) {
-    //         custom_dist = true;
-    //         render_object.dist_squared = ((CanvasNode *)node->parent)->z_index + 9999; // for negative z index, will probably do something about this later
-    //     }
+            if (d1 < d2) pos = line->p1;
+            else pos = line->p2;
+        }
 
-    //     if (!custom_dist) {
-    //         render_object.dist_squared = v2_distance_squared(pos, player->world_node.pos);
-    //     }
-    //     render_object.val = node;
-    //     render_object.type = NODE;
+        if (instanceof(node->type, CANVAS_NODE)) {
+            custom_dist = true;
+            render_object.dist_squared = ((CanvasNode *)node->parent)->z_index + 9999; // for negative z index, will probably do something about this later
+        }
+
+        if (!custom_dist) {
+            render_object.dist_squared = v2_distance_squared(pos, player->world_node.pos);
+        }
+        render_object.val = node;
+        render_object.type = NODE;
         
-    //     array_append(renderList, render_object);
+        array_append(renderList, render_object);
         
-    // });
+    });
 
     int l = array_length(renderList);
 
@@ -1916,15 +1919,15 @@ RenderObject *get_render_list() {
 }
 
 void clampColors(int rgb[3]) {
-    // int max_idx = 0;
-    // for (int i = 1; i < 3; i++) if (rgb[i] > rgb[max_idx]) max_idx = i;
+    int max_idx = 0;
+    for (int i = 1; i < 3; i++) if (rgb[i] > rgb[max_idx]) max_idx = i;
 
-    // if (rgb[max_idx] >= 255) {
-    //     double divisor = (double)rgb[max_idx] / 255;
-    //     for (int i = 0; i < 3; i++) {
-    //         rgb[i] /= divisor;   
-    //     }
-    // }
+    if (rgb[max_idx] >= 255) {
+        double divisor = (double)rgb[max_idx] / 255;
+        for (int i = 0; i < 3; i++) {
+            rgb[i] /= divisor;   
+        }
+    }
 
     for (int i = 0; i < 3; i++) {
         rgb[i] = SDL_clamp(rgb[i], 0, 255);
@@ -2207,7 +2210,7 @@ RayCollisionData castRay(v2 pos, v2 dir) {
         }
     }
 
-    RayCollisionData data;
+    RayCollisionData data = {0};
     if (found) {
         data.hit = true;
         data.wallWidth = tileSize;
@@ -2231,7 +2234,7 @@ RayCollisionData castRay(v2 pos, v2 dir) {
 
 RayCollisionData ray_circle(Raycast ray, CircleCollider *collider) {
     
-    RayCollisionData data;
+    RayCollisionData data = {0};
 
     if (v2_distance(ray.pos, collider->world_node.pos) <= collider->radius || v2_dot(ray.dir, v2_dir(ray.pos, collider->world_node.pos)) < 0) {
         data.hit = false;
@@ -2522,14 +2525,27 @@ void Effect_tick(Node *node, double delta) {
 RayCollisionData castRayForEntities(v2 pos, v2 dir) {
     Raycast ray = {pos, dir};
 
-    RayCollisionData data;
-    double minSquaredDist = INFINITY;
+    RayCollisionData data = {0};
+    double min_sqr_dist = 99999999999;
 
     iter_over_all_nodes(node, {
 
         if (node->type != CIRCLE_COLLIDER) continue;
 
+
+
         RayCollisionData coll_data = ray_circle(ray, node);
+        
+        if (!coll_data.hit) continue;
+
+        double sqr_dist = v2_distance_squared(pos, coll_data.collpos);
+
+        if (sqr_dist < min_sqr_dist) {
+            min_sqr_dist = sqr_dist;
+            data = coll_data;
+        }
+        
+        data = coll_data;
 
     }); 
 
@@ -2540,6 +2556,8 @@ RayCollisionData castRayForAll(v2 pos, v2 dir) {
     RayCollisionData entity_ray_data = castRayForEntities(pos, dir);
     RayCollisionData wall_ray_data = castRay(pos, dir);
 
+    if (!wall_ray_data.hit && !entity_ray_data.hit) return (RayCollisionData){0};
+
     if (!entity_ray_data.hit) return wall_ray_data;
     if (!wall_ray_data.hit) return entity_ray_data;
 
@@ -2548,18 +2566,6 @@ RayCollisionData castRayForAll(v2 pos, v2 dir) {
 
     if (entity_squared_dist < wall_squared_dist) return entity_ray_data;
     return wall_ray_data;
-}
-
-DirSprite *createDirSprite(int dirCount) {
-    DirSprite *dSprite = malloc(sizeof(DirSprite));
-    dSprite->dir = (v2){1, 0};
-    dSprite->dirCount = dirCount;
-    dSprite->sprites = malloc(sizeof(Sprite *) * dirCount);
-    dSprite->current_anim = 0;
-    dSprite->playing = false;
-    dSprite->fps = 12;
-
-    return dSprite;
 }
 
 Sprite *dir_sprite_current_sprite(DirSprite *dSprite, v2 spritePos) {
@@ -3188,7 +3194,7 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
     double pitch = player->pitch + randf_range(1000 * -spread, 1000 * spread);
 
     
-    shakeCamera(10, 4, true, 1);
+    shakeCamera(20, 4, true, 1);
     spritePlayAnim(get_child_by_type(hand_node, SPRITE), 1);
 
     v2 shoot_dir = v2_rotate(playerForward, randf_range(-PI * spread, PI * spread));
@@ -3196,6 +3202,11 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
     v2 effect_size = to_vec(8000);
 
     RayCollisionData ray_data = castRayForAll(player->world_node.pos, shoot_dir);
+
+    if (ray_data.collider != NULL && node(ray_data.collider)->parent->type == PROJECTILE) {
+        projectile_destroy(node(ray_data.collider)->parent);
+    }
+
 
     v2 hit_pos = screenToFloor((v2){RESOLUTION_X / 2, WINDOW_HEIGHT / 2 + pitch});
     double distance_to_hit_pos = v2_distance(hit_pos, player->world_node.pos);
@@ -3233,6 +3244,24 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
     Node_add_child(hit_effect, sprite);
 
     Node_add_child(game_node, hit_effect);
+
+    // ray effect
+    Effect *ray_effect = alloc(Effect, EFFECT, 0.3);
+    Line *line = alloc(Line, LINE);
+    v2 gun_offset = V2(5, 2);
+    double gun_offset_h = -700 + -gun_offset.x * player->pitch;
+    v2 final_offset = v2_rotate(gun_offset, v2_get_angle(playerForward));
+    line->p1 = player->world_node.pos;
+    line->p1 = v2_add(line->p1, final_offset);
+    line->p2 = final_pos;
+    line->h1 = get_player_height() + gun_offset_h;
+    line->h2 = final_height;
+    line->texture = shoot_ray;
+    line->fade = true;
+    Node_add_child(ray_effect, line);
+
+    Node_add_child(game_node, ray_effect);
+
 
     
     struct ability_shoot_packet packet_data = {
@@ -4076,20 +4105,20 @@ void client_add_player_entity(int id) {
     player_entity->desired_height = 0;
 
 
-    Sprite *temp_sprite = alloc(Sprite, SPRITE, false);
-    temp_sprite->texture = entityTexture;
+    // Sprite *temp_sprite = alloc(Sprite, SPRITE, false);
+    // temp_sprite->texture = entityTexture;
 
-    Node_add_child(player_entity, temp_sprite);
+    // Node_add_child(player_entity, temp_sprite);
 
     Node_add_child(player_entity, alloc(CircleCollider, CIRCLE_COLLIDER, PLAYER_COLLIDER_RADIUS));
 
-    // DirSprite *dir_sprite = alloc(DirSprite, DIR_SPRITE, 16);
+    DirSprite *dir_sprite = alloc(DirSprite, DIR_SPRITE, 16);
 
-    // DirSprite_add_animation(dir_sprite, 1, player_textures);
+    DirSprite_add_animation(dir_sprite, 1, player_textures);
 
-    // dir_sprite_play_anim(dir_sprite, 0);
+    dir_sprite_play_anim(dir_sprite, 0);
 
-    // Node_add_child(player_entity, dir_sprite);
+    Node_add_child(player_entity, dir_sprite);
 
 
     printf("Player joined! ID: %d \n", player_entity->id);
@@ -4112,8 +4141,6 @@ void on_client_recv(MPPacket packet, void *data) {
         if (packet_data.id == client_self_id) {
             return;
         }
-
-        printf("Received pos packet! sender id: %d, pos: (%.2f, %.2f)\n", packet_data.id, packet_data.pos.x, packet_data.pos.y);
 
         PlayerEntity *player_entity = find_or_add_player_entity_by_id(packet_data.id);
 
@@ -4148,7 +4175,7 @@ void on_client_recv(MPPacket packet, void *data) {
             return;
         }
             
-            
+        PlayerEntity *shooter = find_or_add_player_entity_by_id(packet_data->shooter_id);            
 
         // create the effect at the pos and height
         Effect *hit_effect = alloc(Effect, EFFECT, 1);
@@ -4169,6 +4196,20 @@ void on_client_recv(MPPacket packet, void *data) {
         spritePlayAnim(sprite, 0);
 
         Node_add_child(hit_effect, sprite);
+
+
+        Effect *ray_effect = alloc(Effect, EFFECT, 0.3);
+        Line *line = alloc(Line, LINE);
+        line->p1 = shooter->entity.world_node.pos;
+        line->p2 = packet_data->hit_pos;
+        line->h1 = shooter->entity.world_node.height;
+        line->h2 = packet_data->hit_height;
+        line->texture = shoot_ray;
+        line->fade = true;
+        line->width = 200;
+        Node_add_child(ray_effect, line);
+
+        Node_add_child(game_node, ray_effect);
 
         Node_add_child(game_node, hit_effect);
 
@@ -4233,11 +4274,18 @@ void PlayerEntity_tick(PlayerEntity *player_entity, double delta) {
 
     player_entity->entity.world_node.pos = v2_lerp(player_entity->entity.world_node.pos, player_entity->desired_pos, 0.1 * (delta * 144));
     player_entity->entity.world_node.height = lerp(player_entity->entity.world_node.height, real_desired_height, 0.1 * (delta * 144));
+
+    DirSprite *dir_sprite = get_child_by_type(player_entity, DIR_SPRITE);
+
+    dir_sprite->dir = player_entity->dir;
+
 }
 
 
 // #TEXTURES INIT
 void init_textures() {
+
+    shoot_ray = load_texture("Textures/shoot_ray.png");
 
     forcefield_field = get_texture_files("Textures/Abilities/Forcefield/pulsate", 5);
 
@@ -5241,8 +5289,6 @@ void CircleCollider_tick(Node *node, double delta) {
 
     if (node->parent == NULL || !instanceof(node->parent->type, WORLD_NODE)) return;
 
-    if (node(collider)->parent->type == PROJECTILE) printf("Projectile collider tick");
-
     collider->world_node.pos = ((WorldNode *)node->parent)->pos;
     collider->world_node.height = ((WorldNode *)node->parent)->height;
 
@@ -5486,6 +5532,8 @@ DirSprite DirSprite_new(int dir_count) {
         dir_sprite.sprites[i] = new(Sprite, SPRITE, true);
     }
 
+    dir_sprite.node = new(Node, NODE);
+
     node(&dir_sprite)->on_tick = DirSprite_tick;
     node(&dir_sprite)->on_delete = DirSprite_on_delete;
     node(&dir_sprite)->on_render = DirSprite_render;
@@ -5519,7 +5567,10 @@ struct vertex {
     float r, g, b, a;
 };
 
+// this function is so gever thanks GPT
 void render_textured_quad(GPU_Image *texture, v2 top_left, v2 top_right, v2 bot_left, v2 bot_right) {
+ 
+
     float vertices[] = {
         // Triangle 1 (Top-left, Top-right, Bottom-right)
         top_left.x, top_left.y,  0.0f, 0.0f,  1, 1, 1, 1,   // Top-left
@@ -5536,6 +5587,48 @@ void render_textured_quad(GPU_Image *texture, v2 top_left, v2 top_right, v2 bot_
     GPU_TriangleBatch(texture, screen, 6, vertices, 0, NULL, GPU_BATCH_XY_ST_RGBA);
 }
 
+void Line_render(Node *node) {
+
+    Line *line = node;
+
+    if (line->texture == NULL) return;
+
+    double w = line->width;
+
+    v2 top_left = worldToScreen(line->p1, line->h1 - w, true);
+    v2 bot_left = worldToScreen(line->p1, line->h1 + w, true);
+    v2 top_right = worldToScreen(line->p2, line->h2 - w, true);
+    v2 bot_right = worldToScreen(line->p2, line->h2 + w, true);
+
+    render_textured_quad(line->texture, top_left, top_right, bot_left, bot_right);
+
+}
+
+Line Line_new() {
+    Line line = {0};
+    line.node = new(Node, NODE);
+    line.width = 100;
+
+    line.node.on_render = Line_render;
+    line.node.on_tick = Line_tick;
+
+    return line;
+}
+
+
+
+void Line_tick(Node *node, double delta) {
+    Line *line = node;
+    static double start_width = -1;
+    if (start_width == -1) {
+        start_width = line->width;
+    }
+
+    if (line->fade && node->parent != NULL && instanceof(node->parent->type, EFFECT)) {
+        Effect *parent = node->parent;
+        line->width = lerp(start_width, 0, inverse_lerp(parent->life_time, 0, parent->life_timer));
+    }
+}
 
 // #END
 #pragma GCC diagnostic pop
