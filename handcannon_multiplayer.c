@@ -38,7 +38,7 @@
 #define BAKED_LIGHT_CALC_RESOLUTION 8
 #define CLIENT_UPDATE_RATE 20
 #define PLAYER_COLLIDER_RADIUS 8
-
+#define NODE_MAX_SIZE 512
 
 #define PARTICLE_GRAVITY -50000
 #define PROJECTILE_GRAVITY -2000
@@ -65,7 +65,7 @@
 #define instanceof(type, parent_type) (type >= parent_type && type <= parent_type##_END)
 #define node(thing) ((Node *)thing)
 
-// # PACKET TYPES AND STRUCTS
+// #PACKETS
 enum PacketTypes {
     PACKET_UPDATE_PLAYER_ID,
     PACKET_PLAYER_POS,
@@ -76,7 +76,22 @@ enum PacketTypes {
     PACKET_HOST_LEFT,
     PACKET_PLAYER_LEFT,
     PACKET_ABILITY_BOMB,
-    PACKET_PLAYER_TOOK_DAMAGE
+    PACKET_PLAYER_TOOK_DAMAGE,
+    PACKET_REQUEST_CREATE_NODE,
+    PACKET_CREATE_NODE
+};
+
+struct request_create_node_packet {
+    int creator_id;
+    int node_size;
+    char node_data[NODE_MAX_SIZE]; // ill cross that bridge when I get to it
+};
+
+struct create_node_packet {
+    int creator_id;
+    int node_size;
+    char node_data[NODE_MAX_SIZE];
+    int sync_id;
 };
 
 struct ability_bomb_packet {
@@ -188,6 +203,13 @@ typedef struct CollisionData {
     bool didCollide;
 } CollisionData;
 
+DEF_STRUCT(SerializedNode, SERIALIZED_NODE, {
+    char node_data[NODE_MAX_SIZE / 4];
+    char node_children_data[NODE_MAX_SIZE / 4 * 3];
+    int node_size;
+    int node_children_count;
+}); 
+
 DEF_STRUCT(Ability, ABILITY, {
     void (*activate)(struct Ability *);
     void (*tick)(struct Ability *, double);
@@ -230,6 +252,9 @@ DEF_STRUCT(Node, NODE, {
     void (*on_delete)(struct Node *);
 
     int type;
+
+    int sync_id;
+    int size;
 
     bool freed, queued_for_deletion;
 
@@ -468,7 +493,7 @@ DEF_STRUCT(Node, NODE, {
 END_STRUCT(NODE);
 
 
-#define new(var_type, var_type_name, ...)  ({var_type object = var_type##_new(__VA_ARGS__); ((Node *)&object)->type = instanceof(var_type_name, NODE)? var_type_name : ((Node *)&object)->type; object;})
+#define new(var_type, var_type_name, ...)  ({var_type object = var_type##_new(__VA_ARGS__); node(&object)->size = sizeof(var_type);((Node *)&object)->type = instanceof(var_type_name, NODE)? var_type_name : ((Node *)&object)->type; object;})
 #define alloc(var_type, var_type_name, ...) ({var_type *ptr; ptr = malloc(sizeof(var_type)); (*ptr) = new(var_type, var_type_name, __VA_ARGS__); ptr;})
 
 
@@ -518,6 +543,12 @@ typedef struct Room {
 } Room;
 
 // #FUNC
+
+SerializedNode serialize_node(Node *node);
+
+int get_node_tree_size(Node *node);
+
+void request_create_node(Node *node, int node_size);
 
 void Line_tick(Node *node, double delta);
 
@@ -884,8 +915,6 @@ GPU_Image *ceilingTexture;
 GPU_Image *ceilingLightTexture;
 
 // #SPRITES
-Sprite *dash_anim_sprite;
-Sprite *leftHandSprite;
 
 // #SOUNDS
 Sound *bomb_explosion;
@@ -918,7 +947,7 @@ Node *root_node;
 
 Node *game_node;
 
-
+Node **sync_id_queue;
 Node **deletion_queue;
 Node **add_queue;
 
@@ -939,6 +968,8 @@ int server_client_id_list[MP_MAX_CLIENTS] = {0};
 
 int client_self_id = -1;
 int next_id = 1234;
+
+int server_next_sync_id = 42;
 
 double game_speed_duration_timer = 0;
 double game_speed = 1;
@@ -1047,6 +1078,7 @@ int main(int argc, char *argv[]) {
 
     deletion_queue = array(Node *, 100);
     add_queue = array(Node *, 10);
+    sync_id_queue = array(Node *, 10);
 
     HEIGHT_TO_XY = (tileSize * 2) / get_max_height();
     XY_TO_HEIGHT = get_max_height() / (tileSize * 2);
@@ -1882,7 +1914,7 @@ RenderObject *get_render_list() {
                     pos = ((WorldNode *)node->parent)->pos;
                 } else if (instanceof(node->parent->type, CANVAS_NODE)) {
                     custom_dist = true;
-                    render_object.dist_squared = ((CanvasNode *)node->parent)->z_index + 9999; // for negative z index, will probably do something about this later
+                    render_object.dist_squared = -((CanvasNode *)node->parent)->z_index; 
                 }
                 
             }
@@ -1898,7 +1930,7 @@ RenderObject *get_render_list() {
 
         if (instanceof(node->type, CANVAS_NODE)) {
             custom_dist = true;
-            render_object.dist_squared = ((CanvasNode *)node->parent)->z_index + 9999; // for negative z index, will probably do something about this later
+            render_object.dist_squared = -((CanvasNode *)node->parent)->z_index;
         }
 
         if (!custom_dist) {
@@ -3271,9 +3303,9 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
         .hit_id = -1
     };
     if (ray_data.hit) {
-        if (ray_data.colliderType == PLAYER_ENTITY) {
+        if (ray_data.collider != NULL && ray_data.collider->parent->type == PLAYER_ENTITY) {
 
-            PlayerEntity *player_entity = ray_data.collider;
+            PlayerEntity *player_entity = ray_data.collider->parent;
 
             
             packet_data.hit_id = player_entity->id;
@@ -3558,7 +3590,22 @@ void activate_ability(Ability *ability) {
 }
 
 void ability_dash_before_activate(Ability *ability) {
-    spritePlayAnim(dash_anim_sprite, 0);
+    CanvasNode *cnode = alloc(CanvasNode, CANVAS_NODE);
+
+    cnode->size = V2(WINDOW_WIDTH, WINDOW_HEIGHT);
+    cnode->z_index = -5;
+
+    Sprite *sprite = alloc(Sprite, SPRITE, true);
+
+    Animation anim = create_animation(6, 1, dash_screen_anim);
+    anim.loop = false;
+    anim.fps = 12;
+    array_append(sprite->animations, anim);
+    spritePlayAnim(sprite, 0);
+
+    Node_add_child(cnode, sprite);
+
+    Node_add_child(game_node, cnode);
 }
 
 
@@ -4083,6 +4130,17 @@ void on_server_recv(SOCKET socket, MPPacket packet, void *data) {
         MPServer_send_to(seed_packet, &packet_data, socket);
         return;
     }
+    if (packet.type == PACKET_REQUEST_CREATE_NODE) {
+
+        struct request_create_node_packet *recv_data = data;
+
+        struct create_node_packet packet_data = {.sync_id = server_next_sync_id++, .node_size = recv_data->node_size, .creator_id = recv_data->creator_id};
+        memcpy(packet_data.node_data, recv_data->node_data, recv_data->node_size);
+
+        MPPacket packet = {.type = PACKET_CREATE_NODE, .len = sizeof(packet_data), .is_broadcast = true};
+
+        MPServer_send(packet, &packet_data);
+    }
 
     MPServer_send(packet, data);
 }
@@ -4265,6 +4323,17 @@ void on_client_recv(MPPacket packet, void *data) {
         // spritePlayAnim(bomb->entity.sprite, 0);
 
         Node_add_child(game_node, bomb);
+    } else if (packet.type == PACKET_CREATE_NODE) {
+        struct create_node_packet *packet_data = data;
+        if (packet_data->creator_id == client_self_id) {
+            if (array_length(sync_id_queue) > 0) {
+                sync_id_queue[0]->sync_id = packet_data->sync_id;
+                array_remove(sync_id_queue, 0);
+            }
+            return;
+        }
+
+        Node_add_child(game_node, packet_data->node_data);
     }
 }
 
@@ -4677,8 +4746,8 @@ void randomize_player_abilities() {
     //Ability *default_special = malloc(sizeof(Ability));
 
     Ability primary_choices[] = {ability_primary_shoot_create()};
-    Ability secondary_choices[] = {ability_bomb_create()};
-    Ability utility_choices[] = {ability_forcefield_create()};
+    Ability secondary_choices[] = {ability_secondary_shoot_create(), ability_bomb_create()};
+    Ability utility_choices[] = {ability_forcefield_create(), ability_dash_create()};
     //Ability speical_choices[] = {};
 
     *default_primary = pick_random_ability_from_array(primary_choices, sizeof(primary_choices) / sizeof(Ability));
@@ -4861,6 +4930,7 @@ Node Node_new() {
         commit_sudoku();
     }
 
+    node.sync_id = -1; // will only be used on things that will get updates (e.g. projectiles)
     node.type = -1;
     node.on_tick = NULL;
     node.on_render = NULL;
@@ -5629,6 +5699,43 @@ void Line_tick(Node *node, double delta) {
         line->width = lerp(start_width, 0, inverse_lerp(parent->life_time, 0, parent->life_timer));
     }
 }
+
+void request_create_node(Node *node, int node_size) {
+
+    if (node_size - sizeof(int) > NODE_MAX_SIZE) {
+        printf("Node too large for create! \n");
+        commit_sudoku();
+    }
+
+    Node_add_child(game_node, node);
+    array_append(sync_id_queue, node);
+
+    struct request_create_node_packet packet_data = {.node_size = node_size, .creator_id = client_self_id, .node_data = {0}};
+
+    memcpy(packet_data.node_data, node, node_size);
+
+    MPPacket packet = {.type = PACKET_REQUEST_CREATE_NODE, .len = sizeof(packet_data), .is_broadcast = false};
+
+    MPClient_send(packet, &packet_data);
+}
+
+
+int get_node_tree_size(Node *node) {
+    int children_sum = 0;
+    for (int i = 0; i < array_length(node->children); i++) {
+        children_sum += get_node_tree_size(node->children[i]);
+    }
+
+    return children_sum + node->size;
+}
+
+SerializedNode serialize_node(Node *node) {
+    SerializedNode snode = {0};
+    snode.node_size = node->size;
+    snode.node_children_count = array_length(node->children);
+    
+}
+
 
 // #END
 #pragma GCC diagnostic pop
