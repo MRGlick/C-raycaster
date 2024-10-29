@@ -14,36 +14,41 @@ typedef struct HashNode {
     struct HashNode *next;
 } HashNode;
 
-typedef struct HashTable {
+typedef struct HashMap {
 
     void **keys;
     int key_size;
     int value_size;
 
+    bool copy_values;
+
     int capacity;
 
     HashNode *values;
 
-} HashTable;
+} HashMap;
 
-#define HashTable(keytype, valtype) _HashTable_new(sizeof(keytype), sizeof(valtype))
+#define HashMap(keytype, valtype, copy_values) _HM_new(sizeof(keytype), sizeof(valtype), copy_values)
+
+#define HM_read(valtype, val) (*(valtype *)val)
 
 int hash(char *val, int val_size, int arr_size);
 
-bool _HashTable_is_hashnode_empty(HashNode node) {
+bool _HM_is_hashnode_empty(HashNode node) {
 
-    if (node.key == NULL && node.key_size == 0 && node.next == NULL && node.val == NULL) return true;
+    if (node.key == NULL || node.key_size == 0 || node.val == NULL) return true;
 
     return false;
 }
 
-HashTable _HashTable_new(int key_size, int value_size) {
-    HashTable table = {0};
+HashMap _HM_new(int key_size, int value_size, bool copy_values) {
+    HashMap table = {0};
     table.key_size = key_size;
     table.value_size = value_size;
     table.capacity = 100;
     table.keys = array(void *, table.capacity);
     table.values = calloc(sizeof(HashNode), table.capacity);
+    table.copy_values = copy_values;
     for (int i = 0; i < table.capacity; i++) {
         table.keys[i] = NULL;
     }
@@ -51,7 +56,7 @@ HashTable _HashTable_new(int key_size, int value_size) {
     return table;
 }
 
-void HashTable_put(HashTable *table, void *key, void *value) {
+void HM_put(HashMap *table, void *key, void *value) {
 
     bool found = false;
     for (int i = 0; i < array_length(table->keys); i++) {
@@ -66,27 +71,66 @@ void HashTable_put(HashTable *table, void *key, void *value) {
 
     int hash_value = hash(key, table->key_size, table->capacity);
     HashNode *available = &table->values[hash_value];
+    HashNode *last = available;
     while (available->val != NULL) {
         available = available->next;
+        if (available->val != NULL) last = available;
     }
+
+    if (last != available) {
+        last->next = available;
+    }
+
     available->key = key;
     available->key_size = table->key_size;
-    available->val = value;
+
+    if (!table->copy_values) {
+        available->val = value;
+    } else {
+        void *new_val = malloc(table->value_size);
+        memcpy(new_val, value, table->value_size);
+
+        available->val = new_val;
+    }
+
+
 }
 
-void *HashTable_get(HashTable *table, void *key) {
-    int hash_value = hash(key, table->key_size, table->capacity);
-    HashNode *current = &table->values[hash_value];
-    if (_HashTable_is_hashnode_empty(*current)) return NULL;
+void print_hash_node(HashNode *node) {
+    printf("Node: %p \n", node);
+    printf("\tKey address(decimal): %d \n", node->key);
+    printf("\tValue address(decimal): %d \n", node->val);
+    printf("\tKey size: %d \n", node->key_size);
+    printf("\tNext node address(decimal): %d \n", node->next);
+}
 
-    while (strncmp(current->key, key, table->key_size) != 0) {
+void *HM_get(HashMap table, void *key) {
+
+    int hash_value = hash(key, table.key_size, table.capacity);
+    HashNode *current = &table.values[hash_value];
+
+    print_hash_node(current);
+
+    if (_HM_is_hashnode_empty(*current)) return NULL;
+
+    while (strncmp(current->key, key, table.key_size) != 0) {
         current = current->next;
     }
-    return current;
+    return current->val;
 }
 
 
-void HashTable_delete(HashTable table) {
+void HM_delete(HashMap table) {
+
+    if (table.copy_values) {
+        for (int i = 0; i < array_length(table.keys); i++) {
+            void *val = HM_get(table, table.keys[i]);
+            free(val);
+        }
+    }
+
+
+
     array_free(table.keys);
     array_free(table.values);
 }
@@ -150,27 +194,29 @@ void test_hash() {
 
 int main(int argc, char *argv[]) {
 
-    HashTable t = HashTable(const char *, int);
+    HashMap t = HashMap(const char *, int, true);
 
     int num_values = 0;
     printf("Enter number of entries: ");
     scanf("%d", &num_values);
 
+
+    int value = 0;
+
     for (int i = 0; i < num_values; i++) {
-        char *key = calloc(1, 1024);
-        int value = 0;
+        char *key = calloc(1024, 1);
 
         printf("Enter key: ");
         scanf("%s", key);
         printf("Enter value for key: ");
         scanf("%d", &value);
-        HashTable_put(&t, key, &value);
+        HM_put(&t, key, &value);
     }
 
 
     for (int i = 0; i < array_length(t.keys); i++) {
         printf("Checking key: %s \n", t.keys[i]);
-        printf("Value: %d \n", HashTable_get(&t, t.keys[i]));
+        printf("Value: %d \n", HM_read(int, HM_get(t, t.keys[i])));
     }
 }
 
