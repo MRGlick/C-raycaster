@@ -9,6 +9,7 @@
 #include "multiplayer.c"
 
 
+
 // #DEFINITIONS
 
 #define DEBUG_FLAG true
@@ -198,17 +199,22 @@ typedef enum AbilityType {
 
 // #STRUCTS
 
+typedef struct SerializedData {
+    int size;
+    char data[];
+} SerializedData;
+
+typedef struct SerializedNode {
+    int node_size;
+    int child_count;
+    char data[];
+} SerializedNode;
+
 typedef struct CollisionData {
     v2 offset;  // adjusting position by this offset makes the object only touch and not overlap
     bool didCollide;
 } CollisionData;
 
-DEF_STRUCT(SerializedNode, SERIALIZED_NODE, {
-    char node_data[NODE_MAX_SIZE / 4];
-    char node_children_data[NODE_MAX_SIZE / 4 * 3];
-    int node_size;
-    int node_children_count;
-}); 
 
 DEF_STRUCT(Ability, ABILITY, {
     void (*activate)(struct Ability *);
@@ -250,6 +256,8 @@ DEF_STRUCT(Node, NODE, {
     void (*on_tick)(struct Node *, double);
     void (*on_ready)(struct Node *);
     void (*on_delete)(struct Node *);
+
+    SerializedData (*serialize)(struct Node *);
 
     int type;
 
@@ -544,7 +552,7 @@ typedef struct Room {
 
 // #FUNC
 
-SerializedNode serialize_node(Node *node);
+SerializedData Node_serialize(Node *node);
 
 int get_node_tree_size(Node *node);
 
@@ -5729,12 +5737,21 @@ int get_node_tree_size(Node *node) {
     return children_sum + node->size;
 }
 
-SerializedNode serialize_node(Node *node) {
-    SerializedNode snode = {0};
-    snode.node_size = node->size;
-    snode.node_children_count = array_length(node->children);
-    
+// data and a size is just a string right? NO.
+SerializedData serialize(Node *node) {
+    int base_node_size = sizeof(Node);
+    Node copy = *node;
+    copy.on_delete = NULL;
+    copy.on_ready = NULL;
+    copy.on_render = NULL;
+    copy.on_tick = NULL;
+    copy.parent = NULL;
+    int node_child_count = array_length(node->children);
+
+    SerializedData current = 
+
 }
+
 
 
 // #END

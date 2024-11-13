@@ -13,6 +13,7 @@
 #include "sounds.c"
 #include <SDL_gpu.h>
 #include <sys/time.h>
+#include "hashtable.c"
 
 #define RENDERER_FLAGS (SDL_RENDERER_ACCELERATED)
 #define EPSILON 0.001
