@@ -40,6 +40,7 @@
 #define CLIENT_UPDATE_RATE 20
 #define PLAYER_COLLIDER_RADIUS 8
 #define NODE_MAX_SIZE 512
+#define MAX_PACKET_SIZE 1024
 
 #define PARTICLE_GRAVITY -50000
 #define PROJECTILE_GRAVITY -2000
@@ -66,6 +67,7 @@
 #define instanceof(type, parent_type) (type >= parent_type && type <= parent_type##_END)
 #define node(thing) ((Node *)thing)
 
+
 // #PACKETS
 enum PacketTypes {
     PACKET_UPDATE_PLAYER_ID,
@@ -76,22 +78,35 @@ enum PacketTypes {
     PACKET_ABILITY_SHOOT,
     PACKET_HOST_LEFT,
     PACKET_PLAYER_LEFT,
-    PACKET_ABILITY_BOMB,
     PACKET_PLAYER_TOOK_DAMAGE,
     PACKET_REQUEST_CREATE_NODE,
-    PACKET_CREATE_NODE
+    PACKET_SEND_SYNC_ID,
+    PACKET_SYNC_PROJECTILE,
+
+    PACKETS_TO_SYNC,
+
+        PACKET_ABILITY_BOMB,
+        PACKET_ABILITY_FORCEFIELD,
+
+    PACKETS_TO_SYNC_END
 };
 
-struct request_create_node_packet {
-    int creator_id;
-    int node_size;
-    char node_data[NODE_MAX_SIZE]; // ill cross that bridge when I get to it
+struct ability_forcefield_packet {
+    v2 pos;
+    double height;
+    v2 vel;
+    double h_vel;
+    int sender_id;
+    int sync_id;
 };
 
-struct create_node_packet {
-    int creator_id;
-    int node_size;
-    char node_data[NODE_MAX_SIZE];
+struct sync_projectile_packet {
+    v2 pos, vel;
+    double height, h_vel;
+    int sync_id;
+};
+
+struct send_sync_id_packet {
     int sync_id;
 };
 
@@ -101,6 +116,7 @@ struct ability_bomb_packet {
     v2 vel;
     double height_vel;
     int sender_id;
+    int sync_id;
 };
 
 struct player_left_packet {
@@ -199,16 +215,26 @@ typedef enum AbilityType {
 
 // #STRUCTS
 
+enum DeserializationTypes {
+    DS_NORMAL,
+    DS_DYNAMIC_ARR,
+    DS_STRING
+};
+
 typedef struct SerializedData {
     int size;
-    char data[];
+    char *data;
 } SerializedData;
 
-typedef struct SerializedNode {
+typedef struct S_NodeHeader {
     int node_size;
     int child_count;
-    char data[];
-} SerializedNode;
+    int sf_count;
+} S_NodeHeader;
+
+typedef struct S_FieldHeader {
+    int sf_type;
+} S_FieldHeader;
 
 typedef struct CollisionData {
     v2 offset;  // adjusting position by this offset makes the object only touch and not overlap
@@ -552,11 +578,11 @@ typedef struct Room {
 
 // #FUNC
 
-SerializedData Node_serialize(Node *node);
+Node *find_node_by_sync_id(int sync_id);
 
-int get_node_tree_size(Node *node);
+void add_to_sync_queue(Node *node);
 
-void request_create_node(Node *node, int node_size);
+Node *use_sync_id(int sync_id);
 
 void Line_tick(Node *node, double delta);
 
@@ -655,7 +681,7 @@ Node Node_new();
 
 void projectile_forcefield_on_tick(Projectile *projectile, double delta);
 
-Projectile *projectile_forcefield_create();
+Projectile *create_forcefield_projectile();
 
 void ability_forcefield_activate();
 
@@ -1526,6 +1552,31 @@ void tick(double delta) {
     SDL_SetRelativeMouseMode(lock_and_hide_mouse);
 
     Node_tick(root_node, delta);
+
+    // sync nodes
+    if (MP_is_server) {
+        iter_over_all_nodes(node, {
+            if (node->sync_id == -1) continue;
+
+            if (instanceof(node->type, PROJECTILE)) {
+
+                Projectile *proj = node;
+
+                MPPacket packet = {.type = PACKET_SYNC_PROJECTILE, .len = sizeof(struct sync_projectile_packet), .is_broadcast = true};
+
+                struct sync_projectile_packet packet_data = {
+                    .pos = proj->entity.world_node.pos, 
+                    .height = proj->entity.world_node.height,
+                    .vel = proj->vel,
+                    .h_vel = proj->height_vel
+                };
+
+                MPClient_send(packet, &packet_data);
+
+            }
+        });
+    }
+
 
     if (isCameraShaking) {
         cameraShakeTimeToNextTick -= delta;
@@ -4129,6 +4180,7 @@ void on_player_disconnect(SOCKET player_socket) {
 
 }
 
+// #SERVER RECV
 void on_server_recv(SOCKET socket, MPPacket packet, void *data) {
 
     if (packet.type == PACKET_REQUEST_DUNGEON_SEED) {
@@ -4138,17 +4190,31 @@ void on_server_recv(SOCKET socket, MPPacket packet, void *data) {
         MPServer_send_to(seed_packet, &packet_data, socket);
         return;
     }
-    if (packet.type == PACKET_REQUEST_CREATE_NODE) {
+    if (instanceof(packet.type, PACKETS_TO_SYNC)) {
+        int sync_id = server_next_sync_id++;
 
-        struct request_create_node_packet *recv_data = data;
+        MPPacket packet = {.is_broadcast = false, .len = sizeof(struct send_sync_id_packet), .type = PACKET_SEND_SYNC_ID};
+        struct send_sync_id_packet pdata = {.sync_id = sync_id};
 
-        struct create_node_packet packet_data = {.sync_id = server_next_sync_id++, .node_size = recv_data->node_size, .creator_id = recv_data->creator_id};
-        memcpy(packet_data.node_data, recv_data->node_data, recv_data->node_size);
+        MPServer_send_to(packet, &pdata, socket);
 
-        MPPacket packet = {.type = PACKET_CREATE_NODE, .len = sizeof(packet_data), .is_broadcast = true};
+        
+        ((struct ability_bomb_packet *)data)->sync_id = sync_id;
 
-        MPServer_send(packet, &packet_data);
+        MPServer_send(packet, data);
     }
+    // if (packet.type == PACKET_REQUEST_CREATE_NODE) {
+
+    //     struct request_create_node_packet *recv_data = data;
+
+    //     struct create_node_packet packet_data = {.sync_id = server_next_sync_id++, .node_size = recv_data->node_size, .creator_id = recv_data->creator_id};
+    //     memcpy(packet_data.node_data, recv_data->node_data, recv_data->node_size);
+
+    //     MPPacket packet = {.type = PACKET_CREATE_NODE, .len = sizeof(packet_data), .is_broadcast = true};
+
+    //     MPServer_send(packet, &packet_data);
+    //     return;
+    // }
 
     MPServer_send(packet, data);
 }
@@ -4324,25 +4390,44 @@ void on_client_recv(MPPacket packet, void *data) {
 
         if (packet_data->sender_id == client_self_id) return;
 
-         Projectile *bomb = create_bomb_projectile(packet_data->pos, packet_data->vel);
+        Projectile *bomb = create_bomb_projectile(packet_data->pos, packet_data->vel);
         bomb->entity.world_node.height = packet_data->height;
         bomb->height_vel = packet_data->height_vel;
-
-        // spritePlayAnim(bomb->entity.sprite, 0);
+        node(bomb)->sync_id = packet_data->sync_id;
 
         Node_add_child(game_node, bomb);
-    } else if (packet.type == PACKET_CREATE_NODE) {
-        struct create_node_packet *packet_data = data;
-        if (packet_data->creator_id == client_self_id) {
-            if (array_length(sync_id_queue) > 0) {
-                sync_id_queue[0]->sync_id = packet_data->sync_id;
-                array_remove(sync_id_queue, 0);
-            }
+
+     } else if (packet.type == PACKET_SEND_SYNC_ID) {
+        use_sync_id(((struct send_sync_id_packet *)data)->sync_id);
+
+     } else if (packet.type == PACKET_SYNC_PROJECTILE) {
+        struct sync_projectile_packet *packet_data = data;
+        Projectile *sync_projectile = find_node_by_sync_id(packet_data->sync_id);
+
+        if (sync_projectile == NULL) {
+            printf("projectile with sync id %d doesnt exist. \n", packet_data->sync_id);
             return;
         }
 
-        Node_add_child(game_node, packet_data->node_data);
-    }
+        sync_projectile->entity.world_node.pos = packet_data->pos;
+        sync_projectile->entity.world_node.height = packet_data->height;
+        sync_projectile->vel = packet_data->vel;
+        sync_projectile->height_vel = packet_data->h_vel;
+
+     } else if (packet.type == PACKET_ABILITY_FORCEFIELD) {
+        struct ability_forcefield_packet *packet_data = data;
+
+        if (packet_data->sender_id == client_self_id) return;
+
+        Projectile *ff = create_forcefield_projectile();
+        ff->entity.world_node.pos = packet_data->pos;
+        ff->entity.world_node.height = packet_data->height;
+        ff->vel = packet_data->vel;
+        ff->height_vel = packet_data->h_vel;
+        node(ff)->sync_id = packet_data->sync_id;
+
+        Node_add_child(game_node, ff);
+     }
 }
 
 void PlayerEntity_tick(PlayerEntity *player_entity, double delta) {
@@ -4526,11 +4611,19 @@ void ability_bomb_activate() {
     bomb->entity.world_node.height = get_player_height();
 
     Node_add_child(game_node, bomb);
+    add_to_sync_queue(bomb);
 
 
     MPPacket packet = {.type = PACKET_ABILITY_BOMB, .len = sizeof(struct ability_bomb_packet), .is_broadcast = true};
 
-    struct ability_bomb_packet packet_data = {.pos = bomb->entity.world_node.pos, .height = bomb->entity.world_node.height, .vel = bomb->vel, .height_vel = bomb->height_vel, .sender_id = client_self_id};
+    struct ability_bomb_packet packet_data = {
+        .pos = bomb->entity.world_node.pos, 
+        .height = bomb->entity.world_node.height, 
+        .vel = bomb->vel, 
+        .height_vel = bomb->height_vel, 
+        .sender_id = client_self_id,
+        .sync_id = -1
+    };
 
     MPClient_send(packet, &packet_data);
 
@@ -4848,7 +4941,7 @@ Ability ability_forcefield_create() {
 void ability_forcefield_activate() {
     printf("Forcefield! \n");
 
-    Projectile *proj = projectile_forcefield_create();
+    Projectile *proj = create_forcefield_projectile();
 
     // ((ParticleSpawner *)proj->extra_data)->target = proj;
 
@@ -4857,9 +4950,25 @@ void ability_forcefield_activate() {
     // ((ParticleSpawner *)proj->extra_data)->world_node.height = proj->entity.world_node.height;
     proj->vel = playerForward;
     Node_add_child(game_node, proj);
+
+
+    MPPacket packet = {.type = PACKET_ABILITY_FORCEFIELD, .len = sizeof(struct ability_forcefield_packet), .is_broadcast = true};
+
+    struct ability_forcefield_packet packet_data = {
+        .sender_id = client_self_id, 
+        .sync_id = -1, 
+        .vel = proj->vel, 
+        .pos = proj->entity.world_node.pos,
+        .height = proj->entity.world_node.height,
+        .h_vel = proj->height_vel
+    };
+
+    MPClient_send(packet, &packet_data);
+
+
 }
 
-Projectile *projectile_forcefield_create() { // #PFC
+Projectile *create_forcefield_projectile() { // #PFC
     Projectile *projectile = alloc(Projectile, PROJECTILE, 10);
     projectile->type = PROJ_FORCEFIELD;
     projectile->on_tick = projectile_forcefield_on_tick;
@@ -5708,48 +5817,33 @@ void Line_tick(Node *node, double delta) {
     }
 }
 
-void request_create_node(Node *node, int node_size) {
+Node *use_sync_id(int sync_id) {
+    if (array_length(sync_id_queue) <= 0) return NULL;
 
-    if (node_size - sizeof(int) > NODE_MAX_SIZE) {
-        printf("Node too large for create! \n");
-        commit_sudoku();
-    }
+    Node *res = sync_id_queue[0];
 
-    Node_add_child(game_node, node);
+    array_remove(sync_id_queue, 0);
+
+    res->sync_id = sync_id;
+
+    return res;
+}
+
+void add_to_sync_queue(Node *node) {
     array_append(sync_id_queue, node);
-
-    struct request_create_node_packet packet_data = {.node_size = node_size, .creator_id = client_self_id, .node_data = {0}};
-
-    memcpy(packet_data.node_data, node, node_size);
-
-    MPPacket packet = {.type = PACKET_REQUEST_CREATE_NODE, .len = sizeof(packet_data), .is_broadcast = false};
-
-    MPClient_send(packet, &packet_data);
 }
 
+Node *find_node_by_sync_id(int sync_id) {
+    Node *res = NULL;
 
-int get_node_tree_size(Node *node) {
-    int children_sum = 0;
-    for (int i = 0; i < array_length(node->children); i++) {
-        children_sum += get_node_tree_size(node->children[i]);
-    }
+    iter_over_all_nodes(node, {
+        if (node->sync_id == sync_id) {
+            res = node;
+            break; // cant return because memory leak !!!
+        }
+    });
 
-    return children_sum + node->size;
-}
-
-// data and a size is just a string right? NO.
-SerializedData serialize(Node *node) {
-    int base_node_size = sizeof(Node);
-    Node copy = *node;
-    copy.on_delete = NULL;
-    copy.on_ready = NULL;
-    copy.on_render = NULL;
-    copy.on_tick = NULL;
-    copy.parent = NULL;
-    int node_child_count = array_length(node->children);
-
-    SerializedData current = 
-
+    return res;
 }
 
 

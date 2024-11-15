@@ -192,36 +192,6 @@ void test_hash() {
 }
 
 
-int main(int argc, char *argv[]) {
-
-    HashMap t = HashMap(const char *, int, true);
-
-    int num_values = 0;
-    printf("Enter number of entries: ");
-    scanf("%d", &num_values);
-
-
-    int value = 0;
-
-    for (int i = 0; i < num_values; i++) {
-        char *key = calloc(1024, 1);
-
-        printf("Enter key: ");
-        scanf("%s", key);
-        printf("Enter value for key: ");
-        scanf("%d", &value);
-        HM_put(&t, key, &value);
-    }
-
-
-    for (int i = 0; i < array_length(t.keys); i++) {
-        printf("Checking key: %s \n", t.keys[i]);
-        printf("Value: %d \n", HM_read(int, HM_get(t, t.keys[i])));
-    }
-}
-
-
-
 
 
 
