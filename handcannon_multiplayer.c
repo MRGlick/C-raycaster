@@ -12,9 +12,9 @@
 
 // #DEFINITIONS
 
-#define DEBUG_FLAG true
+#define DEBUG_FLAG false
 
-#define SERVER_IP "127.0.0.1"
+#define SERVER_IP "84.95.64.209"
 #define SERVER_PORT 1155
 #define TPS 300
 #define FPS 300
@@ -92,12 +92,12 @@ enum PacketTypes {
 };
 
 struct ability_forcefield_packet {
+    int sync_id;
     v2 pos;
     double height;
     v2 vel;
     double h_vel;
     int sender_id;
-    int sync_id;
 };
 
 struct sync_projectile_packet {
@@ -111,12 +111,12 @@ struct send_sync_id_packet {
 };
 
 struct ability_bomb_packet {
+    int sync_id;
     v2 pos;
     double height;
     v2 vel;
     double height_vel;
     int sender_id;
-    int sync_id;
 };
 
 struct player_left_packet {
@@ -1156,9 +1156,6 @@ int main(int argc, char *argv[]) {
     }
     MPClient(SERVER_IP);
 
-    
-
-    //printf("Reached after server client shit \n");
 
     bool ran_first_tick = false;
     u64 tick_timer = 0, render_timer = 0;
@@ -1504,8 +1501,6 @@ void player_tick(Node *node, double delta) {
    
     player->world_node.pos = v2_add(player->world_node.pos, v2_mul(finalVel, to_vec(delta)));
     
-    cd_print(true, "pos: (%.2f, %.2f) \n", player->world_node.pos.x, player->world_node.pos.y);
-    
 
     update_pos_timer -= delta;
     if (update_pos_timer <= 0) {
@@ -1565,7 +1560,8 @@ void tick(double delta) {
                 MPPacket packet = {.type = PACKET_SYNC_PROJECTILE, .len = sizeof(struct sync_projectile_packet), .is_broadcast = true};
 
                 struct sync_projectile_packet packet_data = {
-                    .pos = proj->entity.world_node.pos, 
+                    .sync_id = node(proj)->sync_id,
+                    .pos = proj->entity.world_node.pos,
                     .height = proj->entity.world_node.height,
                     .vel = proj->vel,
                     .h_vel = proj->height_vel
@@ -4189,7 +4185,7 @@ void on_server_recv(SOCKET socket, MPPacket packet, void *data) {
 
         MPServer_send_to(seed_packet, &packet_data, socket);
         return;
-    }
+    } 
     if (instanceof(packet.type, PACKETS_TO_SYNC)) {
         int sync_id = server_next_sync_id++;
 
@@ -4198,23 +4194,10 @@ void on_server_recv(SOCKET socket, MPPacket packet, void *data) {
 
         MPServer_send_to(packet, &pdata, socket);
 
-        
-        ((struct ability_bomb_packet *)data)->sync_id = sync_id;
+        // sync id must always be first then
+        *(int *)data = sync_id;
 
-        MPServer_send(packet, data);
     }
-    // if (packet.type == PACKET_REQUEST_CREATE_NODE) {
-
-    //     struct request_create_node_packet *recv_data = data;
-
-    //     struct create_node_packet packet_data = {.sync_id = server_next_sync_id++, .node_size = recv_data->node_size, .creator_id = recv_data->creator_id};
-    //     memcpy(packet_data.node_data, recv_data->node_data, recv_data->node_size);
-
-    //     MPPacket packet = {.type = PACKET_CREATE_NODE, .len = sizeof(packet_data), .is_broadcast = true};
-
-    //     MPServer_send(packet, &packet_data);
-    //     return;
-    // }
 
     MPServer_send(packet, data);
 }
@@ -4395,12 +4378,18 @@ void on_client_recv(MPPacket packet, void *data) {
         bomb->height_vel = packet_data->height_vel;
         node(bomb)->sync_id = packet_data->sync_id;
 
+        printf("Adding bomb with sync id %d ! \n\n\n\n\n\n\n\n\n\n\n", packet_data->sync_id);
+
         Node_add_child(game_node, bomb);
 
      } else if (packet.type == PACKET_SEND_SYNC_ID) {
+        printf("Received sync id %d! \n", ((struct send_sync_id_packet *)data)->sync_id);
         use_sync_id(((struct send_sync_id_packet *)data)->sync_id);
 
      } else if (packet.type == PACKET_SYNC_PROJECTILE) {
+
+        if (MP_is_server) return;
+
         struct sync_projectile_packet *packet_data = data;
         Projectile *sync_projectile = find_node_by_sync_id(packet_data->sync_id);
 
@@ -4425,6 +4414,8 @@ void on_client_recv(MPPacket packet, void *data) {
         ff->vel = packet_data->vel;
         ff->height_vel = packet_data->h_vel;
         node(ff)->sync_id = packet_data->sync_id;
+
+        printf("Adding forcefield with sync id %d ! \n", packet_data->sync_id);
 
         Node_add_child(game_node, ff);
      }
@@ -4950,6 +4941,7 @@ void ability_forcefield_activate() {
     // ((ParticleSpawner *)proj->extra_data)->world_node.height = proj->entity.world_node.height;
     proj->vel = playerForward;
     Node_add_child(game_node, proj);
+    add_to_sync_queue(proj);
 
 
     MPPacket packet = {.type = PACKET_ABILITY_FORCEFIELD, .len = sizeof(struct ability_forcefield_packet), .is_broadcast = true};
@@ -4968,7 +4960,7 @@ void ability_forcefield_activate() {
 
 }
 
-Projectile *create_forcefield_projectile() { // #PFC
+Projectile *create_forcefield_projectile() {
     Projectile *projectile = alloc(Projectile, PROJECTILE, 10);
     projectile->type = PROJ_FORCEFIELD;
     projectile->on_tick = projectile_forcefield_on_tick;
@@ -5818,7 +5810,14 @@ void Line_tick(Node *node, double delta) {
 }
 
 Node *use_sync_id(int sync_id) {
-    if (array_length(sync_id_queue) <= 0) return NULL;
+    if (array_length(sync_id_queue) <= 0) {
+        
+        printf("Sync id queue is empty!\n");
+        
+        return NULL;
+    }
+
+    printf("Popped from sync queue! \n");
 
     Node *res = sync_id_queue[0];
 
