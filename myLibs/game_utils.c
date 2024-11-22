@@ -311,6 +311,8 @@ SortObject *merge_sort(SortObject arr[], int len) {
 
 }
 
+#ifndef GET_NUM_DIGITS
+#define GET_NUM_DIGITS
 int get_num_digits(int num) {
     int res = 0;
     while (num > 0) {
@@ -319,6 +321,7 @@ int get_num_digits(int num) {
     }
     return res;
 }
+#endif
 
 void play_spatial_sound(Sound *sound, double base_volume, v2 listener_pos, v2 sound_pos, double sound_max_radius) {
     double dist = v2_distance(listener_pos, sound_pos);

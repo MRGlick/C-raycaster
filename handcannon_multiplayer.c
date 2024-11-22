@@ -14,7 +14,7 @@
 
 #define DEBUG_FLAG false
 
-#define SERVER_IP "84.95.64.209"
+#define SERVER_IP "127.0.0.1"
 #define SERVER_PORT 1155
 #define TPS 300
 #define FPS 300
@@ -87,8 +87,28 @@ enum PacketTypes {
 
         PACKET_ABILITY_BOMB,
         PACKET_ABILITY_FORCEFIELD,
+        PACKET_ABILITY_SWITCHSHOT,
 
-    PACKETS_TO_SYNC_END
+    PACKETS_TO_SYNC_END,
+    PACKET_SWITCH_POSITIONS
+};
+
+struct switch_positions_packet {
+    int id1;
+    v2 pos1;
+    double h1;
+    int id2;
+    v2 pos2;
+    double h2;
+};
+
+struct ability_switchshot_packet {
+    int sync_id;
+    v2 pos;
+    double height;
+    v2 vel;
+    double h_vel;
+    int sender_id;
 };
 
 struct ability_forcefield_packet {
@@ -215,27 +235,6 @@ typedef enum AbilityType {
 
 // #STRUCTS
 
-enum DeserializationTypes {
-    DS_NORMAL,
-    DS_DYNAMIC_ARR,
-    DS_STRING
-};
-
-typedef struct SerializedData {
-    int size;
-    char *data;
-} SerializedData;
-
-typedef struct S_NodeHeader {
-    int node_size;
-    int child_count;
-    int sf_count;
-} S_NodeHeader;
-
-typedef struct S_FieldHeader {
-    int sf_type;
-} S_FieldHeader;
-
 typedef struct CollisionData {
     v2 offset;  // adjusting position by this offset makes the object only touch and not overlap
     bool didCollide;
@@ -282,8 +281,6 @@ DEF_STRUCT(Node, NODE, {
     void (*on_tick)(struct Node *, double);
     void (*on_ready)(struct Node *);
     void (*on_delete)(struct Node *);
-
-    SerializedData (*serialize)(struct Node *);
 
     int type;
 
@@ -399,13 +396,13 @@ DEF_STRUCT(Node, NODE, {
                 double height_accel;
                 double life_time, life_timer;
                 double bounciness;
-                bool destroy_on_floor;
+                bool destroy_on_floor, destroy_on_ceiling;
                 bool _created;
                 void (*on_create)(struct Projectile *);
                 void (*on_tick)(struct Projectile *, double);
                 void (*on_destruction)(struct Projectile *);
 
-                void *extra_data;
+                int shooter_id;
             });
 
             END_STRUCT(PROJECTILE);
@@ -488,6 +485,7 @@ DEF_STRUCT(Node, NODE, {
         WorldNode world_node;
         double radius;
         void (*on_collide)(struct CircleCollider *, CollisionData);
+        void (*custom_on_collide)(struct CircleCollider *, CollisionData);
     });
 
     END_STRUCT(WORLD_NODE);
@@ -577,6 +575,16 @@ typedef struct Room {
 } Room;
 
 // #FUNC
+
+void switchshot_projectile_switch(Projectile *proj, int player_id);
+
+void switchshot_projectile_tick(Projectile *proj, double delta);
+
+Projectile *create_switchshot_projectile(v2 pos, double height, v2 vel, double h_vel);
+
+void switchshot_activate(Ability *ability);
+
+Ability create_switchshot_ability();
 
 Node *find_node_by_sync_id(int sync_id);
 
@@ -1061,22 +1069,6 @@ const double PLAYER_SHOOT_COOLDOWN = 0.5;
 // #VAR END
 
 // #DEBUG VAR
-
-void test1() {
-    Node *node = alloc(Node, NODE);
-
-    int count = 0;
-    while (count++ < 5900) {
-
-        
-        Node_add_child(node, alloc(Node, NODE));
-        
-        printf("Node has %d remaining children. \n", array_length(node->children));
-    }
-
-
-    exit(1);
-}
 
 
 // #MAIN
@@ -3696,7 +3688,7 @@ void make_ui() {
     UILabel_set_alignment(continue_button, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
     UILabel_set_text(continue_button, String("Continue"));
 
-    continue_button->on_click = _continue_button_pressed;
+    continue_button->custom_on_click = _continue_button_pressed;
 
     UIStyle default_style = (UIStyle){.bg_color = Color(0, 0, 0, 175), .fg_color = Color(255, 255, 255, 255)};
 
@@ -4376,17 +4368,29 @@ void on_client_recv(MPPacket packet, void *data) {
         Projectile *bomb = create_bomb_projectile(packet_data->pos, packet_data->vel);
         bomb->entity.world_node.height = packet_data->height;
         bomb->height_vel = packet_data->height_vel;
+        bomb->shooter_id = packet_data->sender_id;
         node(bomb)->sync_id = packet_data->sync_id;
 
         printf("Adding bomb with sync id %d ! \n\n\n\n\n\n\n\n\n\n\n", packet_data->sync_id);
 
         Node_add_child(game_node, bomb);
 
-     } else if (packet.type == PACKET_SEND_SYNC_ID) {
+    } else if (packet.type == PACKET_ABILITY_SWITCHSHOT) {
+        struct ability_switchshot_packet *packet_data = data;
+
+        if (packet_data->sender_id == client_self_id) return;
+
+        Projectile *switchshot = create_switchshot_projectile(packet_data->pos, packet_data->height, packet_data->vel, packet_data->h_vel);
+        node(switchshot)->sync_id = packet_data->sync_id;
+        switchshot->shooter_id = packet_data->sender_id;
+
+        Node_add_child(game_node, switchshot);
+     
+    } else if (packet.type == PACKET_SEND_SYNC_ID) {
         printf("Received sync id %d! \n", ((struct send_sync_id_packet *)data)->sync_id);
         use_sync_id(((struct send_sync_id_packet *)data)->sync_id);
 
-     } else if (packet.type == PACKET_SYNC_PROJECTILE) {
+    } else if (packet.type == PACKET_SYNC_PROJECTILE) {
 
         if (MP_is_server) return;
 
@@ -4403,7 +4407,7 @@ void on_client_recv(MPPacket packet, void *data) {
         sync_projectile->vel = packet_data->vel;
         sync_projectile->height_vel = packet_data->h_vel;
 
-     } else if (packet.type == PACKET_ABILITY_FORCEFIELD) {
+    } else if (packet.type == PACKET_ABILITY_FORCEFIELD) {
         struct ability_forcefield_packet *packet_data = data;
 
         if (packet_data->sender_id == client_self_id) return;
@@ -4414,11 +4418,20 @@ void on_client_recv(MPPacket packet, void *data) {
         ff->vel = packet_data->vel;
         ff->height_vel = packet_data->h_vel;
         node(ff)->sync_id = packet_data->sync_id;
-
-        printf("Adding forcefield with sync id %d ! \n", packet_data->sync_id);
+        ff->shooter_id = packet_data->sender_id;
 
         Node_add_child(game_node, ff);
-     }
+    } else if (packet.type == PACKET_SWITCH_POSITIONS) {
+        struct switch_positions_packet *packet_data = data;
+
+        if (packet_data->id1 == client_self_id) {
+            player->world_node.pos = packet_data->pos2;
+            player->world_node.height = packet_data->h2;
+        } else if (packet_data->id2 == client_self_id) {
+            player->world_node.pos = packet_data->pos1;
+            player->world_node.height = packet_data->h1;
+        }
+    }
 }
 
 void PlayerEntity_tick(PlayerEntity *player_entity, double delta) {
@@ -4632,7 +4645,7 @@ Ability ability_bomb_create() {
         .texture = bomb_icon,
         .tick = NULL,
         .timer = 2,
-        .type = A_SPECIAL
+        .type = A_SECONDARY
     };
 
     return ability;
@@ -4663,6 +4676,12 @@ void Projectile_tick(Node *node, double delta) {
         projectile->entity.world_node.height = projectile->entity.world_node.size.y / 2;
     }
     if (projectile->entity.world_node.height + projectile->entity.world_node.size.y / 2 >= get_max_height()) {
+        
+        if (projectile->destroy_on_ceiling) {
+            projectile_destroy(projectile);
+            return;
+        }
+        
         projectile->height_vel *= -projectile->bounciness;
         projectile->entity.world_node.height = get_max_height() - projectile->entity.world_node.size.y / 2;
     }
@@ -4707,6 +4726,8 @@ Projectile Projectile_new(double life_time) {
     projectile.entity.color = (SDL_Color){255, 255, 255, 255};
 
     projectile.entity.world_node.size = to_vec(8000);
+
+    projectile.shooter_id = client_self_id;
 
     return projectile;
 }
@@ -4838,7 +4859,7 @@ void randomize_player_abilities() {
     //Ability *default_special = malloc(sizeof(Ability));
 
     Ability primary_choices[] = {ability_primary_shoot_create()};
-    Ability secondary_choices[] = {ability_secondary_shoot_create(), ability_bomb_create()};
+    Ability secondary_choices[] = {create_switchshot_ability(), ability_secondary_shoot_create(), ability_bomb_create()};
     Ability utility_choices[] = {ability_forcefield_create(), ability_dash_create()};
     //Ability speical_choices[] = {};
 
@@ -5034,7 +5055,7 @@ Node Node_new() {
     node.parent = NULL;
     node.children = array(Node *, 3);
 
-    if ((int)node.children < 10) {
+    if ((int)node.children < 10) { // quite the stupid check innit
         printf("Invalid children! \n");
         commit_sudoku();
     }
@@ -5479,6 +5500,9 @@ void CircleCollider_tick(Node *node, double delta) {
         if (collider->on_collide != NULL) {
             collider->on_collide(collider, data);
         }
+        if (collider->custom_on_collide != NULL) {
+            collider->custom_on_collide(collider, data);
+        }
     }
 }
 
@@ -5486,6 +5510,7 @@ CircleCollider CircleCollider_new(int radius) {
     CircleCollider collider = {.radius = radius};
     collider.world_node = new(WorldNode, WORLD_NODE);
     collider.on_collide = CircleCollider_default_on_collide;
+    collider.custom_on_collide = NULL;
     node(&collider)->on_tick = CircleCollider_tick;
 
     return collider;
@@ -5845,6 +5870,159 @@ Node *find_node_by_sync_id(int sync_id) {
     return res;
 }
 
+
+Ability create_switchshot_ability() {
+    Ability a = {
+        .activate = switchshot_activate,
+        .can_use = false,
+        .cooldown = 8,
+        .delay = 0,
+        .delay_timer = 0,
+        .texture = entityTexture,
+        .tick = NULL,
+        .timer = 8,
+        .type = A_SECONDARY,
+        .before_activate = NULL
+    };
+
+    return a;
+}
+
+void switchshot_activate(Ability *ability) {
+
+    double h_dir = 0; // change later
+
+    Projectile *switchshot = create_switchshot_projectile(player->world_node.pos, player->world_node.height, playerForward, h_dir); 
+
+    MPPacket packet = {.is_broadcast = true, .len = sizeof(struct ability_switchshot_packet), .type = PACKET_ABILITY_SWITCHSHOT};
+
+    struct ability_switchshot_packet packet_data = {
+        .sync_id = -1,
+        .sender_id = client_self_id,
+        .pos = switchshot->entity.world_node.pos,
+        .height = switchshot->entity.world_node.height,
+        .vel = switchshot->vel,
+        .h_vel = switchshot->height_accel
+    };
+
+    MPClient_send(packet, &packet_data);
+
+    printf("Supposed to add switchshot \n");
+    Node_add_child(game_node, switchshot);
+}
+
+void switchshot_custom_on_collide(CircleCollider *collider, CollisionData colldata) {
+    projectile_destroy(node(collider)->parent);
+}
+
+Projectile *create_switchshot_projectile(v2 pos, double height, v2 vel, double h_vel) {
+    Projectile *proj = alloc(Projectile, PROJECTILE, 8);
+
+
+    proj->height_accel = 0;
+    proj->height_vel = h_vel;
+    proj->vel = vel;
+
+    proj->destroy_on_floor = true;
+    proj->destroy_on_ceiling = true;
+    proj->on_tick = switchshot_projectile_tick;
+    proj->on_create = NULL;
+
+    proj->entity.world_node.pos = pos;
+    proj->entity.world_node.height = height;
+
+
+    Sprite *sprite = alloc(Sprite, SPRITE, false);
+    sprite->texture = entityTexture;
+    Node_add_child(proj, sprite);
+
+    CircleCollider *collider = alloc(CircleCollider, CIRCLE_COLLIDER, 5);
+
+    collider->custom_on_collide = switchshot_custom_on_collide;
+
+    Node_add_child(proj, collider);
+
+    return proj;
+}
+
+void switchshot_projectile_tick(Projectile *proj, double delta) {
+
+    if (MP_is_server) {
+        iter_over_all_nodes(node, {
+            if (node->type == PLAYER_ENTITY) {
+                PlayerEntity *player_entity = node;
+
+                CircleCollider *collider = get_child_by_type(proj, CIRCLE_COLLIDER);
+                CircleCollider *player_collider = get_child_by_type(node, CIRCLE_COLLIDER);
+
+                CollisionData coll_data = get_circle_collision(collider, player_collider);
+
+                if (coll_data.didCollide) {
+                    switchshot_projectile_switch(proj, player_entity->id);
+                    projectile_destroy(proj);
+                    return;
+                }
+            } else if (node->type == PLAYER) {
+
+                if (proj->shooter_id == client_self_id) continue;
+
+                CircleCollider *player_collider = get_child_by_type(player, CIRCLE_COLLIDER);
+                CircleCollider *collider = get_child_by_type(proj, CIRCLE_COLLIDER);
+
+                CollisionData coll_data = get_circle_collision(collider, player_collider);
+
+                if (coll_data.didCollide) {
+                    switchshot_projectile_switch(proj, client_self_id);
+                    projectile_destroy(proj);
+                    return;
+                }
+            }
+
+            
+        });
+    }
+
+    
+}
+
+void switchshot_projectile_switch(Projectile *proj, int player_id) {
+
+
+    v2 pos1, pos2;
+    double h1, h2;
+
+    if (proj->shooter_id == client_self_id) {
+        pos1 = player->world_node.pos;
+        h1 = player->world_node.height;
+    } else {
+        PlayerEntity *player1 = find_player_entity_by_id(proj->shooter_id);
+
+        pos1 = player1->entity.world_node.pos;
+        h1 = player1->entity.world_node.height;
+    }
+
+    if (player_id == client_self_id) {
+        pos2 = player->world_node.pos;
+        h2 = player->world_node.height;
+    } else {
+        PlayerEntity *player2 = find_player_entity_by_id(player_id);
+        pos2 = player2->entity.world_node.pos;
+        h2 = player2->entity.world_node.height;
+    }
+
+    MPPacket packet = {.is_broadcast = true, .len = sizeof(struct switch_positions_packet), .type = PACKET_SWITCH_POSITIONS};
+
+    struct switch_positions_packet packet_data = {
+        .id1 = proj->shooter_id,
+        .pos1 = pos1,
+        .h1 = h1,
+        .id2 = player_id,
+        .pos2 = pos2,
+        .h2 = h2
+    };
+
+    MPClient_send(packet, &packet_data);
+}
 
 
 // #END

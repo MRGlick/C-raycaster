@@ -18,6 +18,18 @@ int points = 0;
 UILabel *score_label;
 UIComponent *menu;
 
+#ifndef GET_NUM_DIGITS
+#define GET_NUM_DIGITS
+int get_num_digits(int num) {
+    int res = 0;
+    while (num > 0) {
+        num /= 10;
+        res++;
+    }
+    return res;
+}
+#endif
+
 void update_scoreboard() {
     String a = String("Score: ");
     String b = String_from_int(points);
@@ -85,7 +97,7 @@ void make_menu() {
     UI_set_size(button, (v2){200, 100});
     UI_set_pos(button, (v2){100, 160});
 
-    button->on_click = paused_click_event;
+    button->custom_on_click = paused_click_event;
 
     UI_add_child(menu, button);
 
@@ -118,7 +130,7 @@ int main(int argc, char* argv[])
 
     UIButton *button = UI_alloc(UIButton);
     button->label.component.size = to_vec(100);
-    button->on_click = test_click_event;
+    button->custom_on_click = test_click_event;
     button->label.alignment_x = ALIGNMENT_CENTER;
     button->label.alignment_y = ALIGNMENT_CENTER;
     UILabel_set_text(button, String("10000"));

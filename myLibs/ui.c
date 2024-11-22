@@ -12,7 +12,7 @@
 #include "mystring.c"
 
 
-#define MAX_COMPONENT_STACK_SIZE 1000
+#define MAX_COMPONENT_STACK_SIZE 1024
 #define DEFAULT_FONT_SIZE 30
 
 typedef enum TextAlignment {
@@ -43,6 +43,10 @@ typedef struct UIComponent {
     bool visible;
     void (*render)(GPU_Target *, struct UIComponent *);
     void (*update)(struct UIComponent *);
+    void (*handle_input)(struct UIComponent *, SDL_Event);
+    void (*on_click)(struct UIComponent *, bool);
+    void (*on_gain_focus)(struct UIComponent *);
+    void (*on_lose_focus)(struct UIComponent *);
 
     bool isbutton;
 
@@ -67,16 +71,22 @@ typedef struct UILabel {
 
 typedef struct UIButton {
     UILabel label;
-    void (*on_click)(struct UIComponent *, bool);
+    void (*custom_on_click)(struct UIComponent *, bool);
     bool activate_on_release;
 
     UIStyle hover_style, pressed_style;
 } UIButton;
 
+typedef struct UITextLine {
+    UILabel label;
+    char *text;
+    int cursor_pos;
+} UITextLine;
+
 
 #define UI_alloc(type) ({type *ptr; ptr = malloc(sizeof(type)); (*ptr) = type##_new(); ptr;})
 
-#define UI_get_comp(comp) (UIComponent *)comp
+#define UI_get_comp(comp) ((UIComponent *)comp)
 
 #define UI_set(type, comp, property, value) ((type *)comp)->property = value 
 
@@ -91,7 +101,25 @@ bool _fullscreen = false; // for functionality rather than visibility
 SDL_Window *_window;
 v2 _window_size;
 
+UIComponent *_current_focused_comp = NULL;
+
 // #FUNC
+
+void UITextLine_gain_focus(UIComponent *comp);
+
+void UITextLine_lose_focus(UIComponent *comp);
+
+void reset_focus();
+
+void UIComponent_gain_focus(UIComponent *comp);
+
+void UIButton_on_click(UIButton *button, bool pressed);
+
+void UITextLine_handle_input(UIComponent *comp, SDL_Event input);
+
+void UIComponent_handle_input(UIComponent *comp, SDL_Event input);
+
+UITextLine UITextLine_new();
 
 void UI_set_fullscreen(bool f);
 
@@ -263,7 +291,8 @@ void UI_init(SDL_Window *w, v2 window_size) {
 
     _window = w;
     _window_size = window_size;
-}   
+
+}
 
 UIStyle UIStyle_new() {
     UIStyle style;
@@ -275,7 +304,7 @@ UIStyle UIStyle_new() {
 }
 
 UIComponent UIComponent_new() {
-    UIComponent component;
+    UIComponent component = {0};
     component.is_root = false;
     component.children = array(UIComponent *, 10);
     component.parent = NULL;
@@ -392,7 +421,21 @@ void UILabel_update(UIComponent *component) {
 
 void UI_render(GPU_Target *target, UIComponent *component) {
     if (!component->is_root) {
-        component->render(target, component);
+
+        bool is_visible = UIComponent_is_visible(component);
+
+        if (is_visible) {
+            component->render(target, component);
+        }
+        if (component == _current_focused_comp && is_visible) {
+
+            int padding = 10;
+
+            v2 pos = v2_sub(UI_get_global_pos(component), to_vec(padding));
+            v2 size = v2_add(component->size, to_vec(padding * 2));
+
+            GPU_RectangleFilled2(target, GPU_MakeRect(pos.x, pos.y, size.x, size.y), GPU_MakeColor(255, 50, 50, 30));
+        }
     }
 
     for (int i = 0; i < array_length(component->children); i++) {
@@ -401,8 +444,6 @@ void UI_render(GPU_Target *target, UIComponent *component) {
 }
 
 void UIComponent_render(GPU_Target *target, UIComponent *component) {
-    if (!UIComponent_is_visible(component)) return;
-
     v2 global_pos = UI_get_global_pos(component);
 
     GPU_Rect rect = {
@@ -450,7 +491,8 @@ UIButton UIButton_new() {
     button.label = UILabel_new();
     button.label.component.isbutton = true;
     button.label.component.update = UIButton_update;
-    button.on_click = default_on_click;
+    UI_get_comp(&button)->on_click = UIButton_on_click;
+    button.custom_on_click = default_on_click;
     button.activate_on_release = true;
 
     button.hover_style = UIStyle_new();
@@ -472,6 +514,8 @@ void _UI_mouse_click(SDL_MouseButtonEvent event, bool pressed) {
 
     v2 mouse_pos = _get_mouse_pos();
 
+    bool clicked_something = false;
+
     UIComponent *component_stack[MAX_COMPONENT_STACK_SIZE];
     int stack_ptr = 0;
 
@@ -488,29 +532,44 @@ void _UI_mouse_click(SDL_MouseButtonEvent event, bool pressed) {
 
         if (!component->visible) continue; //skip the children too, dont need is_visible() bc it starts from the root
 
-        if (!component->isbutton) goto children;
-        UIButton *button = component;
-        bool should_activate = button->activate_on_release == !pressed;
-        if (is_point_in_rect(mouse_pos, UI_get_global_pos(button), UI_get_size(button))) {
+        if (is_point_in_rect(mouse_pos, UI_get_global_pos(component), UI_get_size(component))) {
+            if (component->on_click != NULL) component->on_click(component, pressed);
+
+            UIComponent_gain_focus(component);
             
-            if (button->on_click != NULL && should_activate) {
-                button->on_click(button, pressed);
-            }
+            clicked_something = true;
+            // remember to handle contains_mouse
+        }
+
+        // if (!component->isbutton) goto children;
+        // UIButton *button = component;
+        // bool should_activate = button->activate_on_release == !pressed;
+        // if (is_point_in_rect(mouse_pos, UI_get_global_pos(button), UI_get_size(button))) {
             
-            // button might move inside on_click, but im not dealing with that right now bc its unlikely
-            button->label.component.contains_mouse = is_point_in_rect(mouse_pos, UI_get_global_pos(button), UI_get_size(button));
-            button->label.component.update(button);
+        //     if (button->on_click != NULL && should_activate) {
+        //         button->on_click(button, pressed);
+        //     }
+            
+        //     // button might move inside on_click, but im not dealing with that right now bc its unlikely
+        //     button->label.component.contains_mouse = is_point_in_rect(mouse_pos, UI_get_global_pos(button), UI_get_size(button));
+        //     button->label.component.update(button);
+        // }
+        
+        if (!clicked_something) {
+            reset_focus();
         }
         
-        
 
-        children: for (int i = 0; i < array_length(component->children); i++) {
+        for (int i = 0; i < array_length(component->children); i++) {
             component_stack[stack_ptr++] = component->children[i];
         }
     };
 }
 
 void UI_handle_event(SDL_Event event) {
+
+    UIComponent_handle_input(root, event);
+
     switch (event.type) {
         case SDL_MOUSEBUTTONDOWN:
             _UI_mouse_click(event.button, true);
@@ -638,6 +697,89 @@ void UI_set_global_pos(UIComponent *comp, v2 pos) {
 
 void UI_set_fullscreen(bool f) {
     _fullscreen = f;
+}
+
+UITextLine UITextLine_new() {
+    UITextLine text_line = {0};
+
+    text_line.label = UILabel_new();
+
+    text_line.cursor_pos = 0;
+    text_line.text = array(char, 20);
+    UI_get_comp(&text_line)->handle_input = UITextLine_handle_input;
+
+    return text_line;
+}
+
+
+void UIComponent_handle_input(UIComponent *comp, SDL_Event input) {
+    if (comp == NULL) return;
+    if (comp->handle_input != NULL) comp->handle_input(comp, input);
+
+    for (int i = 0; i < array_length(comp->children); i++) {
+        UIComponent_handle_input(comp->children[i], input);
+    }
+}
+
+
+void UITextLine_handle_input(UIComponent *comp, SDL_Event input) {
+    if (_current_focused_comp != comp) return;
+
+    UITextLine *text_line = comp;
+
+    if (input.type == SDL_TEXTINPUT) {
+        for (int i = 0; input.text.text[i] != '\0'; i++) {
+            array_append(text_line->text, input.text.text[i]);
+        }
+    }
+    // add deleting with backspace and pasting (not copying because no selection for now)
+
+    text_line->label.text.data = text_line->text;
+    text_line->label.text.len = array_length(text_line->text);
+    text_line->label.text.ref = true;
+}
+
+void UIButton_on_click(UIButton *button, bool pressed) {
+    if (button->activate_on_release == pressed) return;
+
+    if (button->custom_on_click != NULL) {
+        button->custom_on_click(button, pressed);
+    }
+}
+
+void UIComponent_gain_focus(UIComponent *comp) {
+    
+    if (_current_focused_comp == comp) return;
+
+
+    if (_current_focused_comp != NULL && _current_focused_comp->on_lose_focus != NULL) {
+        _current_focused_comp->on_lose_focus(_current_focused_comp);
+    }
+    
+    _current_focused_comp = comp;
+
+
+    if (comp->on_gain_focus != NULL) {
+        comp->on_gain_focus(comp);
+    }
+}
+
+
+void reset_focus() {
+    if (_current_focused_comp != NULL && _current_focused_comp->on_lose_focus != NULL) {
+        _current_focused_comp->on_lose_focus(_current_focused_comp);
+    }
+
+    _current_focused_comp = NULL;
+}
+
+
+void UITextLine_gain_focus(UIComponent *comp) {
+    SDL_StartTextInput();
+}
+
+void UITextLine_lose_focus(UIComponent *comp) {
+    SDL_StopTextInput();
 }
 
 
