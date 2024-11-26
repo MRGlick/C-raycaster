@@ -12,7 +12,7 @@
 
 // #DEFINITIONS
 
-#define DEBUG_FLAG false
+#define DEBUG_FLAG true
 
 #define SERVER_IP "127.0.0.1"
 #define SERVER_PORT 1155
@@ -282,6 +282,8 @@ DEF_STRUCT(Node, NODE, {
     void (*on_ready)(struct Node *);
     void (*on_delete)(struct Node *);
 
+    bool _called_ready;
+
     int type;
 
     int sync_id;
@@ -312,6 +314,7 @@ DEF_STRUCT(Node, NODE, {
         SDL_Color color;
         bool inherit_color;
         v2 scale;
+        int autoplay_anim;
     });
 
     END_STRUCT(SPRITE);
@@ -461,7 +464,7 @@ DEF_STRUCT(Node, NODE, {
 
             double floor_drag;
 
-            Sprite sprite;
+            int sprite_idx; // if -1, pick randomly
 
             double particle_lifetime;
 
@@ -575,6 +578,14 @@ typedef struct Room {
 } Room;
 
 // #FUNC
+
+Sprite *ParticleSpawner_get_sprite(ParticleSpawner *spawner);
+
+Sprite *copy_sprite(Sprite *sprite, bool copy_tree);
+
+void Sprite_ready(Node *node);
+
+Node *copy_node(Node *node, bool copy_tree);
 
 void switchshot_projectile_switch(Projectile *proj, int player_id);
 
@@ -955,8 +966,8 @@ GPU_Image *floorTexture2;
 GPU_Image *floorLightTexture;
 GPU_Image *ceilingTexture;
 GPU_Image *ceilingLightTexture;
-
-// #SPRITES
+GPU_Image **bomb_explosion_particles;
+GPU_Image **bomb_smoke_particles;
 
 // #SOUNDS
 Sound *bomb_explosion;
@@ -971,9 +982,6 @@ GPU_ShaderBlock floor_shader_block;
 
 int bloom_shader;
 GPU_ShaderBlock bloom_shader_block;
-
-// #PARTICLES (the global ones)
-ParticleSpawner *bomb_explode_particles;
 
 // #ROOMGEN
 Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
@@ -1106,8 +1114,10 @@ int main(int argc, char *argv[]) {
     add_queue = array(Node *, 10);
     sync_id_queue = array(Node *, 10);
 
-    HEIGHT_TO_XY = (tileSize * 2) / get_max_height();
-    XY_TO_HEIGHT = get_max_height() / (tileSize * 2);
+    
+
+    printf("xy to height: %d \n", XY_TO_HEIGHT);
+    printf("height to xy: %d \n", HEIGHT_TO_XY);
 
     root_node = alloc(Node, NODE);
 
@@ -1212,27 +1222,7 @@ void init() {  // #INIT
 
 
     //exit(1);
-
-    bomb_explode_particles = malloc(sizeof(ParticleSpawner));
-    *bomb_explode_particles = ParticleSpawner_new(false);
-
-    // player_hit_particles = malloc(sizeof(ParticleSpawner));
-    // *player_hit_particles = ParticleSpawner_new(V2_ZERO, 0);
-    // player_hit_particles->spread = 2;
-    // player_hit_particles->dir = (v2){0.5, 1};
-    // player_hit_particles->min_size = to_vec(1000);
-    // player_hit_particles->max_size = to_vec(2000);
-    // player_hit_particles->min_speed = 70;
-    // player_hit_particles->max_speed = 160;
-    // player_hit_particles->target = NULL;
-    // player_hit_particles->sprite = (Sprite){.isAnimated = false, .texture = blood_particle};
-    // player_hit_particles->start_color = (SDL_Color){255, 255, 255, 255};
-    // player_hit_particles->end_color = (SDL_Color){255, 180, 180, 255};
-    // player_hit_particles->height_dir = 1;
-    // player_hit_particles->particle_lifetime = 1.5;
-    // player_hit_particles->bounciness = 0.1;
-    // player_hit_particles->floor_drag = 0.4;
-
+    
 
     rapidfire_sound = create_sound("Sounds/shotgun_ability.wav");
 
@@ -1244,8 +1234,9 @@ void init() {  // #INIT
 
     tanHalfFOV = tan(deg_to_rad(fov / 2));
     tanHalfStartFOV = tan(deg_to_rad(startFov / 2));
-
     
+    HEIGHT_TO_XY = (tileSize * 2) / get_max_height();
+    XY_TO_HEIGHT = get_max_height() / (tileSize * 2);
 
     for (int i = 0; i < 26; i++) keyPressArr[i] = false;
 
@@ -3409,13 +3400,7 @@ ParticleSpawner ParticleSpawner_new(bool active) {
     spawner.world_node.pos = V2_ZERO;
     spawner.world_node.height = 0;
 
-    Sprite sprite;
-    sprite.animations = NULL;
-    sprite.current_anim_idx = 0;
-    sprite.isAnimated = false;
-    sprite.texture = default_particle_texture;
-
-    spawner.sprite = sprite;
+    spawner.sprite_idx = -1;
 
     spawner.target = NULL;
 
@@ -3457,12 +3442,26 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
     }
 
     double speed = randf_range(spawner->min_speed, spawner->max_speed);
-    v2 dir = v2_rotate(spawner->dir, randf_range(-PI * spawner->spread, PI * spawner->spread));
-    double height_dir = spawner->height_dir * randf_range(-1, 1);
+
+    double dir3d_length = sqrt(spawner->dir.x * spawner->dir.x + spawner->dir.y * spawner->dir.y + spawner->height_dir * spawner->height_dir);
+
+    double dir3d_x = spawner->dir.x / dir3d_length;
+    double dir3d_y = spawner->dir.y / dir3d_length;
+    double dir3d_z = spawner->height_dir / dir3d_length;
+
+    double yaw = v2_get_angle(V2(dir3d_x, dir3d_y));
+    double pitch = v2_get_angle(V2(dir3d_x, dir3d_z));
+
+    yaw += (spawner->spread / 180 * PI) * randf_range(-1, 1);
+    pitch += (spawner->spread / 180 * PI) * randf_range(-1, 1);
+
+    double new_x = cos(yaw) * cos(pitch);
+    double new_y = sin(yaw) * cos(pitch);
+    double new_z = sin(pitch);
     
-    double vel_x = dir.x * speed;
-    double vel_y = dir.y * speed;
-    double vel_z = height_dir * speed * 3000; // bc height is different like that
+    double vel_x = new_x * speed;
+    double vel_y = new_y * speed;
+    double vel_z = new_z * speed * XY_TO_HEIGHT; // bc height is different like that
 
     particle->vel = (v2){vel_x, vel_y};
     particle->h_vel = vel_z;
@@ -3499,9 +3498,16 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
     
     particle->initial_size = size;
 
-    Sprite *particle_sprite = alloc(Sprite, SPRITE, false);
-    particle_sprite->texture = default_particle_texture;
-    Node_add_child(particle, particle_sprite);
+
+    Sprite *spawner_sprite = ParticleSpawner_get_sprite(spawner);
+    if (spawner_sprite == NULL) {
+        printf("Got null spawner sprite! at particle_spawner_spawn() \n");
+        Sprite *particle_sprite = alloc(Sprite, SPRITE, false);
+        particle_sprite->texture = default_particle_texture;
+        Node_add_child(particle, particle_sprite);
+    } else {
+        Node_add_child(particle, copy_sprite(spawner_sprite, false));
+    }
 
     Node_add_child(game_node, particle);
 
@@ -3539,7 +3545,11 @@ void Particle_tick(Node *node, double delta) { // #PT
     particle->vel = v2_mul(particle->vel, to_vec((1.0 / particle->damp)));
     particle->h_vel *= (1.0 / particle->damp);
 
-    particle->effect.entity.world_node.size = v2_lerp(particle->initial_size, V2_ZERO, inverse_lerp(particle->effect.life_time, 0, particle->effect.life_timer));
+    if (particle->fade_scale) {
+        particle->effect.entity.world_node.size = v2_lerp(particle->initial_size, V2_ZERO, inverse_lerp(particle->effect.life_time, 0, particle->effect.life_timer));
+    } else {
+        particle->effect.entity.world_node.size = particle->initial_size;
+    }
     particle->effect.entity.world_node.pos = v2_add(particle->effect.entity.world_node.pos, v2_mul(particle->vel, to_vec(delta)));
     particle->effect.entity.world_node.height += particle->h_vel * delta;
 
@@ -4451,6 +4461,10 @@ void PlayerEntity_tick(PlayerEntity *player_entity, double delta) {
 // #TEXTURES INIT
 void init_textures() {
 
+    bomb_smoke_particles = get_texture_files("Textures/ExplosionSmokeParticles/smoke", 8);
+
+    bomb_explosion_particles = get_texture_files("Textures/ExplosionParticles/explosion_particle", 11);
+
     shoot_ray = load_texture("Textures/shoot_ray.png");
 
     forcefield_field = get_texture_files("Textures/Abilities/Forcefield/pulsate", 5);
@@ -4754,10 +4768,25 @@ Projectile *create_bomb_projectile(v2 pos, v2 start_vel) {
 
     ParticleSpawner *p_spawner = alloc(ParticleSpawner, PARTICLE_SPAWNER, false);
 
+    Sprite *p_sprite1 = alloc(Sprite, SPRITE, true);
+    array_append(p_sprite1->animations, create_animation(11, 1, bomb_explosion_particles));
+    p_sprite1->autoplay_anim = 0;
+    p_sprite1->animations[0].loop = false;
+    p_sprite1->animations[0].fps = 7;
+    Node_add_child(p_spawner, p_sprite1);
+
+    Sprite *p_sprite2 = alloc(Sprite, SPRITE, true);
+    array_append(p_sprite2->animations, create_animation(8, 1, bomb_smoke_particles));
+    p_sprite2->animations[0].loop = false;
+    p_sprite2->animations[0].fps = 4;
+    p_sprite2->autoplay_anim = 0;
+    
+    Node_add_child(p_spawner, p_sprite2);
+
     Node_add_child(projectile, p_spawner);
 
     Sprite *sprite = alloc(Sprite, SPRITE, true);
-    array_append(sprite->animations, create_animation(4, 1, bomb_anim));
+    array_append(sprite->animations, create_animation(4, 0, bomb_anim));
     sprite->animations[0].loop = true;
     sprite->animations[0].fps = 12;
     spritePlayAnim(sprite, 0);
@@ -4779,31 +4808,39 @@ void bomb_on_destroy(Projectile *projectile) {
     p_spawner->world_node.height = 0;
 
     shakeCamera(30, 15, true, 10);
-    p_spawner->min_size = to_vec(15000);
-    p_spawner->max_size = to_vec(28000);
-    p_spawner->height_accel = -PARTICLE_GRAVITY * 0.1;
-    p_spawner->fade_scale = true;
+    p_spawner->min_size = to_vec(12000);
+    p_spawner->max_size = to_vec(12000);
+    p_spawner->height_accel = -PARTICLE_GRAVITY * 0.3;
+    p_spawner->fade_scale = false;
     p_spawner->affected_by_light = false;
-    p_spawner->min_speed = 30;
-    p_spawner->max_speed = 50;
-    p_spawner->spread = 2;
-    p_spawner->height_dir = 0.2;
+    p_spawner->min_speed = 230;
+    p_spawner->max_speed = 250;
+    p_spawner->spread = 180;
+    p_spawner->height_dir = 0;
     p_spawner->explode_particle_amount = 20;
-    p_spawner->particle_lifetime = 1.3;
+    p_spawner->particle_lifetime = 3;
     p_spawner->floor_drag = 0.3;
+    p_spawner->bounciness = 0.5;
+    p_spawner->damp = 1.02;
+    p_spawner->explode_particle_amount = 30;
     
     p_spawner->start_color = GPU_MakeColor(255, 230, 120, 255);
     p_spawner->end_color = GPU_MakeColor(255, 230, 120, 255);
 
+    p_spawner->sprite_idx = 0;
+
     particle_spawner_explode(p_spawner);
 
-    p_spawner->particle_lifetime = 2.5;
+    p_spawner->particle_lifetime = 3;
     p_spawner->start_color = GPU_MakeColor(120, 120, 120, 255);
     p_spawner->end_color = GPU_MakeColor(0, 0, 0, 0);
-    p_spawner->min_size = to_vec(15000);
-    p_spawner->max_size = to_vec(19000);
-    p_spawner->min_speed = 90;
-    p_spawner->max_speed = 150;
+    p_spawner->min_size = to_vec(12000);
+    p_spawner->max_size = to_vec(12000);
+    p_spawner->min_speed = 240;
+    p_spawner->max_speed = 260;
+    p_spawner->height_dir = -0.2;
+
+    p_spawner->sprite_idx = 1;
 
     particle_spawner_explode(p_spawner);
 
@@ -4859,7 +4896,7 @@ void randomize_player_abilities() {
     //Ability *default_special = malloc(sizeof(Ability));
 
     Ability primary_choices[] = {ability_primary_shoot_create()};
-    Ability secondary_choices[] = {create_switchshot_ability(), ability_secondary_shoot_create(), ability_bomb_create()};
+    Ability secondary_choices[] = {ability_bomb_create()};//{create_switchshot_ability(), ability_secondary_shoot_create(), ability_bomb_create()};
     Ability utility_choices[] = {ability_forcefield_create(), ability_dash_create()};
     //Ability speical_choices[] = {};
 
@@ -5112,9 +5149,16 @@ void Node_delete(Node *node) {
 void Node_add_child(Node *parent, Node *child) {
     if (parent == NULL || child == NULL || parent->children == NULL) return;
 
-    
+    bool call_ready = child->parent == NULL && child->on_ready != NULL && !child->_called_ready;
+
     child->parent = parent;
     array_append(parent->children, child);
+
+
+    if (call_ready) {
+        child->_called_ready = true;
+        child->on_ready(child);
+    }
 }
 
 
@@ -5281,6 +5325,7 @@ int get_node_count() {
 
 Sprite Sprite_new(bool is_animated) {
     Sprite sprite = {0};
+    sprite.autoplay_anim = -1;
     sprite.node = new(Node, NODE);
     if (is_animated) {
         sprite.animations = array(Animation, 2);
@@ -5297,6 +5342,7 @@ Sprite Sprite_new(bool is_animated) {
     sprite.node.on_delete = Sprite_delete;
     sprite.node.on_tick = Sprite_tick;
     sprite.node.on_render = Sprite_render;
+    sprite.node.on_ready = Sprite_ready;
 
     return sprite;
 }
@@ -6022,6 +6068,63 @@ void switchshot_projectile_switch(Projectile *proj, int player_id) {
     };
 
     MPClient_send(packet, &packet_data);
+}
+
+Node *copy_node(Node *node, bool copy_tree) {
+    Node *copy = malloc(node->size);
+    memcpy(copy, node, node->size);
+
+    copy->children = array(Node *, array_length(node->children));
+    if (copy_tree) {
+        for (int i = 0; i < array_length(node->children); i++) {
+            Node_add_child(copy, copy_node(node->children[i], true));
+        }
+    }
+
+    copy->parent = NULL;
+
+    return copy;
+}
+
+void Sprite_ready(Node *node) {
+    Sprite *sprite = node;
+    if (sprite->autoplay_anim != -1) {
+        spritePlayAnim(sprite, sprite->autoplay_anim);
+    }
+}
+
+Sprite *copy_sprite(Sprite *sprite, bool copy_tree) {
+    Sprite *base_copy = copy_node(sprite, copy_tree);
+    
+    base_copy->animations = array(Animation, array_length(sprite->animations));
+    for (int i = 0; i < array_length(sprite->animations); i++) {
+        array_append(base_copy->animations, sprite->animations[i]);
+    }
+
+    return base_copy;
+}
+
+Sprite *ParticleSpawner_get_sprite(ParticleSpawner *spawner) {
+    int sprite_count = 0;
+    for (int i = 0; i < array_length(node(spawner)->children); i++) {
+        if (node(spawner)->children[i]->type == SPRITE) sprite_count++;
+    }
+
+    if (spawner->sprite_idx > sprite_count) return NULL;
+
+    if (sprite_count == 0) return NULL;
+
+    int pick = spawner->sprite_idx == -1 ? randi_range(0, sprite_count - 1) : spawner->sprite_idx;
+
+    int j = 0;
+    for (int i = 0; i < array_length(node(spawner)->children); i++) {
+        if (j == pick) return node(spawner)->children[i];
+        if (node(spawner)->children[i]->type == SPRITE) j++;
+    }
+
+    commit_sudoku(); // should never happen
+
+    return NULL;
 }
 
 
