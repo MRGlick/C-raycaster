@@ -106,7 +106,14 @@ DWORD WINAPI _MPClient_handle_received_data(void *data) {
         int bytes_received = recv(client_socket, receive_buffer, MP_DEFAULT_BUFFER_SIZE, 0);
         int bytes_left = bytes_received;
 
-        while (bytes_left > 0) {
+        if (bytes_left > MP_DEFAULT_BUFFER_SIZE) {
+            commit_sudoku();
+        }
+
+        while (bytes_left > 0 && bytes_left < MP_DEFAULT_BUFFER_SIZE && data_ptr < receive_buffer + MP_DEFAULT_BUFFER_SIZE) {
+
+            
+
             MPPacket *packet = data_ptr;
             // if (sizeof(MPPacket) + packet->len != bytes_received) {
             //     printf("Nagle might have cooked with this one. \n");
@@ -117,6 +124,11 @@ DWORD WINAPI _MPClient_handle_received_data(void *data) {
             if (_MP_client_handle_recv != NULL) {
                 _MP_client_handle_recv(*packet, data_ptr + sizeof(MPPacket));
             }
+
+            if (packet->len > MP_DEFAULT_BUFFER_SIZE) {
+                break;
+            }
+
             bytes_left -= sizeof(MPPacket) + packet->len;
             data_ptr += sizeof(MPPacket) + packet->len;
         }

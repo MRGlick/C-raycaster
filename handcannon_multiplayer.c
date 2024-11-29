@@ -14,7 +14,7 @@
 
 #define DEBUG_FLAG true
 
-#define SERVER_IP "127.0.0.1"
+#define SERVER_IP "84.95.65.146"
 #define SERVER_PORT 1155
 #define TPS 300
 #define FPS 300
@@ -38,6 +38,7 @@
 #define BAKED_LIGHT_RESOLUTION 36
 #define BAKED_LIGHT_CALC_RESOLUTION 8
 #define CLIENT_UPDATE_RATE 20
+#define SERVER_TICK_RATE 40
 #define PLAYER_COLLIDER_RADIUS 8
 #define NODE_MAX_SIZE 512
 #define MAX_PACKET_SIZE 1024
@@ -90,7 +91,8 @@ enum PacketTypes {
         PACKET_ABILITY_SWITCHSHOT,
 
     PACKETS_TO_SYNC_END,
-    PACKET_SWITCH_POSITIONS
+    PACKET_SWITCH_POSITIONS,
+    PACKETS_END
 };
 
 struct switch_positions_packet {
@@ -167,61 +169,6 @@ struct player_joined_packet {
     int id;
     // ... more stuff later, maybe?
 };
-
-
-// #TYPES
-
-// enum Types {
-
-//     NODE_START,
-
-//         NODE,
-
-//         WORLD_NODE_START,
-
-//             WORLD_NODE,
-            
-//             PLAYER,
-//             RAYCAST,
-//             CIRCLE_COLLIDER,
-//             RAY_COLL_DATA,
-//             RENDER_OBJECT,
-//             WALL_STRIPE,
-//             LIGHT_POINT,
-//             SPRITE,
-//             PARTICLE_SPAWNER,
-            
-//             DIR_SPRITE,
-
-//             TILEMAP,
-
-//             RENDERER,
-            
-//             ENTITY_START,
-            
-//                 ENTITY,
-
-//                 BULLET,
-
-//                 PLAYER_ENTITY,
-
-//                 PROJECTILE_START,
-//                     PROJECTILE,
-//                 PROJECTILE_END,
-
-//                 EFFECT_START,
-
-//                     EFFECT,
-//                     PARTICLE,
-
-//                 EFFECT_END,
-
-//             ENTITY_END,
-
-//         WORLD_NODE_END,
-
-//     NODE_END
-// };
 
 enum Tiles { WALL1 = 1, WALL2 = 2 };
 
@@ -579,6 +526,8 @@ typedef struct Room {
 
 // #FUNC
 
+void Node_ready(Node *node);
+
 Sprite *ParticleSpawner_get_sprite(ParticleSpawner *spawner);
 
 Sprite *copy_sprite(Sprite *sprite, bool copy_tree);
@@ -921,6 +870,8 @@ UIComponent *pause_menu;
 UILabel *debug_label;
 
 // #TEXTURES
+GPU_Image **switchshot_anim;
+GPU_Image *switchshot_icon;
 GPU_Image *shoot_ray;
 GPU_Image **forcefield_field;
 GPU_Image *hand_default;
@@ -1059,8 +1010,8 @@ double tanHalfStartFOV;
 double ambient_light = 0.6;
 int floorRenderStart;
 const int tileSize = WINDOW_WIDTH / 30;
-int HEIGHT_TO_XY;
-int XY_TO_HEIGHT;
+double HEIGHT_TO_XY;
+double XY_TO_HEIGHT;
 double realFps;
 bool isCameraShaking = false;
 int camerashake_current_priority = 0;
@@ -1116,8 +1067,7 @@ int main(int argc, char *argv[]) {
 
     
 
-    printf("xy to height: %d \n", XY_TO_HEIGHT);
-    printf("height to xy: %d \n", HEIGHT_TO_XY);
+    
 
     root_node = alloc(Node, NODE);
 
@@ -1142,6 +1092,9 @@ int main(int argc, char *argv[]) {
 
     init();
     
+    printf("xy to height: %.2f \n", XY_TO_HEIGHT);
+    printf("height to xy: %.2f \n", HEIGHT_TO_XY);
+
     reset_tilemap(tilemap->level_tilemap);
     reset_tilemap(tilemap->floor_tilemap);
     reset_tilemap(tilemap->ceiling_tilemap);
@@ -1235,7 +1188,7 @@ void init() {  // #INIT
     tanHalfFOV = tan(deg_to_rad(fov / 2));
     tanHalfStartFOV = tan(deg_to_rad(startFov / 2));
     
-    HEIGHT_TO_XY = (tileSize * 2) / get_max_height();
+    HEIGHT_TO_XY = (double)(tileSize * 2) / get_max_height();
     XY_TO_HEIGHT = get_max_height() / (tileSize * 2);
 
     for (int i = 0; i < 26; i++) keyPressArr[i] = false;
@@ -1518,6 +1471,7 @@ void spriteTick(Sprite *sprite, double delta) {
 // #TICK
 void tick(double delta) {
     
+
     if (loading_map) {
         init_loading_screen();
         generate_dungeon();
@@ -1532,28 +1486,41 @@ void tick(double delta) {
     Node_tick(root_node, delta);
 
     // sync nodes
+    static double server_tick_timer = 1 / SERVER_TICK_RATE;
+    
     if (MP_is_server) {
-        iter_over_all_nodes(node, {
-            if (node->sync_id == -1) continue;
 
-            if (instanceof(node->type, PROJECTILE)) {
+        server_tick_timer -= delta;
+        if (server_tick_timer <= 0) {
+            server_tick_timer = 1 / SERVER_TICK_RATE;
+            iter_over_all_nodes(node, {
+                if (node->sync_id == -1) continue;
+                if (node->sync_id > 10000) {
+                    printf("bruh \n");
+                    commit_sudoku();
+                }
 
-                Projectile *proj = node;
+                if (instanceof(node->type, PROJECTILE)) {
 
-                MPPacket packet = {.type = PACKET_SYNC_PROJECTILE, .len = sizeof(struct sync_projectile_packet), .is_broadcast = true};
+                    Projectile *proj = node;
 
-                struct sync_projectile_packet packet_data = {
-                    .sync_id = node(proj)->sync_id,
-                    .pos = proj->entity.world_node.pos,
-                    .height = proj->entity.world_node.height,
-                    .vel = proj->vel,
-                    .h_vel = proj->height_vel
-                };
+                    MPPacket packet = {.type = PACKET_SYNC_PROJECTILE, .len = sizeof(struct sync_projectile_packet), .is_broadcast = true};
 
-                MPClient_send(packet, &packet_data);
+                    struct sync_projectile_packet packet_data = {
+                        .sync_id = node->sync_id,
+                        .pos = proj->entity.world_node.pos,
+                        .height = proj->entity.world_node.height,
+                        .vel = proj->vel,
+                        .h_vel = proj->height_vel
+                    };
 
-            }
-        });
+                    MPClient_send(packet, &packet_data);
+
+                }
+            });
+        }
+
+        
     }
 
 
@@ -3501,7 +3468,6 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
 
     Sprite *spawner_sprite = ParticleSpawner_get_sprite(spawner);
     if (spawner_sprite == NULL) {
-        printf("Got null spawner sprite! at particle_spawner_spawn() \n");
         Sprite *particle_sprite = alloc(Sprite, SPRITE, false);
         particle_sprite->texture = default_particle_texture;
         Node_add_child(particle, particle_sprite);
@@ -4247,6 +4213,16 @@ void client_add_player_entity(int id) {
 // #CLIENT RECV
 void on_client_recv(MPPacket packet, void *data) {
 
+    if (packet.len > MP_DEFAULT_BUFFER_SIZE) {
+        printf("Packet too big! \n");
+        return;
+    }
+
+    if (packet.type < 0 || packet.type > PACKETS_END) {
+        printf("Invalid packet type! \n");
+        return;
+    }
+
     if (packet.type == PACKET_UPDATE_PLAYER_ID) {
 
         client_self_id = *(int *)(data);
@@ -4405,6 +4381,9 @@ void on_client_recv(MPPacket packet, void *data) {
         if (MP_is_server) return;
 
         struct sync_projectile_packet *packet_data = data;
+
+        cd_print(true, "syncing projectile with sync id %d ! \n", packet_data->sync_id);
+
         Projectile *sync_projectile = find_node_by_sync_id(packet_data->sync_id);
 
         if (sync_projectile == NULL) {
@@ -4460,6 +4439,10 @@ void PlayerEntity_tick(PlayerEntity *player_entity, double delta) {
 
 // #TEXTURES INIT
 void init_textures() {
+
+    switchshot_icon = load_texture("Textures/Abilities/Icons/switchshot_icon.png");
+
+    switchshot_anim = get_texture_files("Textures/Abilities/Switchshot/switchshot", 4);
 
     bomb_smoke_particles = get_texture_files("Textures/ExplosionSmokeParticles/smoke", 8);
 
@@ -4896,8 +4879,8 @@ void randomize_player_abilities() {
     //Ability *default_special = malloc(sizeof(Ability));
 
     Ability primary_choices[] = {ability_primary_shoot_create()};
-    Ability secondary_choices[] = {ability_bomb_create()};//{create_switchshot_ability(), ability_secondary_shoot_create(), ability_bomb_create()};
-    Ability utility_choices[] = {ability_forcefield_create(), ability_dash_create()};
+    Ability secondary_choices[] = {create_switchshot_ability()}; //, ability_secondary_shoot_create(), ability_bomb_create()
+    Ability utility_choices[] = {ability_forcefield_create()};
     //Ability speical_choices[] = {};
 
     *default_primary = pick_random_ability_from_array(primary_choices, sizeof(primary_choices) / sizeof(Ability));
@@ -5068,7 +5051,7 @@ Projectile *create_forcefield_projectile() {
 
 void projectile_forcefield_on_tick(Projectile *projectile, double delta) {
 
-    const int REPEL_DIST = 75;
+    const int REPEL_DIST = 50;
 
     projectile->vel = v2_lerp(projectile->vel, V2_ZERO, 0.01 * delta * 144);
 
@@ -5082,7 +5065,6 @@ void projectile_forcefield_on_tick(Projectile *projectile, double delta) {
         if (dist_sqr < REPEL_DIST * REPEL_DIST) {
             proj->vel = v2_add(proj->vel, v2_dir(projectile->entity.world_node.pos, proj->entity.world_node.pos));
             proj->height_vel -= proj->height_accel * 1.2 * delta;
-            printf("Pushed! \n");
         }
     });
 }
@@ -5091,11 +5073,6 @@ Node Node_new() {
     Node node = {0};
     node.parent = NULL;
     node.children = array(Node *, 3);
-
-    if ((int)node.children < 10) { // quite the stupid check innit
-        printf("Invalid children! \n");
-        commit_sudoku();
-    }
 
     node.sync_id = -1; // will only be used on things that will get updates (e.g. projectiles)
     node.type = -1;
@@ -5149,7 +5126,7 @@ void Node_delete(Node *node) {
 void Node_add_child(Node *parent, Node *child) {
     if (parent == NULL || child == NULL || parent->children == NULL) return;
 
-    bool call_ready = child->parent == NULL && child->on_ready != NULL && !child->_called_ready;
+    bool call_ready = child->parent == NULL && !child->_called_ready;
 
     child->parent = parent;
     array_append(parent->children, child);
@@ -5157,7 +5134,7 @@ void Node_add_child(Node *parent, Node *child) {
 
     if (call_ready) {
         child->_called_ready = true;
-        child->on_ready(child);
+        Node_ready(child);
     }
 }
 
@@ -5924,7 +5901,7 @@ Ability create_switchshot_ability() {
         .cooldown = 8,
         .delay = 0,
         .delay_timer = 0,
-        .texture = entityTexture,
+        .texture = switchshot_icon,
         .tick = NULL,
         .timer = 8,
         .type = A_SECONDARY,
@@ -5978,8 +5955,10 @@ Projectile *create_switchshot_projectile(v2 pos, double height, v2 vel, double h
     proj->entity.world_node.height = height;
 
 
-    Sprite *sprite = alloc(Sprite, SPRITE, false);
-    sprite->texture = entityTexture;
+    Sprite *sprite = alloc(Sprite, SPRITE, true);
+    array_append(sprite->animations, create_animation(4, 0, switchshot_anim));
+    sprite->autoplay_anim = 0;
+    sprite->animations[0].fps = 12;
     Node_add_child(proj, sprite);
 
     CircleCollider *collider = alloc(CircleCollider, CIRCLE_COLLIDER, 5);
@@ -6110,9 +6089,14 @@ Sprite *ParticleSpawner_get_sprite(ParticleSpawner *spawner) {
         if (node(spawner)->children[i]->type == SPRITE) sprite_count++;
     }
 
-    if (spawner->sprite_idx > sprite_count) return NULL;
+    if (spawner->sprite_idx > sprite_count) {
+        printf("Tried accessing sprite idx %d when the actual count is %d \n", spawner->sprite_idx, sprite_count);
+        return NULL;
+    }
 
-    if (sprite_count == 0) return NULL;
+    if (sprite_count == 0) {
+        return NULL;
+    }
 
     int pick = spawner->sprite_idx == -1 ? randi_range(0, sprite_count - 1) : spawner->sprite_idx;
 
@@ -6125,6 +6109,16 @@ Sprite *ParticleSpawner_get_sprite(ParticleSpawner *spawner) {
     commit_sudoku(); // should never happen
 
     return NULL;
+}
+
+void Node_ready(Node *node) {
+    if (node->on_ready != NULL) {
+        node->on_ready(node);
+    }
+
+    for (int i = 0; i < array_length(node->children); i++) {
+        Node_ready(node->children[i]);
+    }
 }
 
 
