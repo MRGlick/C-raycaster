@@ -12,9 +12,9 @@
 
 // #DEFINITIONS
 
-#define DEBUG_FLAG true
+#define DEBUG_FLAG false
 
-#define SERVER_IP "84.95.65.146"
+#define SERVER_IP "84.95.64.135"
 #define SERVER_PORT 1155
 #define TPS 300
 #define FPS 300
@@ -526,6 +526,8 @@ typedef struct Room {
 
 // #FUNC
 
+bool is_sync_id_valid(int sync_id);
+
 void Node_ready(Node *node);
 
 Sprite *ParticleSpawner_get_sprite(ParticleSpawner *spawner);
@@ -971,6 +973,7 @@ int client_self_id = -1;
 int next_id = 1234;
 
 int server_next_sync_id = 42;
+int client_last_seen_sync_id = -1;
 
 double game_speed_duration_timer = 0;
 double game_speed = 1;
@@ -1494,11 +1497,7 @@ void tick(double delta) {
         if (server_tick_timer <= 0) {
             server_tick_timer = 1 / SERVER_TICK_RATE;
             iter_over_all_nodes(node, {
-                if (node->sync_id == -1) continue;
-                if (node->sync_id > 10000) {
-                    printf("bruh \n");
-                    commit_sudoku();
-                }
+                if (node->sync_id == -1 || !is_sync_id_valid(node->sync_id)) continue;
 
                 if (instanceof(node->type, PROJECTILE)) {
 
@@ -1514,9 +1513,11 @@ void tick(double delta) {
                         .h_vel = proj->height_vel
                     };
 
-                    MPClient_send(packet, &packet_data);
+                    printf("Sending packet data: \n\tsync id: %d\n\tpacketlen: %d \n", packet_data.sync_id, packet.len);
 
+                    MPClient_send(packet, &packet_data);
                 }
+                
             });
         }
 
@@ -2319,7 +2320,7 @@ void shakeCamera(double strength, int ticks, bool fade, int priority) {
 
 void reset_tilemap(int t[TILEMAP_HEIGHT][TILEMAP_WIDTH]) { 
 
-    printf("Reseting tilemap \n");
+    // printf("Reseting tilemap \n");
 
     for (int r = 0; r < TILEMAP_HEIGHT; r++) {
         for (int c = 0; c < TILEMAP_WIDTH; c++) {
@@ -3915,7 +3916,7 @@ void load_room(Room *room_ptr) {
 
     fclose(fh);
 
-    printf("Loaded room with %d lights \n", num_lights);
+    // printf("Loaded room with %d lights \n", num_lights);
 
 }
 
@@ -4107,7 +4108,7 @@ void on_player_connect(SOCKET player_socket) {
     );
 
     for (int i = 0; i < MP_clients_amount; i++) {
-        printf("Sending to the dude. ID: %d \n", server_client_id_list[i]);
+        // printf("Sending to the dude. ID: %d \n", server_client_id_list[i]);
 
         struct player_joined_packet packet_data = {.id = server_client_id_list[i]};
 
@@ -4208,6 +4209,8 @@ void client_add_player_entity(int id) {
     write_to_debug_label(String_from_int(player_entity->id));
 
     Node_add_child(game_node, player_entity);
+
+
 }
 
 // #CLIENT RECV
@@ -4236,6 +4239,8 @@ void on_client_recv(MPPacket packet, void *data) {
         }
 
         PlayerEntity *player_entity = find_or_add_player_entity_by_id(packet_data.id);
+
+        if (player_entity == NULL) return;
 
         player_entity->desired_pos = packet_data.pos;
         player_entity->desired_height = packet_data.height;
@@ -4269,6 +4274,8 @@ void on_client_recv(MPPacket packet, void *data) {
         }
             
         PlayerEntity *shooter = find_or_add_player_entity_by_id(packet_data->shooter_id);            
+
+        if (shooter == NULL) return;
 
         // create the effect at the pos and height
         Effect *hit_effect = alloc(Effect, EFFECT, 1);
@@ -4315,6 +4322,7 @@ void on_client_recv(MPPacket packet, void *data) {
             }
 
             PlayerEntity *player_entity = find_or_add_player_entity_by_id(packet_data->hit_id);
+            if (player_entity == NULL) return;
             player_entity_take_dmg(player_entity, 1);
         }
 
@@ -4382,7 +4390,7 @@ void on_client_recv(MPPacket packet, void *data) {
 
         struct sync_projectile_packet *packet_data = data;
 
-        cd_print(true, "syncing projectile with sync id %d ! \n", packet_data->sync_id);
+        // cd_print(true, "syncing projectile with sync id %d ! \n", packet_data->sync_id);
 
         Projectile *sync_projectile = find_node_by_sync_id(packet_data->sync_id);
 
@@ -4587,6 +4595,8 @@ PlayerEntity *find_player_entity_by_id(int id) {
 
 PlayerEntity *find_or_add_player_entity_by_id(int id) {
 
+    if (!is_sync_id_valid(id)) return NULL;
+
     if (id == client_self_id) return NULL;
 
     PlayerEntity *player_entity = find_player_entity_by_id(id);
@@ -4594,6 +4604,9 @@ PlayerEntity *find_or_add_player_entity_by_id(int id) {
     if (player_entity != NULL) return player_entity;
 
     client_add_player_entity(id);
+
+    client_last_seen_sync_id = max(client_last_seen_sync_id, id);
+
     return find_player_entity_by_id(id);
 }
 
@@ -4636,12 +4649,12 @@ Ability ability_bomb_create() {
         .activate = ability_bomb_activate,
         .before_activate = NULL,
         .can_use = false,
-        .cooldown = 5,
+        .cooldown = .2,
         .delay = 0,
         .delay_timer = 0,
         .texture = bomb_icon,
         .tick = NULL,
-        .timer = 2,
+        .timer = .2,
         .type = A_SECONDARY
     };
 
@@ -4878,9 +4891,9 @@ void randomize_player_abilities() {
     Ability *default_utility = malloc(sizeof(Ability));
     //Ability *default_special = malloc(sizeof(Ability));
 
-    Ability primary_choices[] = {ability_primary_shoot_create()};
+    Ability primary_choices[] = {ability_primary_shoot_create()}; //
     Ability secondary_choices[] = {create_switchshot_ability()}; //, ability_secondary_shoot_create(), ability_bomb_create()
-    Ability utility_choices[] = {ability_forcefield_create()};
+    Ability utility_choices[] = {ability_forcefield_create()}; //
     //Ability speical_choices[] = {};
 
     *default_primary = pick_random_ability_from_array(primary_choices, sizeof(primary_choices) / sizeof(Ability));
@@ -5865,6 +5878,10 @@ Node *use_sync_id(int sync_id) {
         return NULL;
     }
 
+    if (!is_sync_id_valid(sync_id)) {
+        return NULL;
+    }
+
     printf("Popped from sync queue! \n");
 
     Node *res = sync_id_queue[0];
@@ -5872,6 +5889,8 @@ Node *use_sync_id(int sync_id) {
     array_remove(sync_id_queue, 0);
 
     res->sync_id = sync_id;
+
+    client_last_seen_sync_id = sync_id;
 
     return res;
 }
@@ -5898,12 +5917,12 @@ Ability create_switchshot_ability() {
     Ability a = {
         .activate = switchshot_activate,
         .can_use = false,
-        .cooldown = 8,
+        .cooldown = 0.2,
         .delay = 0,
         .delay_timer = 0,
         .texture = switchshot_icon,
         .tick = NULL,
-        .timer = 8,
+        .timer = 0.2,
         .type = A_SECONDARY,
         .before_activate = NULL
     };
@@ -5916,6 +5935,8 @@ void switchshot_activate(Ability *ability) {
     double h_dir = 0; // change later
 
     Projectile *switchshot = create_switchshot_projectile(player->world_node.pos, player->world_node.height, playerForward, h_dir); 
+
+    add_to_sync_queue(switchshot);
 
     MPPacket packet = {.is_broadcast = true, .len = sizeof(struct ability_switchshot_packet), .type = PACKET_ABILITY_SWITCHSHOT};
 
@@ -5976,6 +5997,8 @@ void switchshot_projectile_tick(Projectile *proj, double delta) {
         iter_over_all_nodes(node, {
             if (node->type == PLAYER_ENTITY) {
                 PlayerEntity *player_entity = node;
+
+                if (proj->shooter_id == player_entity->id) continue;
 
                 CircleCollider *collider = get_child_by_type(proj, CIRCLE_COLLIDER);
                 CircleCollider *player_collider = get_child_by_type(node, CIRCLE_COLLIDER);
@@ -6119,6 +6142,18 @@ void Node_ready(Node *node) {
     for (int i = 0; i < array_length(node->children); i++) {
         Node_ready(node->children[i]);
     }
+}
+
+bool is_sync_id_valid(int sync_id) {
+    if (sync_id < 42) return false;
+    // if (MP_is_server) {
+    //     if (sync_id > server_next_sync_id) return false;
+    // } else {
+    //     if (sync_id > client_last_seen_sync_id + 100) return false; // 100 so it's only violated by 
+    // }
+    
+
+    return true;
 }
 
 

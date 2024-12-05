@@ -44,16 +44,20 @@ void MP_print_hex(const unsigned char *buf, int len) {
 void MPClient_send(MPPacket packet, void *data) {
 
     if (packet.len > MP_DEFAULT_BUFFER_SIZE - sizeof(packet)) {
-        fprintf(stderr, "Packet too big! Packet size: %d \n", packet.len);
-        exit(-1);
+        fprintf(stderr, "Packet too big to send! Packet size: %d \n", packet.len);
+        //exit(-1);
+        return; // what could ever go wrong?
+    }
+    if (packet.len < 0) {
+        fprintf(stderr, "Invalid packet size! Packet size: %d \n", packet.len);
+        //exit(-1);
+        return; // :)
     }
 
     char buff[MP_DEFAULT_BUFFER_SIZE] = {0};
 
     memcpy(buff, &packet, sizeof(packet));
     memcpy(buff + sizeof(packet), data, packet.len);
-
-    v2 pos = *(v2 *)(buff + sizeof(packet));
 
     send(MPClient_socket, buff, packet.len + sizeof(MPPacket), 0);
 }
@@ -101,35 +105,48 @@ DWORD WINAPI _MPClient_handle_received_data(void *data) {
     while (TRUE) {
         
         char receive_buffer[MP_DEFAULT_BUFFER_SIZE] = {0};
+
+        int base_addr = (int)receive_buffer;
+
         char *data_ptr = receive_buffer;
 
         int bytes_received = recv(client_socket, receive_buffer, MP_DEFAULT_BUFFER_SIZE, 0);
-        int bytes_left = bytes_received;
 
-        if (bytes_left > MP_DEFAULT_BUFFER_SIZE) {
+        if (bytes_received == SOCKET_ERROR) {
+            fprintf(stderr, "Received socket error. Disconnecting... \n");
+            shutdown(client_socket, SD_BOTH);
+            closesocket(client_socket);
+            exit(-1);
+        }
+        if (bytes_received > MP_DEFAULT_BUFFER_SIZE) {
+            printf("Packet too big! \n");
             commit_sudoku();
         }
 
-        while (bytes_left > 0 && bytes_left < MP_DEFAULT_BUFFER_SIZE && data_ptr < receive_buffer + MP_DEFAULT_BUFFER_SIZE) {
+        int i = 0;
+        int test_var_len = 0; 
+        int test_var_type = -1;
 
-            
+        while (data_ptr < receive_buffer + bytes_received && data_ptr >= receive_buffer) {
+            int data_ptr_addr = (int)data_ptr;
 
             MPPacket *packet = data_ptr;
-            // if (sizeof(MPPacket) + packet->len != bytes_received) {
-            //     printf("Nagle might have cooked with this one. \n");
-            //     printf("Predicted size: %d \n", sizeof(MPPacket) + packet->len);
-            //     printf("Got size: %d \n", bytes_received);
-            // }
+
+            if (i == 0) {
+                test_var_len = packet->len;
+                test_var_type = packet->type;
+            }
+
+            i++;
             // process packet from server...
             if (_MP_client_handle_recv != NULL) {
                 _MP_client_handle_recv(*packet, data_ptr + sizeof(MPPacket));
             }
 
             if (packet->len > MP_DEFAULT_BUFFER_SIZE) {
-                break;
+                printf("Packet length bigger than 1024! \n");
             }
 
-            bytes_left -= sizeof(MPPacket) + packet->len;
             data_ptr += sizeof(MPPacket) + packet->len;
         }
 
@@ -173,14 +190,11 @@ DWORD WINAPI _MPServer_handle_client(void *data) {
 
         if (bytes_received <= 0) {
             if (bytes_received == SOCKET_ERROR) {
-                printf("SOCKET ERROR! \n");
-                printf("err number: %d \n", WSAGetLastError());
-                exit(-12941);
+                printf("Received socket error. Attempting to disconnect client. \n");
             } else {
                 printf("Client disconnected! \n");
-                _MPServer_disconnect_client(client_socket);
-                
             }
+            _MPServer_disconnect_client(client_socket);
 
             if (_MP_on_client_disconnected != NULL) {
                 _MP_on_client_disconnected(client_socket);
@@ -189,27 +203,32 @@ DWORD WINAPI _MPServer_handle_client(void *data) {
             return bytes_received; 
         }
 
-        int bytes_left = bytes_received;
         char *data_ptr = receive_buffer;
+        int max_len = MP_DEFAULT_BUFFER_SIZE;
 
-        while (bytes_left > 0) {
+        while (data_ptr < receive_buffer + bytes_received) {
             MPPacket *packet = data_ptr;
-            // if (sizeof(MPPacket) + packet->len != bytes_received) {
-            //     printf("Nagle might have cooked with this one. \n");
-            //     printf("Predicted size: %d \n", sizeof(MPPacket) + packet->len);
-            //     printf("Got size: %d \n", bytes_received);
-            // }
+
             // process packet from server...
             if (_MP_client_handle_recv != NULL) {
                 _MP_server_handle_recv(client_socket, *packet, data_ptr + sizeof(MPPacket));
             }
-            bytes_left -= sizeof(MPPacket) + packet->len;
+
             data_ptr += sizeof(MPPacket) + packet->len;
         }
     }
 }
 
 void MPServer_send(MPPacket packet, void *data) {
+
+    if (packet.len > MP_DEFAULT_BUFFER_SIZE - sizeof(packet)) {
+        fprintf(stderr, "Packet too big to send! Packet size: %d \n", packet.len);
+        exit(-1);
+    }
+    if (packet.len < 0) {
+        fprintf(stderr, "Negative packet size! Packet size: %d \n", packet.len);
+        exit(-1);
+    }
 
     char buf[MP_DEFAULT_BUFFER_SIZE] = {0};
 
@@ -231,10 +250,6 @@ void MPServer_send_to(MPPacket packet, void *data, SOCKET target) {
 
     send(target, buf, packet.len + sizeof(MPPacket), 0);
     
-}
-
-String get_ip_string() {
-    return String_new(10);
 }
 
 DWORD WINAPI _MPServer(void *data) {
