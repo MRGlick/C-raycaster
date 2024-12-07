@@ -97,6 +97,27 @@ void MPClient(char *ip) {
     CloseHandle(h);
 }
 
+
+int MP_full_recv(SOCKET sock, char *buf, int size) {
+    int bytes_received = recv(sock, buf, size, 0);
+
+    MPPacket *first_packet = buf;
+
+    if (first_packet->len > MP_DEFAULT_BUFFER_SIZE) {
+        printf("Corrupted first packet \n");
+        commit_sudoku();
+    }
+
+    int total_bytes_received = bytes_received;
+
+    while (first_packet->len > total_bytes_received - sizeof(MPPacket)) {
+        int bytes = recv(sock, buf + total_bytes_received, first_packet->len - (total_bytes_received - sizeof(MPPacket)), 0);
+        total_bytes_received += bytes;
+    }
+
+    return total_bytes_received;
+}
+
 DWORD WINAPI _MPClient_handle_received_data(void *data) {
     SOCKET client_socket = (SOCKET)data;
 
@@ -106,11 +127,9 @@ DWORD WINAPI _MPClient_handle_received_data(void *data) {
         
         char receive_buffer[MP_DEFAULT_BUFFER_SIZE] = {0};
 
-        int base_addr = (int)receive_buffer;
-
         char *data_ptr = receive_buffer;
 
-        int bytes_received = recv(client_socket, receive_buffer, MP_DEFAULT_BUFFER_SIZE, 0);
+        int bytes_received = MP_full_recv(client_socket, receive_buffer, MP_DEFAULT_BUFFER_SIZE);
 
         if (bytes_received == SOCKET_ERROR) {
             fprintf(stderr, "Received socket error. Disconnecting... \n");
@@ -123,21 +142,18 @@ DWORD WINAPI _MPClient_handle_received_data(void *data) {
             commit_sudoku();
         }
 
-        int i = 0;
-        int test_var_len = 0; 
-        int test_var_type = -1;
 
-        while (data_ptr < receive_buffer + bytes_received && data_ptr >= receive_buffer) {
-            int data_ptr_addr = (int)data_ptr;
+
+
+        while (data_ptr < receive_buffer + bytes_received) {
+
+            int data_ptr_num = (int)data_ptr;
+            int receive_buffer_num = (int)receive_buffer;
+            int diff = data_ptr_num - receive_buffer_num;
 
             MPPacket *packet = data_ptr;
-
-            if (i == 0) {
-                test_var_len = packet->len;
-                test_var_type = packet->type;
-            }
-
-            i++;
+            
+            
             // process packet from server...
             if (_MP_client_handle_recv != NULL) {
                 _MP_client_handle_recv(*packet, data_ptr + sizeof(MPPacket));
@@ -145,6 +161,7 @@ DWORD WINAPI _MPClient_handle_received_data(void *data) {
 
             if (packet->len > MP_DEFAULT_BUFFER_SIZE) {
                 printf("Packet length bigger than 1024! \n");
+                commit_sudoku();
             }
 
             data_ptr += sizeof(MPPacket) + packet->len;
@@ -186,7 +203,7 @@ DWORD WINAPI _MPServer_handle_client(void *data) {
         
         char receive_buffer[MP_DEFAULT_BUFFER_SIZE] = {0};
         
-        int bytes_received = recv(client_socket, receive_buffer, MP_DEFAULT_BUFFER_SIZE, 0);
+        int bytes_received = MP_full_recv(client_socket, receive_buffer, MP_DEFAULT_BUFFER_SIZE);
 
         if (bytes_received <= 0) {
             if (bytes_received == SOCKET_ERROR) {
@@ -200,11 +217,10 @@ DWORD WINAPI _MPServer_handle_client(void *data) {
                 _MP_on_client_disconnected(client_socket);
             }
 
-            return bytes_received; 
+            return 0;
         }
 
         char *data_ptr = receive_buffer;
-        int max_len = MP_DEFAULT_BUFFER_SIZE;
 
         while (data_ptr < receive_buffer + bytes_received) {
             MPPacket *packet = data_ptr;

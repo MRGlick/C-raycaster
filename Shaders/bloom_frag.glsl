@@ -1,52 +1,61 @@
 #version 330 core
 
-in vec4 color;
+uniform sampler2D u_screenTexture;
+uniform vec2 u_resolution;
+uniform float u_bloomThreshold = 0.7;
+uniform float u_bloomIntensity = 1.2;
+uniform float u_bloomSpread = 2.0;
+
 in vec2 texCoord;
+
 out vec4 fragColor;
 
-uniform sampler2D tex;
-uniform vec2 texResolution; // resolution of the texture
+// Extract bright pixels
+vec4 extractBrightPixels(sampler2D tex, vec2 uv) {
+    vec4 color = texture(tex, uv);
+    float brightness = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
+    return brightness > u_bloomThreshold ? color : vec4(0.0);
+}
 
-void main()
-{
-    vec2 texOffset = 1.0 / texResolution; // size of a texel
-
-    float pi = 6.28318530718;
+// Box blur with downscaling
+vec4 downscaledBlur(sampler2D tex, vec2 uv, vec2 resolution, float spread) {
+    vec2 pixelSize = 1.0 / resolution;
+    vec4 color = vec4(0.0);
+    float totalWeight = 0.0;
     
-    float directions = 16.0; // Default 16.0
-    float quality = 3.0; // Default 4.0
-    float size = 16.0;
-    float thresh = 2.0;
-   
-    vec2 Radius = size / texResolution;
-    
-    //vec2 targetResolution = vec2(256, 192);
-    //vec2 uvSnapped = floor(texCoord * targetResolution) / targetResolution;
-
-    // Normalized pixel coordinates (from 0 to 1)
-    vec2 uv = texCoord;
-    // pixel colour
-    vec4 Color = texture(tex, uv);
-    
-    // Blur calculations
-    for(float d = 0.0; d < pi; d += pi / directions)
-    {
-        for(float i = 1.0 / quality; i <= 1.0; i += 1.0 / quality)
-        {   
-            vec4 col = texture(tex, uv + vec2(cos(d), sin(d)) * Radius * i);
-
-            if (col.r + col.b + col.g > thresh) {
-                Color += col;
+    // Simple box blur with configurable spread
+    for (int x = -3; x <= 3; x++) {
+        for (int y = -3; y <= 3; y++) {
+            vec2 offset = vec2(x, y) * pixelSize * spread;
+            vec2 sampleCoord = uv + offset;
+            
+            // Ensure we don't sample outside texture
+            if (sampleCoord.x >= 0.0 && sampleCoord.x <= 1.0 && 
+                sampleCoord.y >= 0.0 && sampleCoord.y <= 1.0) {
+                
+                vec4 sampleColor = extractBrightPixels(tex, sampleCoord);
+                color += sampleColor;
+                totalWeight += 1.0;
             }
-
         }
     }
     
-    // Output to screen
-    Color /= quality * directions;
-    fragColor = Color;
-
-    // Combine the original color with the blurred color for the bloom effect
-    fragColor = texture(tex, uv) + Color * 0.8;
+    // Normalize
+    return color / max(totalWeight, 1.0);
 }
 
+void main() {
+    vec2 uv = texCoord;
+    
+    // Sample original scene
+    vec4 originalColor = texture(u_screenTexture, uv);
+    
+    // Downscaled bloom
+    vec2 downscaledResolution = u_resolution * 0.5;
+    vec4 bloomColor = downscaledBlur(u_screenTexture, uv, downscaledResolution, u_bloomSpread);
+    
+    // Combine original color with bloom
+    vec4 finalColor = originalColor + bloomColor * u_bloomIntensity;
+    
+    fragColor = finalColor;
+}

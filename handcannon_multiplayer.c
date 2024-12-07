@@ -12,7 +12,7 @@
 
 // #DEFINITIONS
 
-#define DEBUG_FLAG false
+#define DEBUG_FLAG true
 
 #define SERVER_IP "84.95.64.135"
 #define SERVER_PORT 1155
@@ -1489,9 +1489,10 @@ void tick(double delta) {
     Node_tick(root_node, delta);
 
     // sync nodes
-    static double server_tick_timer = 1 / SERVER_TICK_RATE;
     
     if (MP_is_server) {
+        
+        static double server_tick_timer = 1 / SERVER_TICK_RATE;
 
         server_tick_timer -= delta;
         if (server_tick_timer <= 0) {
@@ -2115,11 +2116,11 @@ void render(double delta) {  // #RENDER
 
     GPU_ActivateShaderProgram(bloom_shader, &bloom_shader_block);
 
-    GPU_SetShaderImage(screen_image, GPU_GetUniformLocation(bloom_shader, "tex"), 1);
+    GPU_SetShaderImage(screen_image, GPU_GetUniformLocation(bloom_shader, "u_screenTexture"), 1);
     
     float res[2] = {WINDOW_WIDTH, WINDOW_HEIGHT};
 
-    GPU_SetUniformfv(GPU_GetUniformLocation(bloom_shader, "texResolution"), 2, 1, res);
+    GPU_SetUniformfv(GPU_GetUniformLocation(bloom_shader, "u_resolution"), 2, 1, res);
 
 
     GPU_Blit(screen_image, NULL, actual_screen, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
@@ -4147,6 +4148,11 @@ void on_player_disconnect(SOCKET player_socket) {
 
 // #SERVER RECV
 void on_server_recv(SOCKET socket, MPPacket packet, void *data) {
+
+    if (packet.len > MP_DEFAULT_BUFFER_SIZE) {
+        printf("corrupted on_server_recv \n");
+        commit_sudoku();
+    }
 
     if (packet.type == PACKET_REQUEST_DUNGEON_SEED) {
         struct dungeon_seed_packet packet_data = {.seed = server_dungeon_seed};
