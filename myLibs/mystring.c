@@ -40,6 +40,21 @@ String String_copy_from_literal(const char *literal) {
     return str;
 }
 
+String String_ncopy_from_literal(const char *literal, int len) {
+    String str = {
+        .len = len,
+        .ref = false
+    };
+
+    str.data = malloc(str.len + 1);
+    memcpy(str.data, literal, str.len);
+
+    str.data[str.len] = '\0';
+
+
+    return str;
+}
+
 String String_new(int len) {
     String new = {
         .len = len,

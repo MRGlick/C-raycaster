@@ -97,7 +97,6 @@ void _array_ensure_capacity(void **array) {
 
     if (header->length >= header->size) {
         _expand_array(array);
-        //printf("Expanded! \n");
     }
 }
 
@@ -108,6 +107,18 @@ void _array_ensure_capacity(void **array) {
 #define array_append(array, val) do { \
     _array_ensure_capacity((void **)&(array)); \
     array[array_length(array)] = val; \
+    array_header(array)->length++; \
+} while (0)
+
+// Note: i = array_length is possible because the bounds of the insert are 0 -> array_length (including)
+#define array_insert(array, val, i) do { \
+    _array_ensure_capacity((void **)&(array)); \
+    memmove( \
+        (char *)(array) + (i + 1) * array_header((void *)array)->item_size, \
+        (char *)(array) + (i) * array_header((void *)array)->item_size, \
+        (array_length((void *)array) - (i)) * array_header((void *)array)->item_size \
+    ); \
+    array[i] = val; \
     array_header(array)->length++; \
 } while (0)
 

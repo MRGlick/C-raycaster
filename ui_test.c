@@ -102,6 +102,11 @@ void make_menu() {
     UI_add_child(menu, button);
 
 
+    UITextLine *text_line = UI_alloc(UITextLine);
+    UI_set_size(text_line, V2(500, 50));
+    UI_center_around_pos(text_line, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2));
+    UI_add_child(root, text_line);
+
 
     UI_add_child(root, menu);
     UI_update(menu);

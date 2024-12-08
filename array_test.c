@@ -5,8 +5,9 @@ void print_int_arr(int *arr) {
     int len = array_length(arr);
 
     for (int i =0 ; i < len; i++) {
-        printf("%d \n", arr[i]);
+        printf("%d ", arr[i]);
     }
+    printf("\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -17,7 +18,8 @@ int main(int argc, char *argv[]) {
     array_append(arr, 3);
     array_append(arr, 4);
 
-    // array_insert(arr, 7, 0);
+    printf("Array length: %d \n", array_length(arr));
+    array_insert(arr, 7, 4);
 
     print_int_arr(arr);
 

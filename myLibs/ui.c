@@ -10,7 +10,7 @@
 #include "array.c"
 #include "arraylist.c"
 #include "mystring.c"
-
+#include <windows.h>
 
 #define MAX_COMPONENT_STACK_SIZE 1024
 #define DEFAULT_FONT_SIZE 30
@@ -96,6 +96,8 @@ typedef struct UITextLine {
 TTF_Font *default_font;
 bool _ui_initialized = false;
 bool _is_mouse_down = false;
+bool _ctrl_down = false;
+bool _shift_down = false;
 UIComponent *root;
 bool _fullscreen = false; // for functionality rather than visibility
 SDL_Window *_window;
@@ -104,6 +106,12 @@ v2 _window_size;
 UIComponent *_current_focused_comp = NULL;
 
 // #FUNC
+
+void UITextLine_type_char(UIComponent *comp, char c);
+
+char *_UI_get_clipboard();
+
+void UITextLine_update(UIComponent *comp);
 
 void UITextLine_gain_focus(UIComponent *comp);
 
@@ -339,6 +347,19 @@ bool UIComponent_is_visible(UIComponent *component) {
 
 }
 
+SDL_Surface *create_empty_surface(int w, int h) {
+    return SDL_CreateRGBSurface(
+        0, 
+        w,
+        h,
+        32, 
+        0xFF000000, 
+        0xFF0000, 
+        0xFF00, 
+        0xFF
+    );
+}
+
 void UILabel_update(UIComponent *component) {
 
     UILabel *label = component;
@@ -347,26 +368,18 @@ void UILabel_update(UIComponent *component) {
 
     TTF_SetFontSize(label->font, label->font_size);
 
-    SDL_Surface *text_surface = TTF_RenderText_Blended(label->font, label->text.data, current_style.fg_color);
+    SDL_Surface *text_surface = NULL;
 
-    if (text_surface == NULL) {
-        printf("Text surface is null! \n");
-        return;
+    if (label->text.len == 0) {
+        text_surface = create_empty_surface(1, 1);
+    } else {
+        text_surface = TTF_RenderText_Blended(label->font, label->text.data, current_style.fg_color);
     }
 
     // TTF_SetFontSize(label->font, DEFAULT_FONT_SIZE); // other stuff might use this font so ill be a good label and reset it
     // nvm.
 
-    SDL_Surface *main_surface = SDL_CreateRGBSurface(
-        0, 
-        max(component->size.x, text_surface->w), 
-        max(component->size.y, text_surface->h), 
-        32, 
-        0xFF000000, 
-        0xFF0000, 
-        0xFF00, 
-        0xFF
-    );
+    SDL_Surface *main_surface = create_empty_surface(max(component->size.x, text_surface->w), max(component->size.y, text_surface->h));
 
     SDL_Color col = current_style.bg_color;
 
@@ -412,10 +425,6 @@ void UILabel_update(UIComponent *component) {
     SDL_FreeSurface(main_surface);
 
     label->component.texture = texture;
-
-    if (label->component.texture == NULL) {
-        printf("Error! texture is null! \n");
-    }
 
 }
 
@@ -579,6 +588,20 @@ void UI_handle_event(SDL_Event event) {
             break;
         case SDL_MOUSEMOTION:
             _UI_mouse_motion(event.motion);
+        case SDL_KEYDOWN:
+            if (event.key.keysym.sym == SDLK_LCTRL || event.key.keysym.sym == SDLK_RCTRL) {
+                _ctrl_down = true;
+            }
+            if (event.key.keysym.sym == SDLK_LSHIFT || event.key.keysym.sym == SDLK_RSHIFT) {
+                _shift_down = true;
+            }
+        case SDL_KEYUP:
+            if (event.key.keysym.sym == SDLK_LCTRL || event.key.keysym.sym == SDLK_RCTRL) {
+                _ctrl_down = false;
+            }
+            if (event.key.keysym.sym == SDLK_LSHIFT || event.key.keysym.sym == SDLK_RSHIFT) {
+                _shift_down = false;
+            }
     }
 }
 
@@ -708,6 +731,11 @@ UITextLine UITextLine_new() {
     text_line.text = array(char, 20);
     UI_get_comp(&text_line)->handle_input = UITextLine_handle_input;
 
+    UI_get_comp(&text_line)->update = UITextLine_update;
+
+    UI_get_comp(&text_line)->on_gain_focus = UITextLine_gain_focus;
+    UI_get_comp(&text_line)->on_lose_focus = UITextLine_lose_focus;
+
     return text_line;
 }
 
@@ -728,15 +756,46 @@ void UITextLine_handle_input(UIComponent *comp, SDL_Event input) {
     UITextLine *text_line = comp;
 
     if (input.type == SDL_TEXTINPUT) {
-        for (int i = 0; input.text.text[i] != '\0'; i++) {
-            array_append(text_line->text, input.text.text[i]);
+        if (input.text.text[0] != '\0') {
+            UITextLine_type_char(text_line, input.text.text[0]);
         }
     }
-    // add deleting with backspace and pasting (not copying because no selection for now)
+    if (input.type == SDL_KEYDOWN) {
+        if (input.key.keysym.sym == SDLK_RIGHT) {
+            text_line->cursor_pos++;
+        }
+        if (input.key.keysym.sym == SDLK_LEFT) {
+            text_line->cursor_pos--;
+        }
+        if (input.key.keysym.sym == SDLK_BACKSPACE && text_line->cursor_pos != 0) {
+            array_remove(text_line->text, text_line->cursor_pos - 1);
+            text_line->cursor_pos--;
+        }
+        if (input.key.keysym.sym == SDLK_v && (SDL_GetModState() & KMOD_CTRL)) {
+            char *clipboard_data = _UI_get_clipboard();
+            
+            for (int i = 0; clipboard_data[i] != '\0'; i++) {
+                printf("Should add: %c \n", clipboard_data[i]);
+                UITextLine_type_char(text_line, clipboard_data[i]);
+            }
+            
+            free(clipboard_data);
+        }
+    }
+    text_line->cursor_pos = clamp(text_line->cursor_pos, 0, array_length(text_line->text));
+    
+    if (array_length(text_line->text) == 0) {
+        printf("Length is 0!! \n");
+        UILabel_set_text(text_line, StringRef(""));
+    } else {
+        String str = String_ncopy_from_literal(text_line->text, array_length(text_line->text));
 
-    text_line->label.text.data = text_line->text;
-    text_line->label.text.len = array_length(text_line->text);
-    text_line->label.text.ref = true;
+        UILabel_set_text(text_line, str);
+    }
+
+    
+
+    UI_update(text_line);
 }
 
 void UIButton_on_click(UIButton *button, bool pressed) {
@@ -780,6 +839,116 @@ void UITextLine_gain_focus(UIComponent *comp) {
 
 void UITextLine_lose_focus(UIComponent *comp) {
     SDL_StopTextInput();
+}
+
+
+void UITextLine_update(UIComponent *comp) {
+    UILabel_update(comp);
+
+    if (comp != _current_focused_comp) return;
+
+    UILabel *label = comp;
+    UITextLine *text_line = comp;
+
+    v2 offset = V2(0, 0);
+
+    for (int i = 0; i < text_line->cursor_pos; i++) {
+        int adv;
+        TTF_GlyphMetrics32(label->font, text_line->text[i], NULL, NULL, NULL, NULL, &adv);
+        offset.x += adv;
+    }
+
+    SDL_Surface *surface = GPU_CopySurfaceFromImage(comp->texture);
+
+    SDL_Rect rect = {
+        offset.x,
+        offset.y,
+        5,
+        comp->size.y
+    };
+
+    SDL_FillRect(surface, &rect, 0xFFFFFFFF);
+    
+    GPU_UpdateImage(comp->texture, NULL, surface, NULL);
+
+    SDL_FreeSurface(surface);
+
+}
+
+
+// Thanks GPT
+
+// Remember to free this! 
+char *_UI_get_clipboard() {
+    if (!OpenClipboard(NULL)) {
+        return NULL;
+    }
+
+    HANDLE hData = GetClipboardData(CF_TEXT);
+    if (hData == NULL) {
+        CloseClipboard();
+        return NULL;
+    }
+
+
+    char* clipboardText = (char*)GlobalLock(hData);
+    if (clipboardText == NULL) {
+        CloseClipboard();
+        return NULL;
+    }
+
+    char* result = _strdup(clipboardText);
+
+    GlobalUnlock(hData);
+    CloseClipboard();
+
+    return result;
+}
+
+// Thanks GPT
+int _UI_set_clipboard(const char* text) {
+    if (!OpenClipboard(NULL)) {
+        return 0;
+    }
+
+    if (!EmptyClipboard()) {
+        CloseClipboard();
+        return 0;
+    }
+
+    size_t length = strlen(text) + 1;
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, length);
+    if (hMem == NULL) {
+        CloseClipboard();
+        return 0;
+    }
+
+    void* memPtr = GlobalLock(hMem);
+    if (memPtr == NULL) {
+        GlobalFree(hMem);
+        CloseClipboard();
+        return 0;
+    }
+    memcpy(memPtr, text, length);
+    GlobalUnlock(hMem);
+
+    if (SetClipboardData(CF_TEXT, hMem) == NULL) {
+        GlobalFree(hMem);
+        CloseClipboard();
+        return 0;
+    }
+
+    CloseClipboard();
+
+    return 1;
+}
+
+void UITextLine_type_char(UIComponent *comp, char c) {
+
+    UITextLine *text_line = comp;
+
+    array_insert(text_line->text, c, text_line->cursor_pos);
+    text_line->cursor_pos++;
 }
 
 
