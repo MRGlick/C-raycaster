@@ -12,9 +12,9 @@
 
 // #DEFINITIONS
 
-#define DEBUG_FLAG true
+#define DEBUG_FLAG false
 
-#define SERVER_IP "84.95.64.135"
+#define SERVER_IP "127.0.0.1"
 #define SERVER_PORT 1155
 #define TPS 300
 #define FPS 300

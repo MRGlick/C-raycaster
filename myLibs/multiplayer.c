@@ -110,10 +110,27 @@ int MP_full_recv(SOCKET sock, char *buf, int size) {
 
     int total_bytes_received = bytes_received;
 
-    while (first_packet->len > total_bytes_received - sizeof(MPPacket)) {
+
+    MPPacket *current_packet = first_packet;
+
+    int buffer_end = buf + total_bytes_received;
+
+    int bytes_left = total_bytes_received;
+
+    while ((char *)current_packet + sizeof(MPPacket) + current_packet->len < buffer_end) {
+        current_packet = (char *)current_packet + current_packet->len + sizeof(MPPacket);
+    }
+
+    while ((char *)current_packet + current_packet->len > buffer_end) {
         int bytes = recv(sock, buf + total_bytes_received, first_packet->len - (total_bytes_received - sizeof(MPPacket)), 0);
         total_bytes_received += bytes;
+        buffer_end = buf + total_bytes_received;
+
+        while ((char *)current_packet + sizeof(MPPacket) + current_packet->len < buffer_end) {
+            current_packet = (char *)current_packet + current_packet->len + sizeof(MPPacket);
+        }
     }
+
 
     return total_bytes_received;
 }
