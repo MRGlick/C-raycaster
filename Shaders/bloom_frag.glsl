@@ -2,9 +2,9 @@
 
 uniform sampler2D u_screenTexture;
 uniform vec2 u_resolution;
-uniform float u_bloomThreshold = 0.7;
-uniform float u_bloomIntensity = 1.2;
-uniform float u_bloomSpread = 2.0;
+uniform float u_bloomThreshold = 0.5;
+uniform float u_bloomIntensity = 1.0;
+uniform float u_bloomSpread = 1.6;
 
 in vec2 texCoord;
 
@@ -23,9 +23,11 @@ vec4 downscaledBlur(sampler2D tex, vec2 uv, vec2 resolution, float spread) {
     vec4 color = vec4(0.0);
     float totalWeight = 0.0;
     
+    int size = 8;
+
     // Simple box blur with configurable spread
-    for (int x = -3; x <= 3; x++) {
-        for (int y = -3; y <= 3; y++) {
+    for (int x = -size; x <= size; x++) {
+        for (int y = -size; y <= size; y++) {
             vec2 offset = vec2(x, y) * pixelSize * spread;
             vec2 sampleCoord = uv + offset;
             

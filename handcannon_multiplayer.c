@@ -12,7 +12,7 @@
 
 // #DEFINITIONS
 
-#define DEBUG_FLAG false
+#define DEBUG_FLAG true
 
 #define SERVER_IP "127.0.0.1"
 #define SERVER_PORT 1155
@@ -656,8 +656,6 @@ Projectile *create_forcefield_projectile();
 void ability_forcefield_activate();
 
 CollisionData get_circle_collision(CircleCollider *col1, CircleCollider *col2);
-
-void bomb_on_tick(Projectile *projectile, double delta);
 
 void Entity_tick(Entity *entity, double delta);
 
@@ -4655,12 +4653,12 @@ Ability ability_bomb_create() {
         .activate = ability_bomb_activate,
         .before_activate = NULL,
         .can_use = false,
-        .cooldown = .2,
+        .cooldown = 3,
         .delay = 0,
         .delay_timer = 0,
         .texture = bomb_icon,
         .tick = NULL,
-        .timer = .2,
+        .timer = 3,
         .type = A_SECONDARY
     };
 
@@ -4766,7 +4764,6 @@ Projectile *create_bomb_projectile(v2 pos, v2 start_vel) {
     projectile->height_vel = (is_player_on_floor()? 0 : player->height_vel * 0.5) + player->pitch * -3;
     projectile->entity.world_node.size = to_vec(8000);
     projectile->on_destruction = bomb_on_destroy;
-    projectile->on_tick = bomb_on_tick;
 
     ParticleSpawner *p_spawner = alloc(ParticleSpawner, PARTICLE_SPAWNER, false);
 
@@ -4810,8 +4807,8 @@ void bomb_on_destroy(Projectile *projectile) {
     p_spawner->world_node.height = 0;
 
     shakeCamera(30, 15, true, 10);
-    p_spawner->min_size = to_vec(12000);
-    p_spawner->max_size = to_vec(12000);
+    p_spawner->min_size = to_vec(24000);
+    p_spawner->max_size = to_vec(24000);
     p_spawner->height_accel = -PARTICLE_GRAVITY * 0.3;
     p_spawner->fade_scale = false;
     p_spawner->affected_by_light = false;
@@ -4855,16 +4852,19 @@ void bomb_on_destroy(Projectile *projectile) {
 
         double w = inverse_lerp(MAX_DIST * MAX_DIST, 0, dist_sqr_to_player);
 
-        double dmg = w * 8;
+        const double MAX_DMG = 4;
+
+        double dmg = w * MAX_DMG;
         player_take_dmg(dmg);
 
         v2 full_kb = v2_mul(v2_dir(projectile->entity.world_node.pos, player->world_node.pos), to_vec(5));
-        double height_full_kb = 500;
+        double height_full_kb = 300;
+        double max_kb = 0.7;
 
         v2 kb = v2_lerp(full_kb, V2_ZERO, 1 - w);
         double height_kb = lerp(height_full_kb, 0, 1 - w);
 
-        player->vel = v2_add(player->vel, kb);
+        player->vel = v2_mul(v2_add(player->vel, kb), to_vec(max_kb));
         player->height_vel = max(height_kb, player->height_vel + height_kb);
     }
 
@@ -4897,9 +4897,17 @@ void randomize_player_abilities() {
     Ability *default_utility = malloc(sizeof(Ability));
     //Ability *default_special = malloc(sizeof(Ability));
 
-    Ability primary_choices[] = {ability_primary_shoot_create()}; //
-    Ability secondary_choices[] = {create_switchshot_ability()}; //, ability_secondary_shoot_create(), ability_bomb_create()
-    Ability utility_choices[] = {ability_forcefield_create()}; //
+    Ability primary_choices[] = {
+        ability_primary_shoot_create()
+    };
+    Ability secondary_choices[] = {
+        // create_switchshot_ability(),
+        // ability_secondary_shoot_create(),
+        ability_bomb_create()
+    };
+    Ability utility_choices[] = {
+        ability_forcefield_create()
+    }; //
     //Ability speical_choices[] = {};
 
     *default_primary = pick_random_ability_from_array(primary_choices, sizeof(primary_choices) / sizeof(Ability));
@@ -4930,33 +4938,6 @@ void randomize_player_abilities() {
 
 void Entity_tick(Entity *entity, double delta) {
     // spriteTick(entity->sprite, delta);
-}
-
-void bomb_on_tick(Projectile *projectile, double delta) {
-    
-    
-    return;
-    
-    
-    CircleCollider *player_collider = get_child_by_type(player, CIRCLE_COLLIDER);
-    CircleCollider *proj_collider = get_child_by_type(projectile, CIRCLE_COLLIDER);
-
-    if (get_circle_collision(player_collider, proj_collider).didCollide) {
-        projectile_destroy(projectile);
-        return;
-    }
-
-    iter_over_all_nodes(node, {
-        if (node->type != PLAYER_ENTITY) continue;
-
-        PlayerEntity *player_entity = node;
-        CircleCollider *coll = get_child_by_type(player_entity, CIRCLE_COLLIDER);
-
-        if (get_circle_collision(coll, proj_collider).didCollide) {
-            projectile_destroy(projectile);
-            return;
-        }
-    });
 }
 
 CollisionData get_circle_collision(CircleCollider *col1, CircleCollider *col2) {
