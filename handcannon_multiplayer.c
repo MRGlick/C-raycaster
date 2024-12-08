@@ -14,7 +14,7 @@
 
 #define DEBUG_FLAG true
 
-#define SERVER_IP "127.0.0.1"
+#define SERVER_IP "84.95.66.143"
 #define SERVER_PORT 1155
 #define TPS 300
 #define FPS 300
@@ -2156,7 +2156,7 @@ void init_player(v2 pos) {
     player->pendingShots = 0;
     player->max_pending_shots = 10;
 
-    player->maxHealth = 10;
+    player->maxHealth = 100;
     player->health = player->maxHealth;
     player->tallness = 11000;
     player->world_node.height = player->tallness;
@@ -4230,6 +4230,8 @@ void on_client_recv(MPPacket packet, void *data) {
         return;
     }
 
+    printf("Received packet! type=%d\n", packet.type);
+
     if (packet.type == PACKET_UPDATE_PLAYER_ID) {
 
         client_self_id = *(int *)(data);
@@ -4369,8 +4371,6 @@ void on_client_recv(MPPacket packet, void *data) {
         bomb->shooter_id = packet_data->sender_id;
         node(bomb)->sync_id = packet_data->sync_id;
 
-        printf("Adding bomb with sync id %d ! \n\n\n\n\n\n\n\n\n\n\n", packet_data->sync_id);
-
         Node_add_child(game_node, bomb);
 
     } else if (packet.type == PACKET_ABILITY_SWITCHSHOT) {
@@ -4399,7 +4399,6 @@ void on_client_recv(MPPacket packet, void *data) {
         Projectile *sync_projectile = find_node_by_sync_id(packet_data->sync_id);
 
         if (sync_projectile == NULL) {
-            printf("projectile with sync id %d doesnt exist. \n", packet_data->sync_id);
             return;
         }
 
@@ -4653,12 +4652,12 @@ Ability ability_bomb_create() {
         .activate = ability_bomb_activate,
         .before_activate = NULL,
         .can_use = false,
-        .cooldown = 3,
+        .cooldown = .03,
         .delay = 0,
         .delay_timer = 0,
         .texture = bomb_icon,
         .tick = NULL,
-        .timer = 3,
+        .timer = .03,
         .type = A_SECONDARY
     };
 
@@ -5868,8 +5867,6 @@ Node *use_sync_id(int sync_id) {
     if (!is_sync_id_valid(sync_id)) {
         return NULL;
     }
-
-    printf("Popped from sync queue! \n");
 
     Node *res = sync_id_queue[0];
 

@@ -7,7 +7,7 @@
 #include <stdbool.h>
 #include <winsock.h>
 
-#define MP_DEFAULT_BUFFER_SIZE 1024
+#define MP_DEFAULT_BUFFER_SIZE 2048
 #define MP_MAX_CLIENTS 100
 
 int MP_SERVER_PORT = 1155;
@@ -113,20 +113,20 @@ int MP_full_recv(SOCKET sock, char *buf, int size) {
 
     MPPacket *current_packet = first_packet;
 
-    int buffer_end = buf + total_bytes_received;
+    int buffer_end = (int)buf + total_bytes_received;
 
     int bytes_left = total_bytes_received;
 
-    while ((char *)current_packet + sizeof(MPPacket) + current_packet->len < buffer_end) {
+    while ((char *)current_packet + sizeof(MPPacket) + current_packet->len < (char *)buffer_end) {
         current_packet = (char *)current_packet + current_packet->len + sizeof(MPPacket);
     }
 
-    while ((char *)current_packet + current_packet->len > buffer_end) {
+    while ((char *)current_packet + current_packet->len > (char *)buffer_end) {
         int bytes = recv(sock, buf + total_bytes_received, first_packet->len - (total_bytes_received - sizeof(MPPacket)), 0);
         total_bytes_received += bytes;
-        buffer_end = buf + total_bytes_received;
+        buffer_end = (int)buf + total_bytes_received;
 
-        while ((char *)current_packet + sizeof(MPPacket) + current_packet->len < buffer_end) {
+        while ((char *)current_packet + sizeof(MPPacket) + current_packet->len < (char *)buffer_end) {
             current_packet = (char *)current_packet + current_packet->len + sizeof(MPPacket);
         }
     }
@@ -154,12 +154,8 @@ DWORD WINAPI _MPClient_handle_received_data(void *data) {
             closesocket(client_socket);
             exit(-1);
         }
-        if (bytes_received > MP_DEFAULT_BUFFER_SIZE) {
-            printf("Packet too big! \n");
-            commit_sudoku();
-        }
 
-
+        printf("bytes received: %d \n", bytes_received);
 
 
         while (data_ptr < receive_buffer + bytes_received) {
