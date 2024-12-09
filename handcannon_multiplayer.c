@@ -157,11 +157,12 @@ struct dungeon_seed_packet {
 };
 
 struct player_pos_packet {
+    SDL_Color color;
     v2 pos; // 16
     double height; // 8
     v2 dir;
     int id; // 4
-    SDL_Color color;
+    bool crouching;
     // 4 padding
 };
 
@@ -335,6 +336,7 @@ DEF_STRUCT(Node, NODE, {
                 double desired_height;
                 v2 dir;
                 int id;
+                bool crouching;
             });
 
             DEF_STRUCT(Projectile, PROJECTILE, {
@@ -829,8 +831,6 @@ Sprite *dir_sprite_current_sprite(DirSprite *dSprite, v2 spritePos);
 
 void player_tick(Node *node, double delta);
 
-void dSpriteTick(DirSprite *dSprite, v2 spritePos, double delta);
-
 void spriteTick(Sprite *sprite, double delta);
 
 void animation_tick(Animation *anim, double delta);
@@ -870,6 +870,7 @@ UIComponent *pause_menu;
 UILabel *debug_label;
 
 // #TEXTURES
+GPU_Image **ff_spark_particle_anim;
 GPU_Image **switchshot_anim;
 GPU_Image *switchshot_icon;
 GPU_Image *shoot_ray;
@@ -921,6 +922,7 @@ GPU_Image **bomb_explosion_particles;
 GPU_Image **bomb_smoke_particles;
 
 // #SOUNDS
+Sound *ff_block;
 Sound *bomb_explosion;
 Sound *rapidfire_sound;
 Sound *exploder_explosion;
@@ -1093,9 +1095,6 @@ int main(int argc, char *argv[]) {
 
     init();
     
-    printf("xy to height: %.2f \n", XY_TO_HEIGHT);
-    printf("height to xy: %.2f \n", HEIGHT_TO_XY);
-
     reset_tilemap(tilemap->level_tilemap);
     reset_tilemap(tilemap->floor_tilemap);
     reset_tilemap(tilemap->ceiling_tilemap);
@@ -1163,6 +1162,8 @@ int main(int argc, char *argv[]) {
 void init() {  // #INIT
 
     //test1();
+
+    ff_block = create_sound("Sounds/ff_block.wav");
 
     bomb_explosion = create_sound("Sounds/explosion.wav");
 
@@ -1447,7 +1448,8 @@ void player_tick(Node *node, double delta) {
             .height = player->world_node.height,
             .dir = playerForward,
             .id = client_self_id,
-            .color = client_self_color
+            .color = client_self_color,
+            .crouching = player->crouching
         };
 
         MPPacket packet = {
@@ -1512,8 +1514,6 @@ void tick(double delta) {
                         .h_vel = proj->height_vel
                     };
 
-                    printf("Sending packet data: \n\tsync id: %d\n\tpacketlen: %d \n", packet_data.sync_id, packet.len);
-
                     MPClient_send(packet, &packet_data);
                 }
                 
@@ -1548,7 +1548,6 @@ void tick(double delta) {
             client_dungeon_seed_request_timer = 0.5;
         }
     }
-    // printf("Deletion queue length: %d \n", array_length(deletion_queue));
 
     while (array_length(deletion_queue) > 0) {
         Node_delete(deletion_queue[0]);
@@ -1762,6 +1761,10 @@ void render_floor_and_ceiling() {
 
 
     GPU_DeactivateShaderProgram();
+
+    v2 p1 = V2(0, 0), p2 = V2(100, 0), p3 = V2(0, 100), p4 = V2(100, 100);
+
+    render_textured_quad(entityTexture, worldToScreen(p1, 0, true), worldToScreen(p2, 0, true), worldToScreen(p3, 0, true), worldToScreen(p4, 0, true));
 }
 
 void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affected_by_light, SDL_Color custom_color) {
@@ -2156,7 +2159,7 @@ void init_player(v2 pos) {
     player->pendingShots = 0;
     player->max_pending_shots = 10;
 
-    player->maxHealth = 100;
+    player->maxHealth = 15;
     player->health = player->maxHealth;
     player->tallness = 11000;
     player->world_node.height = player->tallness;
@@ -2491,7 +2494,7 @@ Animation create_animation(int frameCount, int priority, GPU_Image **frames) {
         anim.frames = frames;
     }
     anim.frame = 0;
-    anim.fps = 5;
+    anim.fps = 12;
     anim.loop = true;
     anim.timeToNextFrame = 0;
     anim.priority = priority;
@@ -4230,8 +4233,6 @@ void on_client_recv(MPPacket packet, void *data) {
         return;
     }
 
-    printf("Received packet! type=%d\n", packet.type);
-
     if (packet.type == PACKET_UPDATE_PLAYER_ID) {
 
         client_self_id = *(int *)(data);
@@ -4252,6 +4253,7 @@ void on_client_recv(MPPacket packet, void *data) {
         player_entity->desired_height = packet_data.height;
         player_entity->dir = packet_data.dir;
         player_entity->entity.color = packet_data.color;
+        player_entity->crouching = packet_data.crouching;
     
     } else if (packet.type == PACKET_DUNGEON_SEED) {
 
@@ -4436,7 +4438,12 @@ void on_client_recv(MPPacket packet, void *data) {
 
 void PlayerEntity_tick(PlayerEntity *player_entity, double delta) {
 
+    player_entity->entity.world_node.size.y = 10000 * (player_entity->crouching? 0.5 : 1);
+
     double real_desired_height = player_entity->desired_height - player_entity->entity.world_node.size.y / 2;
+    if (player_entity->crouching) {
+        real_desired_height -= player_entity->entity.world_node.size.y;
+    }
 
     player_entity->entity.world_node.pos = v2_lerp(player_entity->entity.world_node.pos, player_entity->desired_pos, 0.1 * (delta * 144));
     player_entity->entity.world_node.height = lerp(player_entity->entity.world_node.height, real_desired_height, 0.1 * (delta * 144));
@@ -4445,11 +4452,14 @@ void PlayerEntity_tick(PlayerEntity *player_entity, double delta) {
 
     dir_sprite->dir = player_entity->dir;
 
+
 }
 
 
 // #TEXTURES INIT
 void init_textures() {
+
+    ff_spark_particle_anim = get_texture_files("Textures/Abilities/ForceField/spark", 2);
 
     switchshot_icon = load_texture("Textures/Abilities/Icons/switchshot_icon.png");
 
@@ -4652,12 +4662,12 @@ Ability ability_bomb_create() {
         .activate = ability_bomb_activate,
         .before_activate = NULL,
         .can_use = false,
-        .cooldown = .03,
+        .cooldown = 3,
         .delay = 0,
         .delay_timer = 0,
         .texture = bomb_icon,
         .tick = NULL,
-        .timer = .03,
+        .timer = 3,
         .type = A_SECONDARY
     };
 
@@ -4970,7 +4980,6 @@ Ability ability_forcefield_create() {
 }
 
 void ability_forcefield_activate() {
-    printf("Forcefield! \n");
 
     Projectile *proj = create_forcefield_projectile();
 
@@ -5025,27 +5034,50 @@ Projectile *create_forcefield_projectile() {
     projectile->entity.world_node.size = to_vec(8000);
 
     ParticleSpawner *particle_spawner = alloc(ParticleSpawner, PARTICLE_SPAWNER, true);
-    particle_spawner->spread = 2;
+    particle_spawner->spread = 180;
     particle_spawner->min_size = to_vec(2000);
     particle_spawner->max_size = to_vec(5000);
-    particle_spawner->height_dir = 1;
     particle_spawner->start_color = Color(200, 255, 255, 255);
     particle_spawner->end_color = Color(255, 255, 255, 255);
     particle_spawner->active = true;
     particle_spawner->height_accel = 0;
     particle_spawner->particle_lifetime = .8;
-    particle_spawner->bounciness = 1;
-    particle_spawner->dir = (v2){10, 0};
+    particle_spawner->bounciness = 0;
+    particle_spawner->dir = (v2){1, 0};
     particle_spawner->affected_by_light = false;
-    particle_spawner->min_speed = 2;
-    particle_spawner->max_speed = 10;
-    particle_spawner->spawn_rate = 32;
+    particle_spawner->min_speed = 20;
+    particle_spawner->max_speed = 50;
+    particle_spawner->spawn_rate = 24;
     particle_spawner->damp = 1;
-    particle_spawner->radial_accel = V2(50, 0);
-    particle_spawner->height_radial_accel = 7500 * XY_TO_HEIGHT;
+    
+    
+    Sprite *particle_sprite = alloc(Sprite, SPRITE, true);
+    array_append(particle_sprite->animations, create_animation(2, 0, ff_spark_particle_anim));
+    particle_sprite->autoplay_anim = 0;
+    Node_add_child(particle_spawner, particle_sprite);
+    
+    particle_spawner->sprite_idx = 0;
+
+    // particle_spawner->radial_accel = V2(50, 0);
+    // particle_spawner->height_radial_accel = 50 * XY_TO_HEIGHT;
     Node_add_child(projectile, particle_spawner);
 
     return projectile;
+}
+
+void _ff_block_effects(Projectile *projectile) {
+    
+    ParticleSpawner *s = get_child_by_type(projectile, PARTICLE_SPAWNER);
+
+    s->spawn_rate *= 8;
+    s->max_speed *= 8;
+    s->min_speed *= 8;
+    particle_spawner_explode(s);
+    s->spawn_rate /= 8;
+    s->max_speed /= 8;
+    s->min_speed /= 8;
+
+    play_spatial_sound(ff_block, 0.7, player->world_node.pos, projectile->entity.world_node.pos, 500);
 }
 
 void projectile_forcefield_on_tick(Projectile *projectile, double delta) {
@@ -5053,6 +5085,9 @@ void projectile_forcefield_on_tick(Projectile *projectile, double delta) {
     const int REPEL_DIST = 50;
 
     projectile->vel = v2_lerp(projectile->vel, V2_ZERO, 0.01 * delta * 144);
+
+
+   
 
     iter_over_all_nodes(node, {
         if (node->type != PROJECTILE) continue;
@@ -5063,8 +5098,10 @@ void projectile_forcefield_on_tick(Projectile *projectile, double delta) {
         double dist_sqr = v2_distance_squared(projectile->entity.world_node.pos, proj->entity.world_node.pos);
         if (dist_sqr < REPEL_DIST * REPEL_DIST) {
             proj->vel = v2_add(proj->vel, v2_dir(projectile->entity.world_node.pos, proj->entity.world_node.pos));
-            proj->height_vel -= proj->height_accel * 1.2 * delta;
+            proj->height_vel = -proj->height_accel * 0.2;
+            _ff_block_effects(projectile);
         }
+       
     });
 }
 

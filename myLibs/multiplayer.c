@@ -155,8 +155,6 @@ DWORD WINAPI _MPClient_handle_received_data(void *data) {
             exit(-1);
         }
 
-        printf("bytes received: %d \n", bytes_received);
-
 
         while (data_ptr < receive_buffer + bytes_received) {
 
