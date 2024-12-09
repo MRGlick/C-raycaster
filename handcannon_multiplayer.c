@@ -868,6 +868,7 @@ GPU_Target *actual_screen;
 // #UI
 UIComponent *pause_menu;
 UILabel *debug_label;
+UIComponent *main_menu;
 
 // #TEXTURES
 GPU_Image **ff_spark_particle_anim;
@@ -1040,14 +1041,17 @@ int main(int argc, char *argv[]) {
     actual_screen = GPU_Init(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_INIT_DISABLE_VSYNC);
     SDL_SetWindowTitle(SDL_GetWindowFromID(actual_screen->context->windowID), "Goofy");
 
+    GPU_BlendPresetEnum blend_mode = GPU_BLEND_NORMAL_ADD_ALPHA;
+
     screen_image = GPU_CreateImage(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_FORMAT_RGBA);
     GPU_SetImageFilter(screen_image, GPU_FILTER_NEAREST);
+    GPU_SetBlendMode(screen_image, blend_mode);
     screen = GPU_LoadTarget(screen_image);
 
     hud_image = GPU_CreateImage(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_FORMAT_RGBA);
     GPU_SetImageFilter(hud_image, GPU_FILTER_NEAREST);
+    GPU_SetBlendMode(hud_image, blend_mode);
     hud = GPU_LoadTarget(hud_image);
-
     // renderer = SDL_CreateRenderer(window, -1, RENDERER_FLAGS);
     
     if (argc >= 2) {
@@ -1173,7 +1177,7 @@ void init() {  // #INIT
     client_self_color.b = randi_range(25, 255);
     client_self_color.a = 255;
 
-    GPU_SetBlendMode(screen_image, GPU_BLEND_NORMAL);
+    GPU_SetBlendMode(screen_image, GPU_BLEND_ADD);
 
 
     //exit(1);
@@ -1196,10 +1200,7 @@ void init() {  // #INIT
     for (int i = 0; i < 26; i++) keyPressArr[i] = false;
 
 
-    init_hand_sprite();
-    init_health_bar();
-    init_crosshair();
-    init_ability_hud();
+
 
 
 
@@ -2175,6 +2176,11 @@ void init_player(v2 pos) {
     player->special = NULL;
 
     randomize_player_abilities();
+
+    init_hand_sprite();
+    init_health_bar();
+    init_crosshair();
+    init_ability_hud();
 }
 
 // CLEAR
@@ -3683,13 +3689,148 @@ void make_ui() {
 
     debug_label = UI_alloc(UILabel);
 
-    UILabel_set_text(debug_label, StringRef("debug label: stuff"));
+    UILabel_set_text(debug_label, StringRef("[]:"));
     
     debug_label->font_size = 15;
 
     UI_set_pos(debug_label, V2_ZERO);
     UI_set_size(debug_label, (v2){WINDOW_WIDTH, WINDOW_HEIGHT / 5});
     UI_add_child(UI_get_root(), debug_label);
+
+
+
+    main_menu = UI_alloc(UIComponent);
+
+    UI_set_size(main_menu, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
+
+    UIRect *mm_bg = UI_alloc(UIRect);
+    mm_bg->color = Color(20, 20, 90, 255);
+    UI_set_size(mm_bg, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
+
+    UI_add_child(main_menu, mm_bg);
+
+    UILabel *mm_title = UI_alloc(UILabel);
+    mm_title->alignment_x = ALIGNMENT_CENTER;
+    mm_title->alignment_y = ALIGNMENT_CENTER;
+    UILabel_set_text(mm_title, StringRef("Handcannon"));
+    mm_title->font_size = 64;
+    UI_set_size(mm_title, V2(WINDOW_WIDTH, WINDOW_HEIGHT / 5));
+    UI_center_around_pos(mm_title, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 5));
+
+    UI_add_child(main_menu, mm_title);
+
+
+    UIButton *mm_host_button = UI_alloc(UIButton);
+    UILabel_set_text(mm_host_button, StringRef("HOST!"));
+    UI_set_size(mm_host_button, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 6));
+    UI_center_around_pos(mm_host_button, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 2 / 5));
+
+    UI_add_child(main_menu, mm_host_button);
+
+    UIButton *mm_join_button = UI_alloc(UIButton);
+    UILabel_set_text(mm_join_button, StringRef("JOIN!"));
+    UI_set_size(mm_join_button, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 6));
+    UI_center_around_pos(mm_join_button, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 3 / 5));
+
+    UI_add_child(main_menu, mm_join_button);
+
+
+    UI_add_child(UI_get_root(), main_menu);
+
+    main_menu->visible = false; // debug
+    
+
+
+    UIComponent *host_menu = UI_alloc(UIComponent);
+
+    UIRect *h_bg = UI_alloc(UIRect);
+    h_bg->color = Color(10, 10, 50, 255);
+    UI_set_size(h_bg, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
+
+    UI_add_child(host_menu, h_bg);
+
+    UILabel *h_title = UI_alloc(UILabel);
+    h_title->alignment_x = ALIGNMENT_CENTER;
+    h_title->alignment_y = ALIGNMENT_CENTER;
+    UILabel_set_text(h_title, StringRef("Host"));
+    h_title->font_size = 48;
+    UI_set_size(h_title, V2(WINDOW_WIDTH, WINDOW_HEIGHT / 6));
+    UI_center_around_pos(h_title, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 6));
+
+    UI_add_child(host_menu, h_title);
+
+    UIButton *h_lan_button = UI_alloc(UIButton);
+    UI_set_size(h_lan_button, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 6));
+    UILabel_set_text(h_lan_button, StringRef("With LAN"));
+    UI_center_around_pos(h_lan_button, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 3 / 6));
+
+    UI_add_child(host_menu, h_lan_button);
+
+    UIButton *h_pf_button = UI_alloc(UIButton);
+    UI_set_size(h_pf_button, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 6));
+    UILabel_set_text(h_pf_button, StringRef("With PF"));
+    UI_center_around_pos(h_pf_button, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 4.2 / 6));
+
+    UI_add_child(host_menu, h_pf_button);
+
+    UILabel *h_pf_note = UI_alloc(UILabel);
+    UI_set_size(h_pf_note, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 12));
+    UILabel_set_text(h_pf_note, StringRef("Note: Port Forwarding is hard"));
+    h_pf_note->font_size = 16;
+    UILabel_set_alignment(h_pf_note, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
+    UI_center_around_pos(h_pf_note, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 4.8 / 6));
+
+    UI_add_child(host_menu, h_pf_note);
+
+    UIButton *h_back_button = UI_alloc(UIButton);
+    UILabel_set_text(h_back_button, StringRef(" <<< "));
+    UI_set_pos(h_back_button, V2(0, 0));
+    UI_set_size(h_back_button, V2(WINDOW_WIDTH / 12, WINDOW_HEIGHT / 12));
+    h_back_button->label.font_size = 16;
+
+    UI_add_child(host_menu, h_back_button);
+
+    host_menu->visible = false;
+
+    UI_add_child(UI_get_root(), host_menu);
+
+    UIComponent *join_menu = UI_alloc(UIComponent);
+
+    UIRect *j_bg = UI_alloc(UIRect);
+    j_bg->color = Color(10, 50, 10, 255);
+    UI_set_size(j_bg, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
+
+    UI_add_child(join_menu, h_bg);
+
+    UILabel *j_title = UI_alloc(UILabel);
+    j_title->alignment_x = ALIGNMENT_CENTER;
+    j_title->alignment_y = ALIGNMENT_CENTER;
+    UILabel_set_text(j_title, StringRef("Join"));
+    j_title->font_size = 48;
+    UI_set_size(j_title, V2(WINDOW_WIDTH, WINDOW_HEIGHT / 6));
+    UI_center_around_pos(j_title, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 6));
+
+    UI_add_child(join_menu, j_title);
+
+    UITextLine *ip_code_line = UI_alloc(UITextLine);
+    ip_code_line->label.text = StringRef("Enter Lobby Code");
+    UI_set_size(ip_code_line, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 12));
+    UI_center_around_pos(ip_code_line, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 3 / 6));
+
+    UI_add_child(join_menu, ip_code_line);
+
+    UIButton *j_back_button = UI_alloc(UIButton);
+    UILabel_set_text(j_back_button, StringRef(" <<< "));
+    UI_set_pos(j_back_button, V2(0, 0));
+    UI_set_size(j_back_button, V2(WINDOW_WIDTH / 12, WINDOW_HEIGHT / 12));
+    j_back_button->label.font_size = 16;
+
+    UI_add_child(join_menu, j_back_button);
+    
+    UI_add_child(UI_get_root(), join_menu);
+
+
+
 }
 
 
@@ -4086,7 +4227,6 @@ void write_to_debug_label(String string) {
 }
 
 void on_player_connect(SOCKET player_socket) {
-    write_to_debug_label(String_from_int(MP_clients_amount));
     int player_id = next_id++;
 
     server_client_id_list[MP_clients_amount - 1] = player_id;
@@ -4213,7 +4353,12 @@ void client_add_player_entity(int id) {
 
 
     printf("Player joined! ID: %d \n", player_entity->id);
-    write_to_debug_label(String_from_int(player_entity->id));
+
+    String label = String_concatf(String("Scene: Added player with ID: "), String_from_int(player_entity->id));
+
+    write_to_debug_label(label);
+
+    UI_update(debug_label);
 
     Node_add_child(game_node, player_entity);
 
@@ -5010,7 +5155,7 @@ void ability_forcefield_activate() {
 }
 
 Projectile *create_forcefield_projectile() {
-    Projectile *projectile = alloc(Projectile, PROJECTILE, 10);
+    Projectile *projectile = alloc(Projectile, PROJECTILE, 5);
     projectile->type = PROJ_FORCEFIELD;
     projectile->on_tick = projectile_forcefield_on_tick;
 

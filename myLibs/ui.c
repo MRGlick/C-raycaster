@@ -69,6 +69,11 @@ typedef struct UILabel {
     TextAlignment alignment_y;
 } UILabel;
 
+typedef struct UIRect {
+    UIComponent comp;
+    SDL_Color color;
+} UIRect;
+
 typedef struct UIButton {
     UILabel label;
     void (*custom_on_click)(struct UIComponent *, bool);
@@ -106,6 +111,12 @@ v2 _window_size;
 UIComponent *_current_focused_comp = NULL;
 
 // #FUNC
+
+void UITextLine_remove_char(UITextLine *text_line);
+
+void UIRect_update(UIComponent *comp);
+
+UIRect UIRect_new();
 
 void UITextLine_type_char(UIComponent *comp, char c);
 
@@ -300,6 +311,8 @@ void UI_init(SDL_Window *w, v2 window_size) {
     _window = w;
     _window_size = window_size;
 
+    
+
 }
 
 UIStyle UIStyle_new() {
@@ -348,16 +361,21 @@ bool UIComponent_is_visible(UIComponent *component) {
 }
 
 SDL_Surface *create_empty_surface(int w, int h) {
-    return SDL_CreateRGBSurface(
-        0, 
-        w,
-        h,
-        32, 
-        0xFF000000, 
-        0xFF0000, 
-        0xFF00, 
-        0xFF
+
+    SDL_Surface *surf = SDL_CreateRGBSurface(
+            0, 
+            w,
+            h,
+            32, 
+            0xFF000000, 
+            0xFF0000, 
+            0xFF00, 
+            0xFF
     );
+
+    SDL_SetSurfaceBlendMode(surf, SDL_BLENDMODE_ADD);
+
+    return surf;
 }
 
 void UILabel_update(UIComponent *component) {
@@ -447,7 +465,7 @@ void UI_render(GPU_Target *target, UIComponent *component) {
         }
     }
 
-    for (int i = 0; i < array_length(component->children); i++) {
+    for (int i = array_length(component->children) - 1; i >= 0; i--) { // top to bottom
         UI_render(target, component->children[i]);
     }
 }
@@ -500,6 +518,8 @@ UIButton UIButton_new() {
     button.label = UILabel_new();
     button.label.component.isbutton = true;
     button.label.component.update = UIButton_update;
+    button.label.alignment_x = ALIGNMENT_CENTER;
+    button.label.alignment_y = ALIGNMENT_CENTER;
     UI_get_comp(&button)->on_click = UIButton_on_click;
     button.custom_on_click = default_on_click;
     button.activate_on_release = true;
@@ -569,7 +589,7 @@ void _UI_mouse_click(SDL_MouseButtonEvent event, bool pressed) {
         }
         
 
-        for (int i = 0; i < array_length(component->children); i++) {
+        for (int i = array_length(component->children) - 1; i >= 0; i--) { // what's after is on top
             component_stack[stack_ptr++] = component->children[i];
         }
     };
@@ -616,7 +636,9 @@ UIComponent *UI_get_root() {
 }
 
 void UI_update(UIComponent *comp) {
+
     comp->update(comp);
+    GPU_SetBlendMode(comp->texture, GPU_BLEND_MULTIPLY);
 
     for (int i = 0; i < array_length(comp->children); i++) {
         UI_update(comp->children[i]);
@@ -768,8 +790,7 @@ void UITextLine_handle_input(UIComponent *comp, SDL_Event input) {
             text_line->cursor_pos--;
         }
         if (input.key.keysym.sym == SDLK_BACKSPACE && text_line->cursor_pos != 0) {
-            array_remove(text_line->text, text_line->cursor_pos - 1);
-            text_line->cursor_pos--;
+            UITextLine_remove_char(text_line);
         }
         if (input.key.keysym.sym == SDLK_v && (SDL_GetModState() & KMOD_CTRL)) {
             char *clipboard_data = _UI_get_clipboard();
@@ -834,6 +855,15 @@ void reset_focus() {
 
 
 void UITextLine_gain_focus(UIComponent *comp) {
+    
+    UITextLine *text_line = comp;
+
+    int count = array_length(text_line->text);
+
+    for (int i = 0; i < count; i++) {
+        UITextLine_remove_char(text_line);
+    }
+    
     SDL_StartTextInput();
 }
 
@@ -951,6 +981,36 @@ void UITextLine_type_char(UIComponent *comp, char c) {
     text_line->cursor_pos++;
 }
 
+
+UIRect UIRect_new() {
+    UIRect rect = {0};
+    rect.comp = UIComponent_new();
+    rect.color = GPU_MakeColor(255, 255, 255, 255);
+    rect.comp.update = UIRect_update;
+
+    return rect;
+}
+
+void UIRect_update(UIComponent *comp) {
+    UIRect *rect = comp;
+    void *thing = comp;
+
+    SDL_Surface *surf = create_empty_surface(comp->size.x, comp->size.y);
+
+    SDL_FillRect(surf, NULL, SDL_MapRGB(surf->format, rect->color.r, rect->color.g, rect->color.b));
+
+    GPU_Image *texture = GPU_CopyImageFromSurface(surf);
+
+    SDL_FreeSurface(surf);
+
+    comp->texture = texture;
+
+}
+
+void UITextLine_remove_char(UITextLine *text_line) {
+    array_remove(text_line->text, text_line->cursor_pos - 1);
+    text_line->cursor_pos--;
+}
 
 // #END
 
