@@ -315,4 +315,8 @@ void MPServer() {
     CloseHandle(h);
 }
 
+void MP_set_port(int port) {
+    MP_SERVER_PORT = port;
+}
+
 #endif

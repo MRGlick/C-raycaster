@@ -86,6 +86,8 @@ typedef struct UITextLine {
     UILabel label;
     char *text;
     int cursor_pos;
+    int char_limit;
+    bool numbers_only;
 } UITextLine;
 
 
@@ -103,6 +105,7 @@ bool _ui_initialized = false;
 bool _is_mouse_down = false;
 bool _ctrl_down = false;
 bool _shift_down = false;
+bool UI_debug_show_focused = false;
 UIComponent *root;
 bool _fullscreen = false; // for functionality rather than visibility
 SDL_Window *_window;
@@ -373,8 +376,6 @@ SDL_Surface *create_empty_surface(int w, int h) {
             0xFF
     );
 
-    SDL_SetSurfaceBlendMode(surf, SDL_BLENDMODE_ADD);
-
     return surf;
 }
 
@@ -454,7 +455,7 @@ void UI_render(GPU_Target *target, UIComponent *component) {
         if (is_visible) {
             component->render(target, component);
         }
-        if (component == _current_focused_comp && is_visible) {
+        if (component == _current_focused_comp && is_visible && UI_debug_show_focused) {
 
             int padding = 10;
 
@@ -465,7 +466,7 @@ void UI_render(GPU_Target *target, UIComponent *component) {
         }
     }
 
-    for (int i = array_length(component->children) - 1; i >= 0; i--) { // top to bottom
+    for (int i = 0; i < array_length(component->children); i++) {
         UI_render(target, component->children[i]);
     }
 }
@@ -524,13 +525,16 @@ UIButton UIButton_new() {
     button.custom_on_click = default_on_click;
     button.activate_on_release = true;
 
+    UI_get_comp(&button)->default_style = (UIStyle){.bg_color = (SDL_Color){0, 0, 0, 50}, .fg_color = (SDL_Color){255, 255, 255, 255}};
+
     button.hover_style = UIStyle_new();
 
-    button.hover_style.bg_color = (SDL_Color){60, 60, 60, 255};
+    button.hover_style.bg_color = (SDL_Color){0, 0, 0, 100};
+    button.hover_style.fg_color = (SDL_Color){255, 255, 255, 255};
 
     button.pressed_style = UIStyle_new();
 
-    button.pressed_style.bg_color = (SDL_Color){100, 100, 100, 255};
+    button.pressed_style.bg_color = (SDL_Color){0, 0, 0, 150};
     button.pressed_style.fg_color = (SDL_Color){255, 255, 255, 255};
 
     return button;
@@ -608,20 +612,10 @@ void UI_handle_event(SDL_Event event) {
             break;
         case SDL_MOUSEMOTION:
             _UI_mouse_motion(event.motion);
-        case SDL_KEYDOWN:
-            if (event.key.keysym.sym == SDLK_LCTRL || event.key.keysym.sym == SDLK_RCTRL) {
-                _ctrl_down = true;
-            }
-            if (event.key.keysym.sym == SDLK_LSHIFT || event.key.keysym.sym == SDLK_RSHIFT) {
-                _shift_down = true;
-            }
-        case SDL_KEYUP:
-            if (event.key.keysym.sym == SDLK_LCTRL || event.key.keysym.sym == SDLK_RCTRL) {
-                _ctrl_down = false;
-            }
-            if (event.key.keysym.sym == SDLK_LSHIFT || event.key.keysym.sym == SDLK_RSHIFT) {
-                _shift_down = false;
-            }
+            break;
+        case SDL_QUIT:
+            exit(0);
+            break;
     }
 }
 
@@ -638,7 +632,6 @@ UIComponent *UI_get_root() {
 void UI_update(UIComponent *comp) {
 
     comp->update(comp);
-    GPU_SetBlendMode(comp->texture, GPU_BLEND_MULTIPLY);
 
     for (int i = 0; i < array_length(comp->children); i++) {
         UI_update(comp->children[i]);
@@ -747,7 +740,12 @@ void UI_set_fullscreen(bool f) {
 UITextLine UITextLine_new() {
     UITextLine text_line = {0};
 
+    text_line.char_limit = 20;
+
     text_line.label = UILabel_new();
+
+    UI_get_comp(&text_line)->default_style.bg_color = GPU_MakeColor(0, 0, 0, 70);
+    UI_get_comp(&text_line)->default_style.fg_color = GPU_MakeColor(255, 255, 255, 255);
 
     text_line.cursor_pos = 0;
     text_line.text = array(char, 20);
@@ -820,6 +818,9 @@ void UITextLine_handle_input(UIComponent *comp, SDL_Event input) {
 }
 
 void UIButton_on_click(UIButton *button, bool pressed) {
+
+    UIButton_update(button);
+
     if (button->activate_on_release == pressed) return;
 
     if (button->custom_on_click != NULL) {
@@ -869,6 +870,7 @@ void UITextLine_gain_focus(UIComponent *comp) {
 
 void UITextLine_lose_focus(UIComponent *comp) {
     SDL_StopTextInput();
+    UI_update(comp);
 }
 
 
@@ -881,14 +883,25 @@ void UITextLine_update(UIComponent *comp) {
     UITextLine *text_line = comp;
 
     v2 offset = V2(0, 0);
+    double text_width = 0;
 
-    for (int i = 0; i < text_line->cursor_pos; i++) {
+    for (int i = 0; i < array_length(text_line->text); i++) {
         int adv;
         TTF_GlyphMetrics32(label->font, text_line->text[i], NULL, NULL, NULL, NULL, &adv);
-        offset.x += adv;
+        text_width += adv;
+        if (i < text_line->cursor_pos) offset.x += adv;
     }
 
     SDL_Surface *surface = GPU_CopySurfaceFromImage(comp->texture);
+
+    switch (label->alignment_x) {
+        case ALIGNMENT_CENTER:
+            offset.x += comp->size.x / 2 - text_width / 2;
+            break;
+        case ALIGNMENT_RIGHT:
+            offset.x += comp->size.x - text_width;
+            break;
+    }
 
     SDL_Rect rect = {
         offset.x,
@@ -976,6 +989,10 @@ int _UI_set_clipboard(const char* text) {
 void UITextLine_type_char(UIComponent *comp, char c) {
 
     UITextLine *text_line = comp;
+
+    if (array_length(text_line->text) + 1 > text_line->char_limit) return;
+
+    if (text_line->numbers_only && (c < '0' || c > '9')) return;
 
     array_insert(text_line->text, c, text_line->cursor_pos);
     text_line->cursor_pos++;

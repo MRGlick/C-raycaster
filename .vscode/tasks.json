@@ -18,7 +18,8 @@
                 "-lSDL2",
                 "-lSDL2_ttf",
                 "-lSDL2_gpu",
-                "-lws2_32"
+                "-lws2_32",
+                "-liphlpapi"
             ],
             "options": {
                 "cwd": "${fileDirname}",

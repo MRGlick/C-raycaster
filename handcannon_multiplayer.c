@@ -7,7 +7,7 @@
 #include "ui.c"
 #include "mystring.c"
 #include "multiplayer.c"
-
+#include <iphlpapi.h>
 
 
 // #DEFINITIONS
@@ -528,6 +528,16 @@ typedef struct Room {
 
 // #FUNC
 
+
+
+String get_public_ip();
+
+String get_local_ip();
+
+String scramble_ip_and_port(String ip, String port);
+
+String unscramble_ip_and_port(StringRef scrambled_ip, int *port);
+
 bool is_sync_id_valid(int sync_id);
 
 void Node_ready(Node *node);
@@ -868,7 +878,8 @@ GPU_Target *actual_screen;
 // #UI
 UIComponent *pause_menu;
 UILabel *debug_label;
-UIComponent *main_menu;
+UIComponent *main_menu, *join_menu, *host_menu;
+UITextLine *port_line, *ip_code_line;
 
 // #TEXTURES
 GPU_Image **ff_spark_particle_anim;
@@ -943,6 +954,8 @@ Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
 
 // #VAR
 
+String public_ip, local_ip, public_code, local_code;
+
 Node *hand_node;
 
 bool ready_to_render = false;
@@ -964,6 +977,8 @@ bool can_exit = false;
 double client_dungeon_seed_request_timer = 0;
 
 bool loading_map = false;
+
+bool started_game = false;
 
 long server_dungeon_seed = -1;
 long client_dungeon_seed = -1;
@@ -1041,7 +1056,7 @@ int main(int argc, char *argv[]) {
     actual_screen = GPU_Init(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_INIT_DISABLE_VSYNC);
     SDL_SetWindowTitle(SDL_GetWindowFromID(actual_screen->context->windowID), "Goofy");
 
-    GPU_BlendPresetEnum blend_mode = GPU_BLEND_NORMAL_ADD_ALPHA;
+    GPU_BlendPresetEnum blend_mode = GPU_BLEND_NORMAL;
 
     screen_image = GPU_CreateImage(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_FORMAT_RGBA);
     GPU_SetImageFilter(screen_image, GPU_FILTER_NEAREST);
@@ -1060,13 +1075,13 @@ int main(int argc, char *argv[]) {
 
     UI_init(get_window(), (v2){WINDOW_WIDTH, WINDOW_HEIGHT});
 
-    make_ui();
-
     MP_init(SERVER_PORT);
     _MP_client_handle_recv = on_client_recv;
     _MP_on_client_connected = on_player_connect;
     _MP_on_client_disconnected = on_player_disconnect;
     _MP_server_handle_recv = on_server_recv;
+
+    make_ui();
 
     deletion_queue = array(Node *, 100);
     add_queue = array(Node *, 10);
@@ -1122,8 +1137,8 @@ int main(int argc, char *argv[]) {
     while (running) {  // #GAME LOOP
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
-            handle_input(event);
             UI_handle_event(event);
+            if (started_game) handle_input(event);
         }
 
         u64 now = SDL_GetTicks64();
@@ -1132,7 +1147,7 @@ int main(int argc, char *argv[]) {
         tick_timer += delta;
         render_timer += delta;
         if (tick_timer >= 1000 / TPS) {
-            tick(mili_to_sec(tick_timer) * game_speed);
+            if (started_game) tick(mili_to_sec(tick_timer) * game_speed);
             ran_first_tick = true;
             tick_timer = 0;
         }
@@ -2096,9 +2111,7 @@ void drawSkybox() {
 
 void render(double delta) {  // #RENDER
 
-    if (loading_map || !ready_to_render) {
-        return;
-    }
+    bool can_render = !loading_map && ready_to_render;
 
     GPU_Clear(screen);
     GPU_Clear(hud);
@@ -2114,7 +2127,8 @@ void render(double delta) {  // #RENDER
     String_delete(&fps_text);
     String_delete(&title);
 
-    Node_render(renderer);
+    if (can_render) Node_render(renderer);
+    UI_render(hud, UI_get_root());
 
     GPU_ActivateShaderProgram(bloom_shader, &bloom_shader_block);
 
@@ -3646,7 +3660,71 @@ void _continue_button_pressed(UIComponent *comp, bool pressed) {
     toggle_pause();
 }
 
+void _on_host_pressed(UIComponent *comp, bool pressed) {
+    main_menu->visible = false;
+    join_menu->visible = false;
+    host_menu->visible = true;
+}
 
+void _on_join_pressed(UIComponent *comp, bool pressed) {
+    main_menu->visible = false;
+    join_menu->visible = true;
+    host_menu->visible = false;
+}
+
+void _back_pressed(UIComponent *comp, bool pressed) {
+    main_menu->visible = true;
+    join_menu->visible = false;
+    host_menu->visible = false;
+}
+
+void _h_play_pressed(UIComponent *comp, bool pressed) {
+
+    public_ip = get_public_ip();
+    local_ip = get_local_ip();
+
+    StringRef port = (StringRef){.data = port_line->text, .len = array_length(port_line->text), .ref = true};
+    if (port.len == 0) return;
+
+    public_code = scramble_ip_and_port(public_ip, port);
+
+    local_code = scramble_ip_and_port(local_ip, port);
+
+    MP_set_port(String_to_int(port));
+
+    MPServer();
+
+    started_game = true;
+    main_menu->visible = false;
+    join_menu->visible = false;
+    host_menu->visible = false;
+
+}
+
+void _j_play_pressed(UIComponent *comp, bool pressed) {
+    StringRef text = (StringRef){.ref = true, .data = ip_code_line->text, .len = array_length(ip_code_line->text)};
+
+
+    int port = 0;
+    String ip = unscramble_ip_and_port(text, &port);
+
+    if (String_isnull(ip) || port == 0) {
+        return;
+    }
+
+    MP_set_port(port);
+
+    MPClient(ip.data);
+
+    started_game = true;
+    main_menu->visible = false;
+    join_menu->visible = false;
+    host_menu->visible = false;
+
+}
+
+
+//#MAKE UI
 void make_ui() {
 
     pause_menu = UI_alloc(UIComponent);
@@ -3679,8 +3757,23 @@ void make_ui() {
 
     UI_set(UIComponent, continue_button, default_style, default_style);
 
+    UILabel *public_code_label = UI_alloc(UILabel);
+    String public_code_text = String_concat(StringRef("Public code: "), public_code);
+    UILabel_set_text(public_code_label, public_code_text);
 
+    UI_set_size(public_code_label, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 10));
+    UI_center_around_pos(public_code_label, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 7 / 9));
 
+    UI_add_child(pause_menu, public_code_label);
+
+    UILabel *local_code_label = UI_alloc(UILabel);
+    String local_code_text = String_concat(StringRef("Local code: "), local_code);
+    UILabel_set_text(local_code_label, local_code_text);
+
+    UI_set_size(local_code_label, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 10));
+    UI_center_around_pos(local_code_label, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 7 / 9));
+
+    UI_add_child(pause_menu, local_code_label);
 
     
     pause_menu->visible = false;
@@ -3697,14 +3790,14 @@ void make_ui() {
     UI_set_size(debug_label, (v2){WINDOW_WIDTH, WINDOW_HEIGHT / 5});
     UI_add_child(UI_get_root(), debug_label);
 
-
+    // #MAIN MENU -----------------------------------------------
 
     main_menu = UI_alloc(UIComponent);
 
     UI_set_size(main_menu, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
 
     UIRect *mm_bg = UI_alloc(UIRect);
-    mm_bg->color = Color(20, 20, 90, 255);
+    mm_bg->color = Color(90, 20, 20, 255);
     UI_set_size(mm_bg, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
 
     UI_add_child(main_menu, mm_bg);
@@ -3721,6 +3814,7 @@ void make_ui() {
 
 
     UIButton *mm_host_button = UI_alloc(UIButton);
+    mm_host_button->custom_on_click = _on_host_pressed;
     UILabel_set_text(mm_host_button, StringRef("HOST!"));
     UI_set_size(mm_host_button, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 6));
     UI_center_around_pos(mm_host_button, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 2 / 5));
@@ -3728,6 +3822,7 @@ void make_ui() {
     UI_add_child(main_menu, mm_host_button);
 
     UIButton *mm_join_button = UI_alloc(UIButton);
+    mm_join_button->custom_on_click = _on_join_pressed;
     UILabel_set_text(mm_join_button, StringRef("JOIN!"));
     UI_set_size(mm_join_button, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 6));
     UI_center_around_pos(mm_join_button, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 3 / 5));
@@ -3737,14 +3832,15 @@ void make_ui() {
 
     UI_add_child(UI_get_root(), main_menu);
 
-    main_menu->visible = false; // debug
-    
+    main_menu->visible = true; // debug
 
+    // #HOST MENU -------------------------------------------
 
-    UIComponent *host_menu = UI_alloc(UIComponent);
+    host_menu = UI_alloc(UIComponent);
+    UI_set_size(host_menu, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
 
     UIRect *h_bg = UI_alloc(UIRect);
-    h_bg->color = Color(10, 10, 50, 255);
+    h_bg->color = Color(20, 20, 90, 255);
     UI_set_size(h_bg, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
 
     UI_add_child(host_menu, h_bg);
@@ -3752,37 +3848,38 @@ void make_ui() {
     UILabel *h_title = UI_alloc(UILabel);
     h_title->alignment_x = ALIGNMENT_CENTER;
     h_title->alignment_y = ALIGNMENT_CENTER;
-    UILabel_set_text(h_title, StringRef("Host"));
+    UILabel_set_text(h_title, StringRef("HOST"));
     h_title->font_size = 48;
-    UI_set_size(h_title, V2(WINDOW_WIDTH, WINDOW_HEIGHT / 6));
-    UI_center_around_pos(h_title, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 6));
+    UI_set_size(h_title, V2(WINDOW_WIDTH, WINDOW_HEIGHT / 5));
+    UI_center_around_pos(h_title, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 5));
 
     UI_add_child(host_menu, h_title);
 
-    UIButton *h_lan_button = UI_alloc(UIButton);
-    UI_set_size(h_lan_button, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 6));
-    UILabel_set_text(h_lan_button, StringRef("With LAN"));
-    UI_center_around_pos(h_lan_button, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 3 / 6));
+    UILabel *port_label = UI_alloc(UILabel);
 
-    UI_add_child(host_menu, h_lan_button);
+    port_label->font_size = 24;
+    UILabel_set_alignment(port_label, ALIGNMENT_CENTER, ALIGNMENT_TOP);
 
-    UIButton *h_pf_button = UI_alloc(UIButton);
-    UI_set_size(h_pf_button, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 6));
-    UILabel_set_text(h_pf_button, StringRef("With PF"));
-    UI_center_around_pos(h_pf_button, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 4.2 / 6));
+    UILabel_set_text(port_label, StringRef("Enter an open port:"));
 
-    UI_add_child(host_menu, h_pf_button);
+    UI_set_size(port_label, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 12));
+    UI_center_around_pos(port_label, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 3 / 5 - WINDOW_HEIGHT / 10));
 
-    UILabel *h_pf_note = UI_alloc(UILabel);
-    UI_set_size(h_pf_note, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 12));
-    UILabel_set_text(h_pf_note, StringRef("Note: Port Forwarding is hard"));
-    h_pf_note->font_size = 16;
-    UILabel_set_alignment(h_pf_note, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
-    UI_center_around_pos(h_pf_note, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 4.8 / 6));
+    UI_add_child(host_menu, port_label);
 
-    UI_add_child(host_menu, h_pf_note);
+    port_line = UI_alloc(UITextLine);
+    port_line->char_limit = 5;
+    port_line->numbers_only = true;
+    port_line->label.font_size = 20;
+    UILabel_set_text(port_line, StringRef("...."));
+    UILabel_set_alignment(port_line, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
+    UI_set_size(port_line, V2(WINDOW_WIDTH / 4, WINDOW_HEIGHT / 12));
+    UI_center_around_pos(port_line, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 3 / 5));
+    UI_add_child(host_menu, port_line);
 
     UIButton *h_back_button = UI_alloc(UIButton);
+    h_back_button->custom_on_click = _back_pressed;
+    UI_get_comp(h_back_button)->default_style.bg_color = Color(0, 0, 0, 0);
     UILabel_set_text(h_back_button, StringRef(" <<< "));
     UI_set_pos(h_back_button, V2(0, 0));
     UI_set_size(h_back_button, V2(WINDOW_WIDTH / 12, WINDOW_HEIGHT / 12));
@@ -3790,21 +3887,32 @@ void make_ui() {
 
     UI_add_child(host_menu, h_back_button);
 
-    host_menu->visible = false;
+    UIButton *play_button = UI_alloc(UIButton);
+    play_button->custom_on_click = _h_play_pressed;
+    UI_get_comp(play_button)->default_style = (UIStyle){.bg_color = Color(5, 5, 70, 255), Color(255, 255, 255, 255)};
+
+    UILabel_set_text(play_button, StringRef("Play!"));
+    UI_set_size(play_button, V2(WINDOW_WIDTH / 8, WINDOW_HEIGHT / 8));
+    UI_center_around_pos(play_button, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 7 / 9));
+    UI_add_child(host_menu, play_button);
+
 
     UI_add_child(UI_get_root(), host_menu);
 
-    UIComponent *join_menu = UI_alloc(UIComponent);
+    host_menu->visible = false;
+
+    // #JOIN MENU -------------------------------------------
+
+    join_menu = UI_alloc(UIComponent);
 
     UIRect *j_bg = UI_alloc(UIRect);
     j_bg->color = Color(10, 50, 10, 255);
     UI_set_size(j_bg, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
 
-    UI_add_child(join_menu, h_bg);
+    UI_add_child(join_menu, j_bg);
 
     UILabel *j_title = UI_alloc(UILabel);
-    j_title->alignment_x = ALIGNMENT_CENTER;
-    j_title->alignment_y = ALIGNMENT_CENTER;
+    UILabel_set_alignment(j_title, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
     UILabel_set_text(j_title, StringRef("Join"));
     j_title->font_size = 48;
     UI_set_size(j_title, V2(WINDOW_WIDTH, WINDOW_HEIGHT / 6));
@@ -3812,14 +3920,19 @@ void make_ui() {
 
     UI_add_child(join_menu, j_title);
 
-    UITextLine *ip_code_line = UI_alloc(UITextLine);
+    ip_code_line = UI_alloc(UITextLine);
+    ip_code_line->char_limit = 24;
+    ip_code_line->label.font_size = 24;
     ip_code_line->label.text = StringRef("Enter Lobby Code");
-    UI_set_size(ip_code_line, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 12));
+    UILabel_set_alignment(ip_code_line, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
+    UI_set_size(ip_code_line, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 12));
     UI_center_around_pos(ip_code_line, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 3 / 6));
 
     UI_add_child(join_menu, ip_code_line);
 
     UIButton *j_back_button = UI_alloc(UIButton);
+    UI_get_comp(j_back_button)->default_style.bg_color = Color(0, 0, 0, 0);
+    j_back_button->custom_on_click = _back_pressed;
     UILabel_set_text(j_back_button, StringRef(" <<< "));
     UI_set_pos(j_back_button, V2(0, 0));
     UI_set_size(j_back_button, V2(WINDOW_WIDTH / 12, WINDOW_HEIGHT / 12));
@@ -3827,7 +3940,18 @@ void make_ui() {
 
     UI_add_child(join_menu, j_back_button);
     
+    UIButton *j_play_button = UI_alloc(UIButton);
+    j_play_button->custom_on_click = _j_play_pressed;
+    UI_get_comp(j_play_button)->default_style = (UIStyle){.bg_color = Color(0, 20, 0, 255), Color(255, 255, 255, 255)};
+
+    UILabel_set_text(j_play_button, StringRef("Play!"));
+    UI_set_size(j_play_button, V2(WINDOW_WIDTH / 8, WINDOW_HEIGHT / 8));
+    UI_center_around_pos(j_play_button, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 7 / 9));
+    UI_add_child(join_menu, j_play_button);
+
     UI_add_child(UI_get_root(), join_menu);
+
+    join_menu->visible = false;
 
 
 
@@ -5229,8 +5353,13 @@ void projectile_forcefield_on_tick(Projectile *projectile, double delta) {
 
     const int REPEL_DIST = 50;
 
-    projectile->vel = v2_lerp(projectile->vel, V2_ZERO, 0.01 * delta * 144);
+    static v2 start_size = V2(-1, -1);
+    if (v2_equal(start_size, V2(-1, -1))) {
+        start_size = projectile->entity.world_node.size;
+    } 
 
+    projectile->vel = v2_lerp(projectile->vel, V2_ZERO, 0.01 * delta * 144);
+    projectile->entity.world_node.size = v2_lerp(start_size, V2(0, 0), 1 - (projectile->life_timer / projectile->life_time));
 
    
 
@@ -5391,11 +5520,8 @@ Renderer Renderer_new() {
 }
 
 void Renderer_render(Node *node) {
-    
-    GPU_Clear(screen);
-    GPU_Clear(actual_screen);
-    GPU_Clear(hud);
 
+    if (!started_game) return;
 
     render_floor_and_ceiling();
 
@@ -5411,7 +5537,6 @@ void Renderer_render(Node *node) {
         }
     });
 
-    UI_render(hud, UI_get_root());
 
     array_free(render_list);
 
@@ -6321,6 +6446,181 @@ bool is_sync_id_valid(int sync_id) {
 
     return true;
 }
+
+int get_digit(int num, int idx) {
+
+    int i = 0;
+    int n = num;
+
+    while (i < idx && n != 0) { // skip unnecessary iterations
+        n /= 10;
+        i++;
+    }
+
+    return n % 10;
+}
+
+String scramble_ip_and_port(String ip, String port) {
+    String result = String_new(12 + port.len); // 3 digits for each part of ip, port can be 4 or 5 digit
+
+    StringRef *ip_parts = String_split(ip, '.');
+
+    if (array_length(ip_parts) != 4) {
+        printf("Invalid IP \n");
+        commit_sudoku();
+    }
+
+    uint8_t ip_bytes[4] = {0};
+
+    for (int i = 0; i < 4; i++) {
+        if (ip_parts[i].len > 3) {
+            printf("Invalid IP \n");
+            commit_sudoku();
+        }
+        ip_bytes[i] = String_to_int(ip_parts[i]);
+    }
+
+    array_free(ip_parts);
+
+    for (int i = 0; i < result.len; i++) {
+        if ((i + 1) % 4 == 0) {
+            int pos = (i + 1) / 4 - 1;
+            result.data[i] = port.data[pos];
+            continue;
+        }
+
+        int ip_section = (i + 1) / 4;
+        int ip_idx = (i + 1) % 4 - 1; // it works shutup
+
+        result.data[i] = '0' + get_digit(ip_bytes[ip_section], 2 - ip_idx);
+
+    }
+
+    for (int i = 0; i < result.len; i++) { // caeser iteration
+        result.data[i] = '0' + (((result.data[i] - '0') + (i)) % 10);
+    }
+
+    for (int i = 0; i < result.len / 2; i++) { // reverse iteration
+        int temp = result.data[i];
+        result.data[i] = result.data[result.len - 1 - i];
+        result.data[result.len - 1 - i] = temp;
+    }
+
+    return result;
+}
+
+// b > 1 !!!
+int posmod(int a, int b) {
+    return (a + (b * abs(a))) % b;
+}
+
+// the string's length cant be determined so the string is being returned
+String unscramble_ip_and_port(StringRef scrambled_ip, int *port) {
+
+    if (scrambled_ip.len < 12 || scrambled_ip.len > 17) {
+        printf("Invalid code \n");
+        return String_null;
+    }
+
+    String copy = String_copy(scrambled_ip);
+
+    for (int i = 0; i < copy.len / 2; i++) { // unreverse
+
+        if (copy.data[i] < '0' || copy.data[i] > '9') {
+            printf("Invalid code \n");
+            return String_null;
+        }
+
+        int temp = copy.data[i];
+        copy.data[i] = copy.data[copy.len - 1 - i];
+        copy.data[copy.len - 1 - i] = temp;
+    }
+
+    for (int i = 0; i < copy.len; i++) { // uncaeser
+        copy.data[i] = '0' + posmod((copy.data[i]- '0') - i, 10);
+    }
+
+    int port_len = scrambled_ip.len / 4;
+    int ip_len = scrambled_ip.len - port_len;
+
+    String ip_string = String_new(ip_len + 3);
+    int ip_idx = 0;
+    int port_result = 0;
+    int dot_count = 0;
+
+    for (int i = 0; i < copy.len; i++) {
+        if ((i + 1) % 4 == 0) {
+            port_result = port_result * 10 + (copy.data[i] - '0');
+            
+            continue;
+        }
+        ip_string.data[ip_idx++] = copy.data[i];
+        if ((ip_idx + 1) % 4 == 0 && dot_count < 3) {
+            ip_string.data[ip_idx++] = '.';
+            dot_count++;
+        }
+        
+    }
+
+
+    if (port != NULL) {
+        *port = port_result;
+    }
+
+    return ip_string;
+}
+
+String get_local_ip() {
+    IP_ADAPTER_INFO adapterInfo[16]; // Allocate space for up to 16 adapters
+    DWORD bufferSize = sizeof(adapterInfo);
+
+    GetAdaptersInfo(adapterInfo, &bufferSize);
+    PIP_ADAPTER_INFO adapter = adapterInfo;
+
+    return String(adapter->IpAddressList.IpAddress.String);
+}
+
+
+String get_public_ip() {
+    SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock == INVALID_SOCKET) {
+        printf("Error creating socket: %d\n", WSAGetLastError());
+        return String_null;
+    }
+
+    struct sockaddr_in server;
+    server.sin_family = AF_INET;
+    server.sin_port = htons(80);
+    server.sin_addr.s_addr = inet_addr("172.67.74.152"); // IP for api.ipify.org
+
+    if (connect(sock, (struct sockaddr*)&server, sizeof(server)) < 0) {
+        printf("Error connecting: %d\n", WSAGetLastError());
+        closesocket(sock);
+        return String_null;
+    }
+
+    // Send HTTP GET request
+    const char* request = "GET / HTTP/1.1\r\nHost: api.ipify.org\r\nConnection: close\r\n\r\n";
+    send(sock, request, strlen(request), 0);
+
+    // Receive response
+    char buffer[512] = {0};
+    int received = recv(sock, buffer, sizeof(buffer) - 1, 0);
+
+    closesocket(sock);
+
+    String result = String(buffer);
+    StringRef *parts = String_split(result, '\n');
+
+    String ip = String_copy(parts[array_length(parts) - 1]);
+
+    array_free(parts);
+
+    String_delete(&result);
+
+    return ip;
+}
+
 
 
 // #END

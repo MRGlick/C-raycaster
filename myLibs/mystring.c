@@ -23,7 +23,23 @@ typedef String StringRef;
 
 #define String(str) String_copy_from_literal(str)
 #define StringRef(str) (String){.len = strlen(str), .data = str, .ref = true}
+#define Sdie() *(int *)2 = 2
+#define String_null (String){0}
 
+bool String_isnull(String a) {
+    if (a.data == NULL && a.len == 0) return true;
+    return false;
+}
+
+int String_to_int(StringRef a) {
+    int res = 0;
+    for (int i = 0; i < a.len; i++) {
+        if (a.data[i] < '0' || a.data[i] > '9') Sdie();
+        res = res * 10 + a.data[i] - '0';
+    }
+
+    return res;
+}
 
 String String_copy_from_literal(const char *literal) {
     String str = {
@@ -102,6 +118,18 @@ void String_delete(String *str) {
     free(str->data);
     str->len = -1;
 }
+
+#ifndef GET_NUM_DIGITS
+#define GET_NUM_DIGITS
+int get_num_digits(int num) {
+    int res = 0;
+    while (num > 0) {
+        num /= 10;
+        res++;
+    }
+    return res;
+}
+#endif
 
 String String_from_double(double num, int accuracy) {
     int len = accuracy + get_num_digits((int)num);
