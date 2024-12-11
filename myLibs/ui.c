@@ -804,7 +804,6 @@ void UITextLine_handle_input(UIComponent *comp, SDL_Event input) {
     text_line->cursor_pos = clamp(text_line->cursor_pos, 0, array_length(text_line->text));
     
     if (array_length(text_line->text) == 0) {
-        printf("Length is 0!! \n");
         UILabel_set_text(text_line, StringRef(""));
     } else {
         String str = String_ncopy_from_literal(text_line->text, array_length(text_line->text));

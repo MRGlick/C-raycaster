@@ -13,9 +13,6 @@
 // #DEFINITIONS
 
 #define DEBUG_FLAG true
-
-#define SERVER_IP "84.95.66.143"
-#define SERVER_PORT 1155
 #define TPS 300
 #define FPS 300
 #define WINDOW_WIDTH 1024
@@ -873,13 +870,14 @@ GPU_Target *screen;
 GPU_Image *screen_image;
 GPU_Target *hud;
 GPU_Image *hud_image;
-GPU_Target *actual_screen;
+GPU_Target *actual_screen = NULL;
 
 // #UI
 UIComponent *pause_menu;
 UILabel *debug_label;
 UIComponent *main_menu, *join_menu, *host_menu;
 UITextLine *port_line, *ip_code_line;
+UILabel *public_code_label = NULL, *local_code_label = NULL;
 
 // #TEXTURES
 GPU_Image **ff_spark_particle_anim;
@@ -1075,7 +1073,7 @@ int main(int argc, char *argv[]) {
 
     UI_init(get_window(), (v2){WINDOW_WIDTH, WINDOW_HEIGHT});
 
-    MP_init(SERVER_PORT);
+    MP_init(1155); // default port
     _MP_client_handle_recv = on_client_recv;
     _MP_on_client_connected = on_player_connect;
     _MP_on_client_disconnected = on_player_disconnect;
@@ -1117,18 +1115,6 @@ int main(int argc, char *argv[]) {
     reset_tilemap(tilemap->level_tilemap);
     reset_tilemap(tilemap->floor_tilemap);
     reset_tilemap(tilemap->ceiling_tilemap);
-    bake_lights();
-
-    bool is_server = argc == 2 && !strcmp(argv[1], "server");
-    if (DEBUG_FLAG) {
-        is_server = !is_server;
-    }
-
-    if (is_server) {
-        printf("creating server \n");
-        MPServer();
-    }
-    MPClient(SERVER_IP);
 
 
     bool ran_first_tick = false;
@@ -1490,7 +1476,6 @@ void spriteTick(Sprite *sprite, double delta) {
 // #TICK
 void tick(double delta) {
     
-
     if (loading_map) {
         init_loading_screen();
         generate_dungeon();
@@ -2115,6 +2100,7 @@ void render(double delta) {  // #RENDER
 
     GPU_Clear(screen);
     GPU_Clear(hud);
+    GPU_Clear(actual_screen);
    
     String title = String("FPS: ");
     String fps_text = String_new(20);
@@ -2787,6 +2773,9 @@ BakedLightColor _lerp_baked_light_color(BakedLightColor a, BakedLightColor b, do
 
 void bake_lights() {
 
+    static int call_count = 0;
+    call_count++;
+
     bool has_lights = false;
 
     iter_over_all_nodes(node, {
@@ -2986,6 +2975,7 @@ void bake_lights() {
         }
     }
 
+    if (lightmap_image != NULL) GPU_FreeImage(lightmap_image);
     lightmap_image = GPU_CreateImage(BAKED_LIGHT_RESOLUTION * TILEMAP_WIDTH, BAKED_LIGHT_RESOLUTION * TILEMAP_HEIGHT, GPU_FORMAT_RGBA);
     GPU_Target *image_target = GPU_LoadTarget(lightmap_image);
 
@@ -3262,10 +3252,6 @@ void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
     v2 effect_size = to_vec(8000);
 
     RayCollisionData ray_data = castRayForAll(player->world_node.pos, shoot_dir);
-
-    if (ray_data.collider != NULL && node(ray_data.collider)->parent->type == PROJECTILE) {
-        projectile_destroy(node(ray_data.collider)->parent);
-    }
 
 
     v2 hit_pos = screenToFloor((v2){RESOLUTION_X / 2, WINDOW_HEIGHT / 2 + pitch});
@@ -3687,12 +3673,20 @@ void _h_play_pressed(UIComponent *comp, bool pressed) {
     if (port.len == 0) return;
 
     public_code = scramble_ip_and_port(public_ip, port);
+    UILabel_set_text(public_code_label, String_concat(StringRef("Public code: "), public_code));
+    UI_update(public_code_label);
 
     local_code = scramble_ip_and_port(local_ip, port);
+    UILabel_set_text(local_code_label, String_concat(StringRef("Local code: "), local_code));
+    UI_update(local_code_label);
 
     MP_set_port(String_to_int(port));
 
     MPServer();
+
+    MPClient(public_ip.data);
+
+    _UI_set_clipboard(public_code.data); // we do a little cheating
 
     started_game = true;
     main_menu->visible = false;
@@ -3709,6 +3703,7 @@ void _j_play_pressed(UIComponent *comp, bool pressed) {
     String ip = unscramble_ip_and_port(text, &port);
 
     if (String_isnull(ip) || port == 0) {
+        printf("IP or port are invalid! \n");
         return;
     }
 
@@ -3757,23 +3752,27 @@ void make_ui() {
 
     UI_set(UIComponent, continue_button, default_style, default_style);
 
-    UILabel *public_code_label = UI_alloc(UILabel);
-    String public_code_text = String_concat(StringRef("Public code: "), public_code);
-    UILabel_set_text(public_code_label, public_code_text);
+    public_code_label = UI_alloc(UILabel);
+
+    public_code_label->font_size = 16;
+    UILabel_set_text(public_code_label, StringRef(""));
 
     UI_set_size(public_code_label, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 10));
-    UI_center_around_pos(public_code_label, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 7 / 9));
-
     UI_add_child(pause_menu, public_code_label);
+    
+    UI_center_around_pos(public_code_label, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 1.3)); // after adding so it would account for the pause menu's pos
 
-    UILabel *local_code_label = UI_alloc(UILabel);
-    String local_code_text = String_concat(StringRef("Local code: "), local_code);
-    UILabel_set_text(local_code_label, local_code_text);
+
+    local_code_label = UI_alloc(UILabel);
+
+    local_code_label->font_size = 16;
+    UILabel_set_text(local_code_label, StringRef(""));
 
     UI_set_size(local_code_label, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 10));
-    UI_center_around_pos(local_code_label, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 7 / 9));
-
     UI_add_child(pause_menu, local_code_label);
+    
+    UI_center_around_pos(local_code_label, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 1.1));
+
 
     
     pause_menu->visible = false;
@@ -3790,7 +3789,7 @@ void make_ui() {
     UI_set_size(debug_label, (v2){WINDOW_WIDTH, WINDOW_HEIGHT / 5});
     UI_add_child(UI_get_root(), debug_label);
 
-    // #MAIN MENU -----------------------------------------------
+    // #MM -----------------------------------------------
 
     main_menu = UI_alloc(UIComponent);
 
@@ -6561,13 +6560,47 @@ String unscramble_ip_and_port(StringRef scrambled_ip, int *port) {
         }
         
     }
-
-
     if (port != NULL) {
         *port = port_result;
     }
 
-    return ip_string;
+    int *arr = array(int, 5);
+    bool trailing = true;
+    for (int i = 0; i < ip_string.len - 1; i++) {
+        if (trailing) {
+            if (ip_string.data[i] == '0' && ip_string.data[i + 1] != '.') {
+                array_append(arr, i);
+            } else {
+                trailing = false;
+            }
+        }
+
+        if (ip_string.data[i] == '.') trailing = true;
+
+    }
+
+    String final_ip_string = String_new(ip_string.len - array_length(arr));
+    int idx = 0;
+    for (int i = 0; i < ip_string.len; i++) {
+        
+        bool in_arr = false;
+        for (int j = 0; j < array_length(arr); j++) {
+            if (arr[j] == i) {
+                in_arr = true;
+                break;
+            }
+        }
+
+        if (in_arr) continue;
+
+        final_ip_string.data[idx++] = ip_string.data[i];
+
+    }
+
+    String_delete(&ip_string);
+    array_free(arr);
+
+    return final_ip_string;
 }
 
 String get_local_ip() {

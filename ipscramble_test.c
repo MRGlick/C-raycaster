@@ -119,19 +119,53 @@ String unscramble_ip_and_port(StringRef scrambled_ip, int *port) {
         }
         
     }
-
-
     if (port != NULL) {
         *port = port_result;
     }
 
-    return ip_string;
+    int *arr = array(int, 5);
+    bool trailing = true;
+    for (int i = 0; i < ip_string.len - 1; i++) {
+        if (trailing) {
+            if (ip_string.data[i] == '0' && ip_string.data[i + 1] != '.') {
+                array_append(arr, i);
+            } else {
+                trailing = false;
+            }
+        }
+
+        if (ip_string.data[i] == '.') trailing = true;
+
+    }
+
+    String final_ip_string = String_new(ip_string.len - array_length(arr));
+    int idx = 0;
+    for (int i = 0; i < ip_string.len; i++) {
+        
+        bool in_arr = false;
+        for (int j = 0; j < array_length(arr); j++) {
+            if (arr[j] == i) {
+                in_arr = true;
+                break;
+            }
+        }
+
+        if (in_arr) continue;
+
+        final_ip_string.data[idx++] = ip_string.data[i];
+
+    }
+
+    String_delete(&ip_string);
+    array_free(arr);
+
+    return final_ip_string;
 }
 
 
 int main() {
 
-    String result = scramble_ip_and_port(StringRef("143.0.0.1"), StringRef("1155"));
+    String result = StringRef("0123675881444690");
 
     printf("%s \n", result.data);
 
@@ -141,7 +175,5 @@ int main() {
 
     printf("og ip: %s \n", original_ip.data);
     printf("og port: %d \n", original_port);
-
-    String_delete(&result);
 
 }
