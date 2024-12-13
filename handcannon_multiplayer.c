@@ -1763,9 +1763,6 @@ void render_floor_and_ceiling() {
 
     GPU_DeactivateShaderProgram();
 
-    v2 p1 = V2(0, 0), p2 = V2(100, 0), p3 = V2(0, 100), p4 = V2(100, 100);
-
-    render_textured_quad(entityTexture, worldToScreen(p1, 0, true), worldToScreen(p2, 0, true), worldToScreen(p3, 0, true), worldToScreen(p4, 0, true));
 }
 
 void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affected_by_light, SDL_Color custom_color) {
@@ -1923,7 +1920,7 @@ RenderObject *get_render_list() {
                     pos = ((WorldNode *)node->parent)->pos;
                 } else if (instanceof(node->parent->type, CANVAS_NODE)) {
                     custom_dist = true;
-                    render_object.dist_squared = -((CanvasNode *)node->parent)->z_index; 
+                    render_object.dist_squared = -((CanvasNode *)node)->z_index; 
                 }
                 
             }
@@ -2105,13 +2102,11 @@ void render(double delta) {  // #RENDER
     String title = String("FPS: ");
     String fps_text = String_new(20);
     decimal_to_text(realFps, fps_text.data);
-    String final = String_concat(title, fps_text);
+    String final = String_concatf(title, fps_text);
 
     SDL_SetWindowTitle(get_window(), final.data);
 
     String_delete(&final);
-    String_delete(&fps_text);
-    String_delete(&title);
 
     if (can_render) Node_render(renderer);
     UI_render(hud, UI_get_root());
