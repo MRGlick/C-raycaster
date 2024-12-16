@@ -21,6 +21,7 @@
         "stdio.h": "c",
         "initializer_list": "c",
         "stdbool.h": "c",
-        "winsock.h": "c"
+        "winsock.h": "c",
+        "inttypes.h": "c"
     }
 }

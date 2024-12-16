@@ -1071,6 +1071,8 @@ int main(int argc, char *argv[]) {
         levelToLoad = argv[1];
     }
 
+    BS_init();
+
     UI_init(get_window(), (v2){WINDOW_WIDTH, WINDOW_HEIGHT});
 
     MP_init(1155); // default port
@@ -2169,7 +2171,7 @@ void init_player(v2 pos) {
     player->secondary = NULL;
     player->utility = NULL;
     player->special = NULL;
-
+    
     randomize_player_abilities();
 
     init_hand_sprite();
@@ -2547,7 +2549,7 @@ GPU_Image *get_sprite_current_texture(Sprite *sprite) {
 
 // Todo: add shoot cooldown for base shooting
 void ability_shoot_activate(Ability *ability) {
-    play_sound(player_default_shoot, 0.4);
+    play_sound(player_default_shoot);
     _shoot(0);
 }
 
@@ -3016,7 +3018,7 @@ void player_take_dmg(double dmg) {
     player->health -= dmg;
 
     // play some effect or animation
-    play_sound(player_default_hurt, 0.1);
+    play_sound(player_default_hurt);
     shakeCamera(20, 10, true, 2);
 
     // player_hit_particles->world_node.pos = player->world_node.pos;
@@ -3221,7 +3223,7 @@ Ability ability_secondary_shoot_create() {
 void ability_secondary_shoot_activate(Ability *ability) {
 
     shakeCamera(35, 15, true, 10);
-    play_sound(rapidfire_sound, 0.1);
+    play_sound(rapidfire_sound);
 
     Ability *rapid_fire = (Ability *)ability;
     int shots = 6;

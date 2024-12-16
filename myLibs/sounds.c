@@ -2,20 +2,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include "inttypes.h"
 
 #define FADE_SAMPLE_COUNT 2000
 #define SOUND_REDUCTION_FACTOR 0.25
 #define VOLUME_REDUCTION_THRESHOLD 28000
 
-typedef uint64_t u64;
-typedef uint32_t u32;
-typedef uint16_t u16;
-typedef uint8_t u8;
-
-typedef int64_t s64;
-typedef int32_t s32;
-typedef int16_t s16;
-typedef int8_t s8;
 
 
 typedef struct Sound {
@@ -46,9 +38,9 @@ double _max(double a, double b) {
 }
 
 Sound *create_sound(const char *filename) {
-    SDL_AudioSpec audio_spec;
-    u8 *data;
-    u32 data_len;
+    SDL_AudioSpec audio_spec = {0};
+    u8 *data = {0};
+    u32 data_len = 0;
     
     if (SDL_LoadWAV(filename, &audio_spec, &data, &data_len) == NULL) {
         fprintf(stderr, "Could not open %s: %s\n", filename, SDL_GetError());
@@ -167,7 +159,7 @@ void play_sound(Sound *sound, double volume_multiplier) {
         return;
     }
 
-    u64 ticks_passed_since_lps = (double)(SDL_GetTicks64() - last_played_sound->time_at_start);
+    u64 ticks_passed_since_lps = (SDL_GetTicks64() - last_played_sound->time_at_start);
 
     int lps_current_sample = last_played_sound->audio_spec.freq * ticks_passed_since_lps / 1000;
 

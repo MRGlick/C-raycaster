@@ -10,17 +10,14 @@
 #include "vec2.c"
 #include "arraylist.c" // stdio, stdlib
 #include "color.c"
-#include "sounds.c"
+#include "bettersounds.c"
 #include <SDL_gpu.h>
 #include <sys/time.h>
 #include "hashtable.c"
+#include "inttypes.h"
 
 #define RENDERER_FLAGS (SDL_RENDERER_ACCELERATED)
 #define EPSILON 0.001
-#define u64 uint64_t
-#define u32 uint32_t
-#define u16 uint16_t
-#define u8 uint8_t
 
 #define in_range(a, min, max) (a <= max && a >= min)
 
@@ -69,7 +66,7 @@ typedef struct Pixel {
     Uint8 r, g, b, a;
 } Pixel;
 
-double last_print_time;
+
 const double DEG_TO_RAD = PI / 180;
 const double RAD_TO_DEG = 180 / PI;
 
@@ -79,8 +76,8 @@ v2 get_screen_size() {
     return (v2){mode.w, mode.h};
 }
 
-void init_cd_print() {
-    last_print_time = SDL_GetTicks64();
+int sign(int x) {
+    return (x > 0) - (0 > x);
 }
 
 u64 get_systime_mili() {
@@ -210,18 +207,6 @@ v2 get_texture_size(GPU_Image *texture) {
     return (v2){texture->w, texture->h};
 }
 
-void cd_print(bool activate_cooldown, const char *text, ...) {
-    u64 now  = SDL_GetTicks64();
-    if (mili_to_sec(now - last_print_time) < 0.01) return;
-    if (activate_cooldown) last_print_time = now;
-
-    va_list args;
-    int done;
-
-    va_start(args, text);
-    done = vprintf(text, args);
-    va_end(args);
-}
 
 
 
@@ -333,7 +318,9 @@ void play_spatial_sound(Sound *sound, double base_volume, v2 listener_pos, v2 so
 
     volume_multiplier *= volume_multiplier; // to make it more realistic ig
 
-    play_sound(sound, volume_multiplier);
+    sound->volume_multiplier = volume_multiplier;
+
+    play_sound(sound);
 }
 
 void shuffle_array(int *arr, int l) {
