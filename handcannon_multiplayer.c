@@ -3685,7 +3685,13 @@ void _h_play_pressed(UIComponent *comp, bool pressed) {
 
     MPClient(local_ip.data);
 
-    _UI_set_clipboard(public_code.data); // we do a little cheating
+    String clipboard_string = String_concat(StringRef("Join my game! \n\tPublic code: "), public_code);
+    clipboard_string = String_concatf(clipboard_string, String("\n\tLAN code: "));
+    clipboard_string = String_concatf(clipboard_string, String_copy(local_code));
+
+    _UI_set_clipboard(clipboard_string.data); // we do a little cheating
+
+    String_delete(&clipboard_string);
 
     started_game = true;
     main_menu->visible = false;
