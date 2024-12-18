@@ -3681,7 +3681,9 @@ void _h_play_pressed(UIComponent *comp, bool pressed) {
 
     MPServer();
 
-    MPClient(public_ip.data);
+    printf("Attempting to connect at local ip: %s:%d \n", local_ip.data, port.data);
+
+    MPClient(local_ip.data);
 
     _UI_set_clipboard(public_code.data); // we do a little cheating
 
@@ -6606,6 +6608,19 @@ String get_local_ip() {
 
     GetAdaptersInfo(adapterInfo, &bufferSize);
     PIP_ADAPTER_INFO adapter = adapterInfo;
+
+    while (adapter != NULL) {
+
+        StringRef current_ip = StringRef(adapter->IpAddressList.IpAddress.String);
+
+        if (String_starts_with(current_ip, StringRef("192."))
+         || String_starts_with(current_ip, StringRef("172."))
+          || String_starts_with(current_ip, StringRef("10."))) {
+            break; // that means it's a "real" local ip that we can actually use
+        }
+
+        adapter = adapter->Next;
+    }
 
     return String(adapter->IpAddressList.IpAddress.String);
 }

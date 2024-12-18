@@ -20,6 +20,19 @@ String get_local_ip() {
     GetAdaptersInfo(adapterInfo, &bufferSize);
     PIP_ADAPTER_INFO adapter = adapterInfo;
 
+    while (adapter != NULL) {
+
+        StringRef current_ip = StringRef(adapter->IpAddressList.IpAddress.String);
+
+        if (String_starts_with(current_ip, StringRef("192."))
+         || String_starts_with(current_ip, StringRef("172."))
+          || String_starts_with(current_ip, StringRef("10."))) {
+            break; // that means it's a "real" local ip that we can actually use
+        }
+
+        adapter = adapter->Next;
+    }
+
     return String(adapter->IpAddressList.IpAddress.String);
 }
 
