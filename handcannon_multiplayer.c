@@ -3040,6 +3040,7 @@ void player_die() {
     player->vel = V2_ZERO;
     player->height_vel = 0;
     player->health = player->maxHealth;
+    randomize_player_abilities();
 }
 
 void init_loading_screen() {
@@ -3723,9 +3724,36 @@ void _j_play_pressed(UIComponent *comp, bool pressed) {
 
 }
 
+void _copy_public_code_pressed(UIComponent *comp, bool pressed) {
+    _UI_set_clipboard(public_code.data);
+}
+
+void _copy_local_code_pressed(UIComponent *comp, bool pressed) {
+    _UI_set_clipboard(local_code.data);
+}
+
 
 //#MAKE UI
 void make_ui() {
+
+    UIStyle
+    copy_button_default = {
+        .bg_color = Color(50, 200, 50, 150),
+        .fg_color = Color(255, 255, 255, 255)
+    },
+    copy_button_hover = {
+        .bg_color = Color(50, 255, 50, 200),
+        .fg_color = Color(255, 255, 255, 255)
+    },
+    copy_button_pressed = {
+        .bg_color = Color(0, 180, 0, 255),
+        .fg_color = Color(255, 255, 255, 255)
+    },
+    code_labels_default = {
+        .bg_color = Color(0, 0, 0, 150),
+        .fg_color = Color(255, 255, 255, 255)
+    };
+
 
     pause_menu = UI_alloc(UIComponent);
 
@@ -3758,28 +3786,54 @@ void make_ui() {
     UI_set(UIComponent, continue_button, default_style, default_style);
 
     public_code_label = UI_alloc(UILabel);
-
+    UILabel_set_alignment(public_code_label, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
+    UI_get_comp(public_code_label)->default_style = code_labels_default;
     public_code_label->font_size = 16;
     UILabel_set_text(public_code_label, StringRef(""));
 
     UI_set_size(public_code_label, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 10));
     UI_add_child(pause_menu, public_code_label);
     
-    UI_center_around_pos(public_code_label, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 1.3)); // after adding so it would account for the pause menu's pos
+    UI_set_global_pos(public_code_label, V2(0, 0)); // after adding so it would account for the pause menu's pos
+
+    UIButton *copy_public_code_button = UI_alloc(UIButton);
+    copy_public_code_button->custom_on_click = _copy_public_code_pressed;
+    copy_public_code_button->label.font_size = 16;
+    UI_get_comp(copy_public_code_button)->default_style = copy_button_default;
+    copy_public_code_button->hover_style = copy_button_hover;
+    copy_public_code_button->pressed_style = copy_button_pressed;
+    UILabel_set_text(copy_public_code_button, StringRef("Copy"));
+    UI_set_size(copy_public_code_button, V2(WINDOW_WIDTH / 10, WINDOW_HEIGHT / 10));
+    UI_add_child(pause_menu, copy_public_code_button);
+
+    UI_set_global_pos(copy_public_code_button, V2(WINDOW_WIDTH / 3, 0));
+    
 
 
     local_code_label = UI_alloc(UILabel);
-
+    UILabel_set_alignment(local_code_label, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
+    UI_get_comp(local_code_label)->default_style = code_labels_default;
     local_code_label->font_size = 16;
     UILabel_set_text(local_code_label, StringRef(""));
 
     UI_set_size(local_code_label, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 10));
     UI_add_child(pause_menu, local_code_label);
     
-    UI_center_around_pos(local_code_label, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 1.1));
+    UI_set_global_pos(local_code_label, V2(0, WINDOW_HEIGHT / 10));
 
+    UIButton *copy_local_code_button = UI_alloc(UIButton);
+    UI_get_comp(copy_local_code_button)->default_style = copy_button_default;
+    copy_local_code_button->hover_style = copy_button_hover;
+    copy_local_code_button->pressed_style = copy_button_pressed;
+    copy_local_code_button->custom_on_click = _copy_local_code_pressed;
+    copy_local_code_button->label.font_size = 16;
+    UILabel_set_text(copy_local_code_button, StringRef("Copy"));
+    UI_set_size(copy_local_code_button, V2(WINDOW_WIDTH / 10, WINDOW_HEIGHT / 10));
+    UI_add_child(pause_menu, copy_local_code_button);
 
+    UI_set_global_pos(copy_local_code_button, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 10));
     
+
     pause_menu->visible = false;
     UI_add_child(UI_get_root(), pause_menu);
 
@@ -5183,8 +5237,8 @@ void randomize_player_abilities() {
         ability_primary_shoot_create()
     };
     Ability secondary_choices[] = {
-        // create_switchshot_ability(),
-        // ability_secondary_shoot_create(),
+        create_switchshot_ability(),
+        ability_secondary_shoot_create(),
         ability_bomb_create()
     };
     Ability utility_choices[] = {
