@@ -2,6 +2,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wincompatible-pointer-types"
 
+#include "profiling.c"
 #include "game_utils.c"
 #include "globals.h"
 #include "ui.c"
@@ -29,8 +30,7 @@
 #define RENDER_DISTANCE 350
 #define WALL_HEIGHT 30
 #define WALL_HEIGHT_MULTIPLIER 2
-#define NUM_WALL_THREADS 1
-#define NUM_FLOOR_THREADS 2
+#define NUM_WALL_THREADS 4
 #define MAX_LIGHT 9
 #define BAKED_LIGHT_RESOLUTION 36
 #define BAKED_LIGHT_CALC_RESOLUTION 8
@@ -499,7 +499,10 @@ enum ProjectileTypes {
 };
 
 typedef struct RenderObject {
-    void *val;
+    union {
+        void *val;
+        WallStripe stripe;
+    };
     double dist_squared;
     int type;
     bool isnull;
@@ -526,6 +529,7 @@ typedef struct Room {
 // #FUNC
 
 
+double get_time_seconds();
 
 String get_public_ip();
 
@@ -873,6 +877,7 @@ GPU_Image *hud_image;
 GPU_Target *actual_screen = NULL;
 
 // #UI
+UILabel *malloc_tracker, *free_tracker;
 UIComponent *pause_menu;
 UILabel *debug_label;
 UIComponent *main_menu, *join_menu, *host_menu;
@@ -952,6 +957,10 @@ Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
 
 // #VAR
 
+double timer = 0;
+
+Thread *wall_threads[NUM_WALL_THREADS] = {0};
+
 String public_ip, local_ip, public_code, local_code;
 
 Node *hand_node;
@@ -1024,7 +1033,7 @@ const char *font = "font.ttf";
 const SDL_Color fogColor = {0, 0, 0, 255};
 double tanHalfFOV;
 double tanHalfStartFOV;
-double ambient_light = 0.6;
+double ambient_light = 0.9;
 int floorRenderStart;
 const int tileSize = WINDOW_WIDTH / 30;
 double HEIGHT_TO_XY;
@@ -1141,7 +1150,7 @@ int main(int argc, char *argv[]) {
         }
 
         if (render_timer >= 1000 / FPS && ran_first_tick) {
-            realFps = 1000.0 / render_timer;
+            realFps = lerp(realFps, 1000.0 / render_timer, 0.1);
             render(mili_to_sec(render_timer) * game_speed);
             render_timer = 0;
         }
@@ -1167,6 +1176,10 @@ int main(int argc, char *argv[]) {
 }
 
 void init() {  // #INIT
+
+    for (int i = 0; i < NUM_WALL_THREADS; i++) {
+        wall_threads[i] = RT_alloc_thread();
+    }
 
     //test1();
 
@@ -1478,6 +1491,14 @@ void spriteTick(Sprite *sprite, double delta) {
 // #TICK
 void tick(double delta) {
     
+    timer += delta;
+
+    UILabel_set_text(malloc_tracker, String_concatf(String("Average mallocs/sec: "), String_from_double(mallocs / timer, 2)));
+    UILabel_update(malloc_tracker);
+
+    UILabel_set_text(free_tracker, String_concatf(String("Average frees/sec: "), String_from_double(frees / timer, 2)));
+    UILabel_update(free_tracker);
+
     if (loading_map) {
         init_loading_screen();
         generate_dungeon();
@@ -1835,29 +1856,29 @@ RenderObject getWallStripe(int i) {
         return (RenderObject){.isnull = true};
     }
 
-    WallStripe *stripe = malloc(sizeof(WallStripe));
-    stripe->i = i;
-    stripe->texture = data.colliderTexture;
+    WallStripe stripe;
+    stripe.i = i;
+    stripe.texture = data.colliderTexture;
 
     double cos_angle_to_forward = v2_cos_angle_between(ray_dir, playerForward);
     double dist = v2_distance(data.startpos, data.collpos) * cos_angle_to_forward;
     double fov_factor = tanHalfStartFOV / tanHalfFOV;
     double final_size = WALL_HEIGHT * WALL_HEIGHT_MULTIPLIER * WINDOW_HEIGHT / dist * fov_factor;
 
-    stripe->size = final_size;
+    stripe.size = final_size;
     
-    stripe->brightness = dist > 150? distance_to_color(dist - 150, 0.01) : 1;
-    stripe->normal = data.normal;
-    stripe->collIdx = data.collIdx;
-    stripe->wallWidth = data.wallWidth;
-    stripe->pos = data.collpos;
+    stripe.brightness = dist > 150? distance_to_color(dist - 150, 0.01) : 1;
+    stripe.normal = data.normal;
+    stripe.collIdx = data.collIdx;
+    stripe.wallWidth = data.wallWidth;
+    stripe.pos = data.collpos;
 
     RenderObject currentRenderObj = {.isnull = false};
 
     double real_dist = dist / cos_angle_to_forward;
 
     currentRenderObj.dist_squared = real_dist * real_dist;
-    currentRenderObj.val = stripe;
+    currentRenderObj.stripe = stripe;
     currentRenderObj.type = WALL_STRIPE;
 
     return currentRenderObj;
@@ -1886,17 +1907,17 @@ RenderObject *get_render_list() {
         int i = 0;
         addWallStripes_Threaded(&i); // hehe its not threaded
     } else {
-        SDL_Thread *threads[NUM_WALL_THREADS];
-
+        
         int indicies[NUM_WALL_THREADS];
 
         for (int i = 0; i < NUM_WALL_THREADS; i++) {
             indicies[i] = i;
-            threads[i] = SDL_CreateThread(addWallStripes_Threaded, "thread wall", &indicies[i]);
+            RT_activate_thread(wall_threads[i], addWallStripes_Threaded, &indicies[i]);
         }
         for (int i = 0; i < NUM_WALL_THREADS; i++) {
-            SDL_WaitThread(threads[i], NULL);
+            RT_wait_thread(wall_threads[i]);
         }
+        
     }
 
     for (int i = RESOLUTION_X - 1; i >= 0; i--) {
@@ -1974,37 +1995,39 @@ void clampColors(int rgb[3]) {
     }
 }
 
-void renderWallStripe(WallStripe *stripe) {
+void renderWallStripe(RenderObject render_object) {
 
-    double angleLightModifier = sin(v2_get_angle(stripe->normal));
+    WallStripe stripe = render_object.stripe;
 
-    GPU_Image *texture = stripe->texture;
+    double angleLightModifier = sin(v2_get_angle(stripe.normal));
+
+    GPU_Image *texture = stripe.texture;
     v2 textureSize = (v2){texture->w, texture->h};
 
-    GPU_Rect srcRect = {(int)loop_clamp(stripe->collIdx * stripe->wallWidth, 0, textureSize.x), 0, 1, textureSize.y};
+    GPU_Rect srcRect = {(int)loop_clamp(stripe.collIdx * stripe.wallWidth, 0, textureSize.x), 0, 1, textureSize.y};
 
-    double dist_squared = ((RenderObject *)stripe)->dist_squared;
+    double dist_squared = render_object.dist_squared;
     double dist = sqrt(dist_squared);
 
-    double p_height = (get_player_height() / get_max_height() - 0.5) * (stripe->size);
+    double p_height = (get_player_height() / get_max_height() - 0.5) * (stripe.size);
 
     GPU_Rect dstRect = {
-        stripe->i * WINDOW_WIDTH / RESOLUTION_X + cameraOffset.x, 
-        WINDOW_HEIGHT / 2 - stripe->size / 2 + p_height - player->pitch + cameraOffset.y,
+        stripe.i * WINDOW_WIDTH / RESOLUTION_X + cameraOffset.x, 
+        WINDOW_HEIGHT / 2 - stripe.size / 2 + p_height - player->pitch + cameraOffset.y,
         WINDOW_WIDTH / RESOLUTION_X + 1,
-        stripe->size
+        stripe.size
     };
 
 
-    BakedLightColor baked_light_color = get_light_color_by_pos(v2_add(stripe->pos, v2_mul(stripe->normal, to_vec(0.5))), 0, 0);
+    BakedLightColor baked_light_color = get_light_color_by_pos(v2_add(stripe.pos, v2_mul(stripe.normal, to_vec(0.5))), 0, 0);
 
     double baked_light_brightness = (baked_light_color.r + baked_light_color.g + baked_light_color.b) / 3;
 
-    double brightness = SDL_clamp(stripe->brightness + baked_light_brightness / 2, 0, 1);
+    double brightness = SDL_clamp(stripe.brightness + baked_light_brightness / 2, 0, 1);
     // baked lights
     
     // because it looks kinda ass
-    double normal_modifier = 0;//v2_get_angle(stripe->normal) * 10;
+    double normal_modifier = 0;//v2_get_angle(stripe.normal) * 10;
 
     int rgb[3] = {
         125 * baked_light_color.r * brightness + normal_modifier,
@@ -2020,7 +2043,6 @@ void renderWallStripe(WallStripe *stripe) {
     GPU_SetRGB(texture, rgb[0], rgb[1], rgb[2]);
     GPU_BlitRect(texture, &srcRect, screen, &dstRect);
 
-    free(stripe);
 }
 
 BakedLightColor get_light_color_by_pos(v2 pos, int row_offset, int col_offset) {
@@ -2102,8 +2124,7 @@ void render(double delta) {  // #RENDER
     GPU_Clear(actual_screen);
    
     String title = String("FPS: ");
-    String fps_text = String_new(20);
-    decimal_to_text(realFps, fps_text.data);
+    String fps_text = String_from_int((int)realFps);
     String final = String_concatf(title, fps_text);
 
     SDL_SetWindowTitle(get_window(), final.data);
@@ -3735,6 +3756,22 @@ void _copy_local_code_pressed(UIComponent *comp, bool pressed) {
 
 //#MAKE UI
 void make_ui() {
+
+
+    malloc_tracker = UI_alloc(UILabel);
+    UILabel_set_text(malloc_tracker, StringRef("Mallocs: 69420"));
+    UI_set_pos(malloc_tracker, V2(0, WINDOW_HEIGHT * 2 / 10));
+    UI_set_size(malloc_tracker, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 10));
+    malloc_tracker->font_size = 16;
+    UI_add_child(UI_get_root(), malloc_tracker);
+
+    free_tracker = UI_alloc(UILabel);
+    UILabel_set_text(free_tracker, StringRef("Frees: 69420"));
+    UI_set_pos(free_tracker, V2(0, WINDOW_HEIGHT * 3 / 10));
+    UI_set_size(free_tracker, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 10));
+    free_tracker->font_size = 16;
+    UI_add_child(UI_get_root(), free_tracker);
+
 
     UIStyle
     copy_button_default = {
@@ -5588,7 +5625,7 @@ void Renderer_render(Node *node) {
     foreach(RenderObject render_obj, render_list, array_length(render_list), {
         
         if (render_obj.type == WALL_STRIPE) {
-            renderWallStripe(render_obj.val);
+            renderWallStripe(render_obj);
         } else if (render_obj.type == NODE) {
             if (render_obj.val == renderer) continue;
             Node_render(render_obj.val);
@@ -6726,6 +6763,10 @@ String get_public_ip() {
     return ip;
 }
 
+
+double get_time_seconds() {
+    return (double)SDL_GetTicks64() / 1000;
+}
 
 
 // #END

@@ -7,7 +7,7 @@
             "args": [
                 "-fdiagnostics-color=always",
                 "-g",
-                //"-Ofast",
+                // "-O",
                 "${file}",
                 "-o",
                 "${fileDirname}\\${fileBasenameNoExtension}.exe",
@@ -19,7 +19,8 @@
                 "-lSDL2_ttf",
                 "-lSDL2_gpu",
                 "-lws2_32",
-                "-liphlpapi"
+                "-liphlpapi",
+                // "-pg"
             ],
             "options": {
                 "cwd": "${fileDirname}",
