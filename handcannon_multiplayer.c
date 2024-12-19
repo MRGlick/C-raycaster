@@ -30,7 +30,7 @@
 #define RENDER_DISTANCE 350
 #define WALL_HEIGHT 30
 #define WALL_HEIGHT_MULTIPLIER 2
-#define NUM_WALL_THREADS 4
+#define NUM_WALL_THREADS 2
 #define MAX_LIGHT 9
 #define BAKED_LIGHT_RESOLUTION 36
 #define BAKED_LIGHT_CALC_RESOLUTION 8
@@ -877,7 +877,7 @@ GPU_Image *hud_image;
 GPU_Target *actual_screen = NULL;
 
 // #UI
-UILabel *malloc_tracker, *free_tracker;
+UILabel *malloc_tracker, *free_tracker, *fps_tracker;
 UIComponent *pause_menu;
 UILabel *debug_label;
 UIComponent *main_menu, *join_menu, *host_menu;
@@ -956,6 +956,9 @@ Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
 
 
 // #VAR
+
+Projectile **projectiles = NULL;
+Node **players = NULL;
 
 double timer = 0;
 
@@ -1061,7 +1064,7 @@ int main(int argc, char *argv[]) {
     if (SDL_Init(SDL_INIT_EVERYTHING) < 0) printf("Shit. \n");
 
     actual_screen = GPU_Init(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_INIT_DISABLE_VSYNC);
-    SDL_SetWindowTitle(SDL_GetWindowFromID(actual_screen->context->windowID), "Goofy");
+    SDL_SetWindowTitle(SDL_GetWindowFromID(actual_screen->context->windowID), "90s shooter game");
 
     GPU_BlendPresetEnum blend_mode = GPU_BLEND_NORMAL;
 
@@ -1096,7 +1099,8 @@ int main(int argc, char *argv[]) {
     add_queue = array(Node *, 10);
     sync_id_queue = array(Node *, 10);
 
-    
+    projectiles = array(Projectile *, 10);
+    players = array(Node *, 5);
 
     
 
@@ -1150,7 +1154,7 @@ int main(int argc, char *argv[]) {
         }
 
         if (render_timer >= 1000 / FPS && ran_first_tick) {
-            realFps = lerp(realFps, 1000.0 / render_timer, 0.1);
+            realFps = lerp(realFps, 1000.0 / render_timer, 0.02);
             render(mili_to_sec(render_timer) * game_speed);
             render_timer = 0;
         }
@@ -1498,6 +1502,9 @@ void tick(double delta) {
 
     UILabel_set_text(free_tracker, String_concatf(String("Average frees/sec: "), String_from_double(frees / timer, 2)));
     UILabel_update(free_tracker);
+
+    UILabel_set_text(fps_tracker, String_concatf(String("FPS: "), String_from_int((int)realFps)));
+    UILabel_update(fps_tracker);
 
     if (loading_map) {
         init_loading_screen();
@@ -2122,14 +2129,6 @@ void render(double delta) {  // #RENDER
     GPU_Clear(screen);
     GPU_Clear(hud);
     GPU_Clear(actual_screen);
-   
-    String title = String("FPS: ");
-    String fps_text = String_from_int((int)realFps);
-    String final = String_concatf(title, fps_text);
-
-    SDL_SetWindowTitle(get_window(), final.data);
-
-    String_delete(&final);
 
     if (can_render) Node_render(renderer);
     UI_render(hud, UI_get_root());
@@ -3758,16 +3757,22 @@ void _copy_local_code_pressed(UIComponent *comp, bool pressed) {
 void make_ui() {
 
 
+    fps_tracker = UI_alloc(UILabel);
+    UI_set_size(fps_tracker, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 10));
+    UI_set_pos(fps_tracker, V2(0, WINDOW_HEIGHT * 2 / 10));
+    fps_tracker->font_size = 16;
+    UI_add_child(UI_get_root(), fps_tracker);
+
     malloc_tracker = UI_alloc(UILabel);
     UILabel_set_text(malloc_tracker, StringRef("Mallocs: 69420"));
-    UI_set_pos(malloc_tracker, V2(0, WINDOW_HEIGHT * 2 / 10));
+    UI_set_pos(malloc_tracker, V2(0, WINDOW_HEIGHT * 3 / 10));
     UI_set_size(malloc_tracker, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 10));
     malloc_tracker->font_size = 16;
     UI_add_child(UI_get_root(), malloc_tracker);
 
     free_tracker = UI_alloc(UILabel);
     UILabel_set_text(free_tracker, StringRef("Frees: 69420"));
-    UI_set_pos(free_tracker, V2(0, WINDOW_HEIGHT * 3 / 10));
+    UI_set_pos(free_tracker, V2(0, WINDOW_HEIGHT * 4 / 10));
     UI_set_size(free_tracker, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 10));
     free_tracker->font_size = 16;
     UI_add_child(UI_get_root(), free_tracker);
@@ -5240,21 +5245,6 @@ void bomb_on_destroy(Projectile *projectile) {
         player->vel = v2_mul(v2_add(player->vel, kb), to_vec(max_kb));
         player->height_vel = max(height_kb, player->height_vel + height_kb);
     }
-
-    iter_over_all_nodes(node, {
-        if (node->type != PLAYER_ENTITY) continue;
-
-        PlayerEntity *player_entity = node;
-        
-        double dist_sqr = v2_distance_squared(projectile->entity.world_node.pos, player_entity->entity.world_node.pos);
-        
-        
-
-        if (dist_sqr_to_player < MAX_DIST * MAX_DIST) {
-            double dmg = inverse_lerp(MAX_DIST * MAX_DIST, 0, dist_sqr_to_player) * 8;
-            player_entity_take_dmg(player_entity, dmg);
-        }
-    });
 }
 
 Ability pick_random_ability_from_array(Ability arr[], int size) {
@@ -5458,10 +5448,8 @@ void projectile_forcefield_on_tick(Projectile *projectile, double delta) {
 
    
 
-    iter_over_all_nodes(node, {
-        if (node->type != PROJECTILE) continue;
+    foreach (Projectile *proj, projectiles, array_length(projectiles), {
 
-        Projectile *proj = node;
         if (proj == projectile) continue;
 
         double dist_sqr = v2_distance_squared(projectile->entity.world_node.pos, proj->entity.world_node.pos);
@@ -5535,6 +5523,13 @@ void Node_add_child(Node *parent, Node *child) {
 
     child->parent = parent;
     array_append(parent->children, child);
+
+    if (instanceof(child->type, PROJECTILE)) {
+        array_append(projectiles, ((Projectile *)child));
+    }
+    if (child->type == PLAYER_ENTITY) {
+        array_append(players, ((Node *)child));
+    }
 
 
     if (call_ready) {
@@ -5955,6 +5950,26 @@ Node *get_child_by_type(Node *parent, int child_type) {
 void Node_queue_deletion(Node *node) {
     if (node->queued_for_deletion) return;
     node->queued_for_deletion = true;
+    if (instanceof(node->type, PROJECTILE)) {
+        int idx = -1;
+        for (int i = 0; i < array_length(projectiles); i++) {
+            if (projectiles[i] == node) {
+                idx = i;
+                break;
+            }
+        }
+        array_remove(projectiles, idx);
+    }
+    if (node->type == PLAYER_ENTITY) {
+        int idx = -1;
+        for (int i = 0; i < array_length(projectiles); i++) {
+            if (projectiles[i] == node) {
+                idx = i;
+                break;
+            }
+        }
+        array_remove(players, idx);
+    }
     array_append(deletion_queue, node);
 }
 
