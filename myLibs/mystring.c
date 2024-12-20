@@ -135,7 +135,6 @@ String String_from_double(double num, int accuracy) {
     int len = accuracy + get_num_digits((int)num);
     String str = String_new(len + 10); // for the dot and scientific notation (atleast tell me about it??)
     sprintf(str.data, "%.2f", num);
-    printf("%s \n", str.data);
     return str;
 }
 

@@ -42,6 +42,7 @@
 
 #define PARTICLE_GRAVITY -50000
 #define PROJECTILE_GRAVITY -2000
+#define PARTICLE_POOL_SIZE 5000
 
 #define OUT_OF_SCREEN_POS \
     (v2) { WINDOW_WIDTH * 100, WINDOW_HEIGHT * 100 }
@@ -528,6 +529,7 @@ typedef struct Room {
 
 // #FUNC
 
+Particle *create_particle(double life_time);
 
 double get_time_seconds();
 
@@ -957,10 +959,10 @@ Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
 
 // #VAR
 
+Particle **particle_pool = NULL;
 Projectile **projectiles = NULL;
 Node **players = NULL;
 
-double timer = 0;
 
 Thread *wall_threads[NUM_WALL_THREADS] = {0};
 
@@ -1101,7 +1103,7 @@ int main(int argc, char *argv[]) {
 
     projectiles = array(Projectile *, 10);
     players = array(Node *, 5);
-
+    particle_pool = array(Particle *, PARTICLE_POOL_SIZE);
     
 
     root_node = alloc(Node, NODE);
@@ -1299,18 +1301,7 @@ void key_pressed(SDL_Keycode key) {
     }
 
     if (key == SDLK_LCTRL && !player->crouching) {
-        
         player->crouching = true;
-        
-        double current_speed_sqr = v2_length_squared(player->vel);
-        double crouch_speed = 2;
-        v2 crouch_dir = playerForward;
-
-        if (current_speed_sqr < crouch_speed * crouch_speed) {
-            player->vel = v2_mul(crouch_dir, to_vec(crouch_speed));
-        }
-        
-        
     }
 
     if (key == SDLK_r) {
@@ -1419,47 +1410,58 @@ void player_tick(Node *node, double delta) {
         player->handOffset.y = lerp(player->handOffset.y, 0, 0.1);
     }
 
-    double drag = 0;
-    if (is_player_on_floor()) {
-        if (player->crouching) {
-            drag = 0.15;
-        } else {
-            drag = 1;
-        }
-    } 
-
     v2 movement_vec = v2_add(v2_mul(move_dir, to_vec(keyVec.x)), v2_mul(move_dir_rotated, to_vec(keyVec.y)));
-    player->vel = v2_lerp(player->vel, movement_vec, delta * 10.0 * drag);
 
+    double floor_max_speed = 120;
+    double air_max_speed = 200;
 
-    
-    if (player->sprinting) {
-        speed_multiplier *= 1.25;
-        fov = lerp(fov, startFov * 1.2, delta * 7);
+    v2 final_vel = v2_mul(movement_vec, to_vec(player->speed * speed_multiplier));
+
+    double drag = 0.1;
+
+    if (is_player_on_floor()) {
+        final_vel = v2_limit_length(final_vel, floor_max_speed);
+    } else if (player->crouching) {
+        final_vel = v2_limit_length(final_vel, (floor_max_speed + air_max_speed) / 2);
     } else {
-        fov = lerp(fov, startFov, delta * 7);
+        final_vel = v2_limit_length(final_vel, air_max_speed);
+        drag = 0;
     }
 
-    v2 finalVel = v2_mul(player->vel, to_vec(player->speed * speed_multiplier));
+    double movement = v2_length(final_vel) * delta;
 
-    bool move_without_ray = true;
+    v2 movement_dir = v2_normalize(final_vel);
 
-    double movement = v2_length(finalVel) * delta;
+    // close your eyes
+    if (!is_player_on_floor() || player->crouching) {
+        double current_speed = v2_length(player->vel);
 
-    v2 movement_dir = v2_normalize(finalVel);
-
-    // RayCollisionData ray = castRay(player->world_node.pos, movement_dir);
-    // if (ray.hit) {
-    //     double dist = v2_distance(ray.startpos, ray.collpos);
-    //     if (movement > dist) {
-    //         move_without_ray = false;
-    //         player->world_node.pos = v2_add(player->world_node.pos, v2_mul(movement_dir, to_vec(dist - 10)));
-    //     }
-    // }
-
-   
-    player->world_node.pos = v2_add(player->world_node.pos, v2_mul(finalVel, to_vec(delta)));
+        if (current_speed > air_max_speed) {
+            player->vel = v2_limit_length(v2_add(player->vel, v2_mul(final_vel, to_vec(0.1 * delta * 144))), current_speed);
+        } else {
+            if (v2_equal(final_vel, V2_ZERO)) {
+                player->vel = v2_lerp(player->vel, final_vel, drag * delta * 144);
+            } else {
+                player->vel = v2_lerp(player->vel, final_vel, 0.1 * delta * 144);
+            }
+        }
+        if (player->crouching) {
+            player->vel = v2_lerp(player->vel, V2_ZERO, 0.1 * delta);
+        }
+    } else {
+        if (v2_equal(final_vel, V2_ZERO)) {
+            player->vel = v2_lerp(player->vel, final_vel, drag * delta * 144);
+        } else {
+            player->vel = v2_lerp(player->vel, final_vel, 0.1 * delta * 144);
+        }
+    }
     
+    
+   
+    player->world_node.pos = v2_add(player->world_node.pos, v2_mul(player->vel, to_vec(delta)));
+    
+
+
 
     update_pos_timer -= delta;
     if (update_pos_timer <= 0) {
@@ -1495,13 +1497,30 @@ void spriteTick(Sprite *sprite, double delta) {
 // #TICK
 void tick(double delta) {
     
-    timer += delta;
+    cd_print(true, "particle pool size: %d \n", array_length(particle_pool));
 
-    UILabel_set_text(malloc_tracker, String_concatf(String("Average mallocs/sec: "), String_from_double(mallocs / timer, 2)));
-    UILabel_update(malloc_tracker);
+    static double mps_timer = 0;
+    static int mps_counter = 0;
+    static int frees_ps_counter = 0;
+    static const double TRACKER_UPDATE_TIME = 0.5;
 
-    UILabel_set_text(free_tracker, String_concatf(String("Average frees/sec: "), String_from_double(frees / timer, 2)));
-    UILabel_update(free_tracker);
+    mps_timer += delta;
+
+    if (mps_timer > TRACKER_UPDATE_TIME) {
+        mps_timer = 0;
+        
+        UILabel_set_text(malloc_tracker, String_concatf(String("Average mallocs/sec: "), String_from_double((mallocs - mps_counter) / TRACKER_UPDATE_TIME, 2)));
+        UILabel_update(malloc_tracker);
+        
+        UILabel_set_text(free_tracker, String_concatf(String("Average frees/sec: "), String_from_double((frees - frees_ps_counter) / TRACKER_UPDATE_TIME, 2)));
+        UILabel_update(free_tracker);
+
+        mps_counter = mallocs;
+        frees_ps_counter = frees;
+    }
+    
+
+    
 
     UILabel_set_text(fps_tracker, String_concatf(String("FPS: "), String_from_int((int)realFps)));
     UILabel_update(fps_tracker);
@@ -3244,6 +3263,7 @@ Ability ability_secondary_shoot_create() {
 void ability_secondary_shoot_activate(Ability *ability) {
 
     shakeCamera(35, 15, true, 10);
+    rapidfire_sound->volume_multiplier = 0.2;
     play_sound(rapidfire_sound);
 
     Ability *rapid_fire = (Ability *)ability;
@@ -3254,7 +3274,8 @@ void ability_secondary_shoot_activate(Ability *ability) {
     
 
     player->height_vel = -1;
-    player->vel = v2_mul(playerForward, to_vec(-5));
+    //#SKB
+    player->vel = v2_mul(playerForward, to_vec(-300));
 }
 
 void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
@@ -3425,8 +3446,9 @@ void particle_spawner_tick(Node *node, double delta) {
 
 void particle_spawner_spawn(ParticleSpawner *spawner) {
 
+    // Particle *particle = create_particle(spawner->particle_lifetime);
     Particle *particle = alloc(Particle, PARTICLE, spawner->particle_lifetime);
-    
+
     v2 pos = spawner->world_node.pos;
     double height = spawner->world_node.height;
 
@@ -3492,15 +3514,9 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
     
     particle->initial_size = size;
 
-
     Sprite *spawner_sprite = ParticleSpawner_get_sprite(spawner);
-    if (spawner_sprite == NULL) {
-        Sprite *particle_sprite = alloc(Sprite, SPRITE, false);
-        particle_sprite->texture = default_particle_texture;
-        Node_add_child(particle, particle_sprite);
-    } else {
-        Node_add_child(particle, copy_sprite(spawner_sprite, false));
-    }
+
+    Node_add_child(particle, copy_sprite(spawner_sprite, true));
 
     Node_add_child(game_node, particle);
 
@@ -3510,6 +3526,8 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
 void Particle_tick(Node *node, double delta) { // #PT
 
     Particle *particle = node;
+
+    
 
     SDL_Color current_color;
 
@@ -3561,8 +3579,9 @@ void Particle_tick(Node *node, double delta) { // #PT
 
 
    
-
     Effect_tick((Effect *)particle, delta);
+
+    
 }
 
 Ability ability_dash_create() {
@@ -3593,7 +3612,7 @@ void ability_dash_activate(Ability *ability) {
     double dash_distance = MAX_DASH_STR;
 
 
-    // player->vel = v2_mul(dir, to_vec(dash_strength));
+    player->vel = v2_mul(dir, to_vec(300));
     shakeCamera(15, 20, true, 10);
 
 
@@ -5234,8 +5253,8 @@ void bomb_on_destroy(Projectile *projectile) {
 
         double dmg = w * MAX_DMG;
         player_take_dmg(dmg);
-
-        v2 full_kb = v2_mul(v2_dir(projectile->entity.world_node.pos, player->world_node.pos), to_vec(5));
+        //#BKB
+        v2 full_kb = v2_mul(v2_dir(projectile->entity.world_node.pos, player->world_node.pos), to_vec(300));
         double height_full_kb = 300;
         double max_kb = 0.7;
 
@@ -5264,12 +5283,13 @@ void randomize_player_abilities() {
         ability_primary_shoot_create()
     };
     Ability secondary_choices[] = {
-        create_switchshot_ability(),
+        // create_switchshot_ability(),
         ability_secondary_shoot_create(),
         ability_bomb_create()
     };
     Ability utility_choices[] = {
-        ability_forcefield_create()
+        ability_forcefield_create(),
+        ability_dash_create()
     }; //
     //Ability speical_choices[] = {};
 
@@ -5491,10 +5511,24 @@ void Node_delete(Node *node) {
             break;
         }
     }
+
+
+    // if (node->type == PARTICLE && array_length(particle_pool) < PARTICLE_POOL_SIZE - 1) { // pool particles instead of freeing them
+    //     array_append(particle_pool, node);
+    //     if (node->parent != NULL) {
+    //         Node_remove_child(node->parent, node);
+    //         node->parent = NULL;
+    //     }
+        
+    //     return;
+    // }
+
+
+
     
-    while (array_length(node->children) > 0) { // ACCESS OF UNADDRESSABLE MEMORY
+    while (array_length(node->children) > 0) {
         Node *child = node->children[0]; // for debug
-        Node_delete(child); // ACCESS OF UNADDRESSABLE MEMORY
+        Node_delete(child);
     }
 
     if (node->parent != NULL) {
@@ -6783,6 +6817,27 @@ double get_time_seconds() {
     return (double)SDL_GetTicks64() / 1000;
 }
 
+Particle *create_particle(double life_time) {
+    if (array_length(particle_pool) == 0) {
+        printf("Pool is empty. creating new particle. \n");
+        Particle *particle = alloc(Particle, PARTICLE, life_time);
+        Node_add_child(particle, alloc(Sprite, SPRITE, true));
+        return particle;
+    }
+
+    Particle *particle = particle_pool[array_length(particle_pool) - 1];
+    array_remove(particle_pool, array_length(particle_pool) - 1);
+
+    particle->effect.life_time = life_time;
+    particle->effect.life_timer = life_time;
+
+    Node_ready(particle);
+
+    if (get_child_by_type(particle, SPRITE) == NULL) {
+        printf("Bad. \n");
+    }
+    return particle;
+}
 
 // #END
 #pragma GCC diagnostic pop
