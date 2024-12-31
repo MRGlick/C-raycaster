@@ -15,7 +15,6 @@
 #include <sys/time.h>
 #include "hashtable.c"
 #include "inttypes.h"
-#include "reusable_threads.c"
 
 #define RENDERER_FLAGS (SDL_RENDERER_ACCELERATED)
 #define EPSILON 0.001
@@ -53,6 +52,21 @@
     __VA_ARGS__ \
 }
 
+typedef struct SortObject {
+    void *val;
+    double num;
+} SortObject;
+
+typedef struct TextureData { // for anything that involves writing to one big texture
+    int *pixels;
+    int w, h;
+} TextureData;
+
+typedef struct Pixel {
+    Uint8 r, g, b, a;
+} Pixel;
+
+
 const double DEG_TO_RAD = PI / 180;
 const double RAD_TO_DEG = 180 / PI;
 
@@ -75,6 +89,62 @@ u64 get_systime_mili() {
 
 void randomize() {
     srand(get_systime_mili());
+}
+
+Pixel TextureData_get_pixel(TextureData *data, int x, int y) {
+    int p = data->pixels[y * data->w + x];
+
+    // 0xRRGGBBAA
+
+    Uint8 r = p >> 24;
+    Uint8 g = p >> 16;
+    Uint8 b = p >> 8;
+    Uint8 a = p;
+
+    return (Pixel){r, g, b, a};
+}
+
+TextureData *TextureData_from_png(char *file) {
+
+    
+
+    SDL_Surface* surface = GPU_LoadSurface(file);
+    if (!surface) {
+        fprintf(stderr, "SDL_LoadBMP Error: %s\n", SDL_GetError());
+        SDL_Quit();
+        return NULL;
+    }
+
+    // Allocate memory for the pixel data
+    int* pixels = (int*)malloc(surface->w * surface->h * sizeof(int));
+    if (!pixels) {
+        fprintf(stderr, "Memory allocation failed\n");
+        SDL_FreeSurface(surface);
+        return NULL;
+    }
+
+    // Access pixel data from the surface
+    int pitch = surface->pitch;
+    Uint32* pixel_data = (Uint32*)surface->pixels;
+    SDL_PixelFormat* format = surface->format;
+
+    for (int y = 0; y < surface->h; ++y) {
+        for (int x = 0; x < surface->w; ++x) {
+            Uint32 pixel = pixel_data[y * (pitch / 4) + x]; // pitch is in bytes, divide by 4 for Uint32
+            Uint8 r, g, b, a;
+            SDL_GetRGBA(pixel, format, &r, &g, &b, &a);
+            pixels[y * surface->w + x] = (r << 24) | (g << 16) | (b << 8) | a; // 0xRRGGBBAA
+        }
+    }
+
+    TextureData *data = malloc(sizeof(TextureData));
+    data->pixels = pixels;
+    data->w = surface->w;
+    data->h = surface->h;
+
+    SDL_FreeSurface(surface);
+
+    return data;
 }
 
 double mili_to_sec(u64 mili) {
@@ -137,6 +207,9 @@ v2 get_texture_size(GPU_Image *texture) {
     return (v2){texture->w, texture->h};
 }
 
+
+
+
 double rad_to_deg(double radians) {
     return radians * RAD_TO_DEG;
 }
@@ -158,6 +231,70 @@ bool is_point_in_rect(v2 point, v2 rect_pos, v2 rect_size) {
     return (in_range(point.x, rect_pos.x, rect_pos.x + rect_size.x) && in_range(point.y, rect_pos.y, rect_pos.y + rect_size.y));
 }
 #endif
+
+
+// Merge sort
+// Completely destroyed by qsort()
+// Will probably never touch this bc memory
+
+SortObject *merge(SortObject *arr1, SortObject *arr2, int l1, int l2) {
+    SortObject *res = malloc(sizeof(SortObject) * (l1 + l2));
+    int i1 = 0;
+    int i2 = 0;
+    int i = 0;
+    while (i1 < l1 && i2 < l2) {
+        if (arr1[i1].num < arr2[i2].num) {
+            res[i] = arr1[i1];
+            i1++;
+        } else {
+            res[i] = arr2[i2];
+            i2++;
+        }
+        i++;
+    }
+    while (i1 < l1) {
+        res[i] = arr1[i1];
+        i1++;
+        i++;
+    }
+    while (i2 < l2) {
+        res[i] = arr2[i2];
+        i2++;
+        i++;
+    }
+
+    return res;
+}
+
+SortObject *merge_sort(SortObject arr[], int len) {
+    if (len == 1) {
+        SortObject *res = malloc(sizeof(SortObject));
+        res[0] = arr[0];
+        return res;
+    }
+    int l1 = len / 2;
+    int l2 = len % 2 == 0 ? len / 2 : len / 2 + 1;
+    SortObject a1[l1];
+    SortObject a2[l2];
+    for (int i = 0; i < len; i++) {
+        if (i < l1) {
+            a1[i] = arr[i];
+        } else {
+            a2[i - l1] = arr[i];
+        }
+    }
+
+    SortObject *a = merge_sort(a1, l1);
+    SortObject *b = merge_sort(a2, l2);
+    
+    SortObject *sorted = merge(a, b, l1, l2);
+
+    free(a);
+    free(b);
+
+    return sorted;
+
+}
 
 #ifndef GET_NUM_DIGITS
 #define GET_NUM_DIGITS

@@ -299,6 +299,8 @@ DWORD WINAPI _MPServer(void *data) {
     listen(server_socket, SOMAXCONN);
     printf("Listening on port %d. \n", MP_SERVER_PORT);
 
+    MP_is_server = true;
+
     while (TRUE) {
         SOCKET client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_addr_size);
 
@@ -310,7 +312,6 @@ DWORD WINAPI _MPServer(void *data) {
 }
 
 void MPServer() {
-    MP_is_server = true;
     HANDLE h = CreateThread(NULL, 0, _MPServer, NULL, 0, NULL);
     CloseHandle(h);
 }

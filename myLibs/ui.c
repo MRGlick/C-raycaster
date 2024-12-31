@@ -614,7 +614,7 @@ void UI_handle_event(SDL_Event event) {
             _UI_mouse_motion(event.motion);
             break;
         case SDL_QUIT:
-            exit(0);
+            // exit(0);
             break;
     }
 }

@@ -2,13 +2,13 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wincompatible-pointer-types"
 
-#include "profiling.c"
 #include "game_utils.c"
 #include "globals.h"
 #include "ui.c"
 #include "mystring.c"
 #include "multiplayer.c"
 #include <iphlpapi.h>
+#include "reusable_threads.c"
 
 
 // #DEFINITIONS
@@ -42,7 +42,6 @@
 
 #define PARTICLE_GRAVITY -50000
 #define PROJECTILE_GRAVITY -2000
-#define PARTICLE_POOL_SIZE 5000
 
 #define OUT_OF_SCREEN_POS \
     (v2) { WINDOW_WIDTH * 100, WINDOW_HEIGHT * 100 }
@@ -65,7 +64,7 @@
 #define END_STRUCT(typename) enum {typename##_END = __COUNTER__};
 #define instanceof(type, parent_type) (type >= parent_type && type <= parent_type##_END)
 #define node(thing) ((Node *)thing)
-
+#define await(cond) while (!cond) { }
 
 // #PACKETS
 enum PacketTypes {
@@ -529,9 +528,7 @@ typedef struct Room {
 
 // #FUNC
 
-Particle *create_particle(double life_time);
 
-double get_time_seconds();
 
 String get_public_ip();
 
@@ -879,12 +876,12 @@ GPU_Image *hud_image;
 GPU_Target *actual_screen = NULL;
 
 // #UI
-UILabel *malloc_tracker, *free_tracker, *fps_tracker;
+
 UIComponent *pause_menu;
-UILabel *debug_label;
 UIComponent *main_menu, *join_menu, *host_menu;
 UITextLine *port_line, *ip_code_line;
 UILabel *public_code_label = NULL, *local_code_label = NULL;
+UILabel *fps_label = NULL;
 
 // #TEXTURES
 GPU_Image **ff_spark_particle_anim;
@@ -958,11 +955,6 @@ Room rooms[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
 
 
 // #VAR
-
-Particle **particle_pool = NULL;
-Projectile **projectiles = NULL;
-Node **players = NULL;
-
 
 Thread *wall_threads[NUM_WALL_THREADS] = {0};
 
@@ -1038,12 +1030,12 @@ const char *font = "font.ttf";
 const SDL_Color fogColor = {0, 0, 0, 255};
 double tanHalfFOV;
 double tanHalfStartFOV;
-double ambient_light = 0.9;
+double ambient_light = 0.6;
 int floorRenderStart;
 const int tileSize = WINDOW_WIDTH / 30;
 double HEIGHT_TO_XY;
 double XY_TO_HEIGHT;
-double realFps;
+double real_fps;
 bool isCameraShaking = false;
 int camerashake_current_priority = 0;
 int cameraShakeTicks;
@@ -1066,7 +1058,7 @@ int main(int argc, char *argv[]) {
     if (SDL_Init(SDL_INIT_EVERYTHING) < 0) printf("Shit. \n");
 
     actual_screen = GPU_Init(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_INIT_DISABLE_VSYNC);
-    SDL_SetWindowTitle(SDL_GetWindowFromID(actual_screen->context->windowID), "90s shooter game");
+    SDL_SetWindowTitle(SDL_GetWindowFromID(actual_screen->context->windowID), "90s shooter game with multiplayer");
 
     GPU_BlendPresetEnum blend_mode = GPU_BLEND_NORMAL;
 
@@ -1101,9 +1093,8 @@ int main(int argc, char *argv[]) {
     add_queue = array(Node *, 10);
     sync_id_queue = array(Node *, 10);
 
-    projectiles = array(Projectile *, 10);
-    players = array(Node *, 5);
-    particle_pool = array(Particle *, PARTICLE_POOL_SIZE);
+    
+
     
 
     root_node = alloc(Node, NODE);
@@ -1156,22 +1147,21 @@ int main(int argc, char *argv[]) {
         }
 
         if (render_timer >= 1000 / FPS && ran_first_tick) {
-            realFps = lerp(realFps, 1000.0 / render_timer, 0.02);
+            real_fps = lerp(real_fps, 1000.0 / render_timer, 0.1);
             render(mili_to_sec(render_timer) * game_speed);
             render_timer = 0;
         }
     }
 
-    struct player_left_packet packet_data = {.id = client_self_id};
-
-    MPPacket packet = {.type = PACKET_PLAYER_LEFT, .is_broadcast = true, .len = sizeof(packet_data)};
-
-    MPClient_send(packet, &packet_data);
-
-
     if (MP_is_server) {
-        MPPacket hl_packet = {.type = PACKET_HOST_LEFT, .len = 0, .is_broadcast = true};
-        MPServer_send(hl_packet, NULL);
+        MPPacket packet = {.type = PACKET_HOST_LEFT, .len = 0, .is_broadcast = true};
+        MPServer_send(packet, NULL);
+    } else {
+        struct player_left_packet packet_data = {.id = client_self_id};
+
+        MPPacket packet = {.type = PACKET_PLAYER_LEFT, .is_broadcast = true, .len = sizeof(packet_data)};
+
+        MPClient_send(packet, &packet_data);
     }
 
     GPU_FreeImage(screen_image);
@@ -1186,8 +1176,6 @@ void init() {  // #INIT
     for (int i = 0; i < NUM_WALL_THREADS; i++) {
         wall_threads[i] = RT_alloc_thread();
     }
-
-    //test1();
 
     ff_block = create_sound("Sounds/ff_block.wav");
 
@@ -1301,7 +1289,18 @@ void key_pressed(SDL_Keycode key) {
     }
 
     if (key == SDLK_LCTRL && !player->crouching) {
+        
         player->crouching = true;
+        
+        double current_speed_sqr = v2_length_squared(player->vel);
+        double crouch_speed = 2;
+        v2 crouch_dir = playerForward;
+
+        if (current_speed_sqr < crouch_speed * crouch_speed) {
+            player->vel = v2_mul(crouch_dir, to_vec(crouch_speed));
+        }
+        
+        
     }
 
     if (key == SDLK_r) {
@@ -1497,33 +1496,9 @@ void spriteTick(Sprite *sprite, double delta) {
 // #TICK
 void tick(double delta) {
     
-    cd_print(true, "particle pool size: %d \n", array_length(particle_pool));
+    UILabel_set_text(fps_label, String_concatf(String("FPS: "), String_from_double(real_fps, 2)));
+    UILabel_update(fps_label);
 
-    static double mps_timer = 0;
-    static int mps_counter = 0;
-    static int frees_ps_counter = 0;
-    static const double TRACKER_UPDATE_TIME = 0.5;
-
-    mps_timer += delta;
-
-    if (mps_timer > TRACKER_UPDATE_TIME) {
-        mps_timer = 0;
-        
-        UILabel_set_text(malloc_tracker, String_concatf(String("Average mallocs/sec: "), String_from_double((mallocs - mps_counter) / TRACKER_UPDATE_TIME, 2)));
-        UILabel_update(malloc_tracker);
-        
-        UILabel_set_text(free_tracker, String_concatf(String("Average frees/sec: "), String_from_double((frees - frees_ps_counter) / TRACKER_UPDATE_TIME, 2)));
-        UILabel_update(free_tracker);
-
-        mps_counter = mallocs;
-        frees_ps_counter = frees;
-    }
-    
-
-    
-
-    UILabel_set_text(fps_tracker, String_concatf(String("FPS: "), String_from_int((int)realFps)));
-    UILabel_update(fps_tracker);
 
     if (loading_map) {
         init_loading_screen();
@@ -2068,7 +2043,6 @@ void renderWallStripe(RenderObject render_object) {
 
     GPU_SetRGB(texture, rgb[0], rgb[1], rgb[2]);
     GPU_BlitRect(texture, &srcRect, screen, &dstRect);
-
 }
 
 BakedLightColor get_light_color_by_pos(v2 pos, int row_offset, int col_offset) {
@@ -2588,6 +2562,7 @@ GPU_Image *get_sprite_current_texture(Sprite *sprite) {
 
 // Todo: add shoot cooldown for base shooting
 void ability_shoot_activate(Ability *ability) {
+    
     play_sound(player_default_shoot);
     _shoot(0);
 }
@@ -3263,7 +3238,6 @@ Ability ability_secondary_shoot_create() {
 void ability_secondary_shoot_activate(Ability *ability) {
 
     shakeCamera(35, 15, true, 10);
-    rapidfire_sound->volume_multiplier = 0.2;
     play_sound(rapidfire_sound);
 
     Ability *rapid_fire = (Ability *)ability;
@@ -3274,8 +3248,7 @@ void ability_secondary_shoot_activate(Ability *ability) {
     
 
     player->height_vel = -1;
-    //#SKB
-    player->vel = v2_mul(playerForward, to_vec(-300));
+    player->vel = v2_mul(playerForward, to_vec(-5));
 }
 
 void _shoot(double spread) { // the sound isnt attached bc shotgun makes eargasm
@@ -3446,9 +3419,8 @@ void particle_spawner_tick(Node *node, double delta) {
 
 void particle_spawner_spawn(ParticleSpawner *spawner) {
 
-    // Particle *particle = create_particle(spawner->particle_lifetime);
     Particle *particle = alloc(Particle, PARTICLE, spawner->particle_lifetime);
-
+    
     v2 pos = spawner->world_node.pos;
     double height = spawner->world_node.height;
 
@@ -3514,9 +3486,15 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
     
     particle->initial_size = size;
 
-    Sprite *spawner_sprite = ParticleSpawner_get_sprite(spawner);
 
-    Node_add_child(particle, copy_sprite(spawner_sprite, true));
+    Sprite *spawner_sprite = ParticleSpawner_get_sprite(spawner);
+    if (spawner_sprite == NULL) {
+        Sprite *particle_sprite = alloc(Sprite, SPRITE, false);
+        particle_sprite->texture = default_particle_texture;
+        Node_add_child(particle, particle_sprite);
+    } else {
+        Node_add_child(particle, copy_sprite(spawner_sprite, false));
+    }
 
     Node_add_child(game_node, particle);
 
@@ -3526,8 +3504,6 @@ void particle_spawner_spawn(ParticleSpawner *spawner) {
 void Particle_tick(Node *node, double delta) { // #PT
 
     Particle *particle = node;
-
-    
 
     SDL_Color current_color;
 
@@ -3579,9 +3555,8 @@ void Particle_tick(Node *node, double delta) { // #PT
 
 
    
-    Effect_tick((Effect *)particle, delta);
 
-    
+    Effect_tick((Effect *)particle, delta);
 }
 
 Ability ability_dash_create() {
@@ -3612,7 +3587,7 @@ void ability_dash_activate(Ability *ability) {
     double dash_distance = MAX_DASH_STR;
 
 
-    player->vel = v2_mul(dir, to_vec(300));
+    // player->vel = v2_mul(dir, to_vec(dash_strength));
     shakeCamera(15, 20, true, 10);
 
 
@@ -3706,7 +3681,7 @@ void _h_play_pressed(UIComponent *comp, bool pressed) {
     public_ip = get_public_ip();
     local_ip = get_local_ip();
 
-    StringRef port = (StringRef){.data = port_line->text, .len = array_length(port_line->text), .ref = true};
+    String port = String_ncopy_from_literal(port_line->text, array_length(port_line->text));
     if (port.len == 0) return;
 
     public_code = scramble_ip_and_port(public_ip, port);
@@ -3721,7 +3696,9 @@ void _h_play_pressed(UIComponent *comp, bool pressed) {
 
     MPServer();
 
-    printf("Attempting to connect at local ip: %s:%d \n", local_ip.data, port.data);
+    printf("Attempting to connect at local ip: %s:%s \n", local_ip.data, port.data);
+
+    await(MP_is_server);
 
     MPClient(local_ip.data);
 
@@ -3733,10 +3710,14 @@ void _h_play_pressed(UIComponent *comp, bool pressed) {
 
     String_delete(&clipboard_string);
 
+    String_delete(&port);
+
     started_game = true;
     main_menu->visible = false;
     join_menu->visible = false;
     host_menu->visible = false;
+
+    
 
 }
 
@@ -3775,28 +3756,6 @@ void _copy_local_code_pressed(UIComponent *comp, bool pressed) {
 //#MAKE UI
 void make_ui() {
 
-
-    fps_tracker = UI_alloc(UILabel);
-    UI_set_size(fps_tracker, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 10));
-    UI_set_pos(fps_tracker, V2(0, WINDOW_HEIGHT * 2 / 10));
-    fps_tracker->font_size = 16;
-    UI_add_child(UI_get_root(), fps_tracker);
-
-    malloc_tracker = UI_alloc(UILabel);
-    UILabel_set_text(malloc_tracker, StringRef("Mallocs: 69420"));
-    UI_set_pos(malloc_tracker, V2(0, WINDOW_HEIGHT * 3 / 10));
-    UI_set_size(malloc_tracker, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 10));
-    malloc_tracker->font_size = 16;
-    UI_add_child(UI_get_root(), malloc_tracker);
-
-    free_tracker = UI_alloc(UILabel);
-    UILabel_set_text(free_tracker, StringRef("Frees: 69420"));
-    UI_set_pos(free_tracker, V2(0, WINDOW_HEIGHT * 4 / 10));
-    UI_set_size(free_tracker, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 10));
-    free_tracker->font_size = 16;
-    UI_add_child(UI_get_root(), free_tracker);
-
-
     UIStyle
     copy_button_default = {
         .bg_color = Color(50, 200, 50, 150),
@@ -3814,6 +3773,15 @@ void make_ui() {
         .bg_color = Color(0, 0, 0, 150),
         .fg_color = Color(255, 255, 255, 255)
     };
+
+
+    fps_label = UI_alloc(UILabel);
+
+    UILabel_set_text(fps_label, StringRef("FPS: 60"));
+    fps_label->font_size = 20;
+    UI_set_size(fps_label, V2(WINDOW_WIDTH / 4, WINDOW_HEIGHT / 10));
+    UI_set_global_pos(fps_label, V2(WINDOW_WIDTH * 0.03, WINDOW_HEIGHT * 0.2));
+    UI_add_child(UI_get_root(), fps_label);
 
 
     pause_menu = UI_alloc(UIComponent);
@@ -3897,17 +3865,6 @@ void make_ui() {
 
     pause_menu->visible = false;
     UI_add_child(UI_get_root(), pause_menu);
-
-
-    debug_label = UI_alloc(UILabel);
-
-    UILabel_set_text(debug_label, StringRef("[]:"));
-    
-    debug_label->font_size = 15;
-
-    UI_set_pos(debug_label, V2_ZERO);
-    UI_set_size(debug_label, (v2){WINDOW_WIDTH, WINDOW_HEIGHT / 5});
-    UI_add_child(UI_get_root(), debug_label);
 
     // #MM -----------------------------------------------
 
@@ -4463,11 +4420,6 @@ bool is_player_on_floor() {
     return player->world_node.height <= player->tallness * 0.8;
 }
 
-// takes ownership of 'string'
-void write_to_debug_label(String string) {
-    UILabel_set_text(debug_label, string);
-    UILabel_update(debug_label);
-}
 
 void on_player_connect(SOCKET player_socket) {
     int player_id = next_id++;
@@ -4598,10 +4550,6 @@ void client_add_player_entity(int id) {
     printf("Player joined! ID: %d \n", player_entity->id);
 
     String label = String_concatf(String("Scene: Added player with ID: "), String_from_int(player_entity->id));
-
-    write_to_debug_label(label);
-
-    UI_update(debug_label);
 
     Node_add_child(game_node, player_entity);
 
@@ -4933,8 +4881,10 @@ void init_textures() {
     default_particle_texture = load_texture("Textures/base_particle.png");
 
     player_default_hurt = create_sound("Sounds/player_default_hurt.wav");
+    player_default_hurt->volume_multiplier = 0.3;
 
     player_default_shoot = create_sound("Sounds/player_default_shoot.wav");
+    player_default_shoot->volume_multiplier = 0.3;
 
     mimran_jumpscare = load_texture("Textures/scary_monster2.png");
 
@@ -5253,8 +5203,8 @@ void bomb_on_destroy(Projectile *projectile) {
 
         double dmg = w * MAX_DMG;
         player_take_dmg(dmg);
-        //#BKB
-        v2 full_kb = v2_mul(v2_dir(projectile->entity.world_node.pos, player->world_node.pos), to_vec(300));
+
+        v2 full_kb = v2_mul(v2_dir(projectile->entity.world_node.pos, player->world_node.pos), to_vec(5));
         double height_full_kb = 300;
         double max_kb = 0.7;
 
@@ -5264,6 +5214,21 @@ void bomb_on_destroy(Projectile *projectile) {
         player->vel = v2_mul(v2_add(player->vel, kb), to_vec(max_kb));
         player->height_vel = max(height_kb, player->height_vel + height_kb);
     }
+
+    iter_over_all_nodes(node, {
+        if (node->type != PLAYER_ENTITY) continue;
+
+        PlayerEntity *player_entity = node;
+        
+        double dist_sqr = v2_distance_squared(projectile->entity.world_node.pos, player_entity->entity.world_node.pos);
+        
+        
+
+        if (dist_sqr_to_player < MAX_DIST * MAX_DIST) {
+            double dmg = inverse_lerp(MAX_DIST * MAX_DIST, 0, dist_sqr_to_player) * 8;
+            player_entity_take_dmg(player_entity, dmg);
+        }
+    });
 }
 
 Ability pick_random_ability_from_array(Ability arr[], int size) {
@@ -5288,8 +5253,7 @@ void randomize_player_abilities() {
         ability_bomb_create()
     };
     Ability utility_choices[] = {
-        ability_forcefield_create(),
-        ability_dash_create()
+        ability_forcefield_create()
     }; //
     //Ability speical_choices[] = {};
 
@@ -5468,8 +5432,10 @@ void projectile_forcefield_on_tick(Projectile *projectile, double delta) {
 
    
 
-    foreach (Projectile *proj, projectiles, array_length(projectiles), {
+    iter_over_all_nodes(node, {
+        if (node->type != PROJECTILE) continue;
 
+        Projectile *proj = node;
         if (proj == projectile) continue;
 
         double dist_sqr = v2_distance_squared(projectile->entity.world_node.pos, proj->entity.world_node.pos);
@@ -5511,24 +5477,10 @@ void Node_delete(Node *node) {
             break;
         }
     }
-
-
-    // if (node->type == PARTICLE && array_length(particle_pool) < PARTICLE_POOL_SIZE - 1) { // pool particles instead of freeing them
-    //     array_append(particle_pool, node);
-    //     if (node->parent != NULL) {
-    //         Node_remove_child(node->parent, node);
-    //         node->parent = NULL;
-    //     }
-        
-    //     return;
-    // }
-
-
-
     
-    while (array_length(node->children) > 0) {
+    while (array_length(node->children) > 0) { // ACCESS OF UNADDRESSABLE MEMORY
         Node *child = node->children[0]; // for debug
-        Node_delete(child);
+        Node_delete(child); // ACCESS OF UNADDRESSABLE MEMORY
     }
 
     if (node->parent != NULL) {
@@ -5557,13 +5509,6 @@ void Node_add_child(Node *parent, Node *child) {
 
     child->parent = parent;
     array_append(parent->children, child);
-
-    if (instanceof(child->type, PROJECTILE)) {
-        array_append(projectiles, ((Projectile *)child));
-    }
-    if (child->type == PLAYER_ENTITY) {
-        array_append(players, ((Node *)child));
-    }
 
 
     if (call_ready) {
@@ -5984,26 +5929,6 @@ Node *get_child_by_type(Node *parent, int child_type) {
 void Node_queue_deletion(Node *node) {
     if (node->queued_for_deletion) return;
     node->queued_for_deletion = true;
-    if (instanceof(node->type, PROJECTILE)) {
-        int idx = -1;
-        for (int i = 0; i < array_length(projectiles); i++) {
-            if (projectiles[i] == node) {
-                idx = i;
-                break;
-            }
-        }
-        array_remove(projectiles, idx);
-    }
-    if (node->type == PLAYER_ENTITY) {
-        int idx = -1;
-        for (int i = 0; i < array_length(projectiles); i++) {
-            if (projectiles[i] == node) {
-                idx = i;
-                break;
-            }
-        }
-        array_remove(players, idx);
-    }
     array_append(deletion_queue, node);
 }
 
@@ -6813,31 +6738,6 @@ String get_public_ip() {
 }
 
 
-double get_time_seconds() {
-    return (double)SDL_GetTicks64() / 1000;
-}
-
-Particle *create_particle(double life_time) {
-    if (array_length(particle_pool) == 0) {
-        printf("Pool is empty. creating new particle. \n");
-        Particle *particle = alloc(Particle, PARTICLE, life_time);
-        Node_add_child(particle, alloc(Sprite, SPRITE, true));
-        return particle;
-    }
-
-    Particle *particle = particle_pool[array_length(particle_pool) - 1];
-    array_remove(particle_pool, array_length(particle_pool) - 1);
-
-    particle->effect.life_time = life_time;
-    particle->effect.life_timer = life_time;
-
-    Node_ready(particle);
-
-    if (get_child_by_type(particle, SPRITE) == NULL) {
-        printf("Bad. \n");
-    }
-    return particle;
-}
 
 // #END
 #pragma GCC diagnostic pop
