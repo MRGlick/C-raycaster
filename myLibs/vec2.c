@@ -22,8 +22,8 @@ typedef struct v2 {
 
 #define V2(a, b) (v2){a, b}
 
-#define min(a, b) a < b ? a : b
-#define max(a, b) a > b ? a : b
+#define min(a, b) (a < b ? a : b)
+#define max(a, b) (a > b ? a : b)
 
 // double sin_table[10800];
 // double cos_table[10800];

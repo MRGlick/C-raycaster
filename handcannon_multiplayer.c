@@ -190,7 +190,8 @@ DEF_STRUCT(Ability, ABILITY, {
     void (*activate)(struct Ability *);
     void (*tick)(struct Ability *, double);
     void (*before_activate)(struct Ability *);
-    bool can_use;
+    int max_uses;
+    int uses;
     double cooldown;
     double timer;
     double delay;
@@ -536,6 +537,10 @@ typedef struct Room {
 } Room;
 
 // #FUNC
+
+void left_mouse_pressed(bool pressed);
+
+void right_mouse_pressed(bool pressed);
 
 void SpatialSound_delete(SpatialSound *sound);
 
@@ -1070,6 +1075,7 @@ const double PLAYER_SHOOT_COOLDOWN = 0.5;
 int main(int argc, char *argv[]) {
     if (SDL_Init(SDL_INIT_EVERYTHING) < 0) printf("Shit. \n");
 
+
     actual_screen = GPU_Init(WINDOW_WIDTH, WINDOW_HEIGHT, GPU_INIT_DISABLE_VSYNC);
     SDL_SetWindowTitle(SDL_GetWindowFromID(actual_screen->context->windowID), "90s shooter game with multiplayer");
 
@@ -1195,9 +1201,10 @@ void init() {  // #INIT
     bomb_explosion = create_sound("Sounds/explosion.wav");
 
     randomize();
-    client_self_color.r = randi_range(25, 255);
-    client_self_color.g = randi_range(25, 255);
-    client_self_color.b = randi_range(25, 255);
+
+    hsv_to_rgb(randf_range(0, 360), 1, 1, &client_self_color.r, &client_self_color.g, &client_self_color.b);
+
+
     client_self_color.a = 255;
 
     GPU_SetBlendMode(screen_image, GPU_BLEND_ADD);
@@ -1270,18 +1277,30 @@ void handle_input(SDL_Event event) {
             break;
         case SDL_MOUSEBUTTONDOWN:
             if (event.button.button == SDL_BUTTON_LEFT) {
-                isLMouseDown = true;
+                if (!isLMouseDown) {
+                    left_mouse_pressed(true);
+                    isLMouseDown = true;
+                }
             }
             if (event.button.button == SDL_BUTTON_RIGHT) {
-                isRMouseDown = true;
+                if (!isRMouseDown) {
+                    isRMouseDown = true;
+                    right_mouse_pressed(true);
+                }
             }
             break;
         case SDL_MOUSEBUTTONUP:
             if (event.button.button == SDL_BUTTON_LEFT) {
-                isLMouseDown = false;
+                if (isLMouseDown) {
+                    isLMouseDown = false;
+                    left_mouse_pressed(false);
+                }
             }
             if (event.button.button == SDL_BUTTON_RIGHT) {
-                isRMouseDown = false;
+                if (isRMouseDown) {
+                    isRMouseDown = false;
+                    right_mouse_pressed(false);
+                }
             }
             break;
     }
@@ -1401,13 +1420,6 @@ void player_tick(Node *node, double delta) {
     ability_tick(player->secondary, delta);
     ability_tick(player->utility, delta);
     ability_tick(player->special, delta);
-
-    if (isLMouseDown) {
-        activate_ability(player->primary);
-    }
-    if (isRMouseDown) {
-        activate_ability(player->secondary);
-    }
 
     v2 right = {1, 0};
     v2 move_dir = v2_rotate_to(right, deg_to_rad(player->angle));
@@ -3201,7 +3213,8 @@ Ability ability_primary_shoot_create() {
         .activate = ability_shoot_activate,
         .tick = NULL,
         .before_activate = NULL,
-        .can_use = false,
+        .max_uses = 1,
+        .uses = 1,
         .cooldown = 0.5,
         .timer = 0.2,
         .type = A_PRIMARY,
@@ -3212,11 +3225,11 @@ Ability ability_primary_shoot_create() {
 }
 
 void default_ability_tick(Ability *ability, double delta) {
-    if (!ability->can_use) {
+    if (ability->uses < ability->max_uses) {
         ability->timer -= delta;
         if (ability->timer <= 0) {
             ability->timer = ability->cooldown;
-            ability->can_use = true;
+            ability->uses++;
         }
     }
 
@@ -3235,7 +3248,8 @@ Ability ability_secondary_shoot_create() {
         .activate = ability_secondary_shoot_activate,
         .tick = NULL,
         .before_activate = NULL,
-        .can_use = false,
+        .uses = 1,
+        .max_uses = 1,
         .cooldown = 5,
         .delay = 0,
         .delay_timer = -1000,
@@ -3578,7 +3592,8 @@ Ability ability_dash_create() {
         .activate = ability_dash_activate,
         .tick = NULL,
         .before_activate = ability_dash_before_activate,
-        .can_use = true,
+        .uses = 1,
+        .max_uses = 1,
         .cooldown = 3,
         .timer = 3,
         .type = A_UTILITY,
@@ -3628,7 +3643,7 @@ void ability_dash_activate(Ability *ability) {
 
 void activate_ability(Ability *ability) {
     
-    if (ability == NULL || !ability->can_use || paused) {
+    if (ability == NULL || (ability->uses == 0) || paused) {
         if (ability == NULL) {
             commit_sudoku();
         }
@@ -3636,7 +3651,7 @@ void activate_ability(Ability *ability) {
     }
 
 
-    ability->can_use = false;
+    ability->uses--;
 
     if (ability->before_activate != NULL) {
         ability->before_activate(ability);
@@ -5013,7 +5028,8 @@ Ability ability_bomb_create() {
     Ability ability = {
         .activate = ability_bomb_activate,
         .before_activate = NULL,
-        .can_use = false,
+        .uses = 0,
+        .max_uses = 3,
         .cooldown = 3,
         .delay = 0,
         .delay_timer = 0,
@@ -5329,7 +5345,8 @@ Ability ability_forcefield_create() {
     Ability ability = {
         .activate = ability_forcefield_activate,
         .before_activate = NULL,
-        .can_use = false,
+        .uses = 1,
+        .max_uses = 1,
         .cooldown = 10,
         .timer = 0,
         .delay_timer = 0,
@@ -6328,7 +6345,8 @@ Node *find_node_by_sync_id(int sync_id) {
 Ability create_switchshot_ability() {
     Ability a = {
         .activate = switchshot_activate,
-        .can_use = false,
+        .uses = 1,
+        .max_uses = 1,
         .cooldown = 0.2,
         .delay = 0,
         .delay_timer = 0,
@@ -6832,6 +6850,18 @@ void SpatialSound_tick(SpatialSound *sound, double delta) {
 void SpatialSound_delete(SpatialSound *sound) {
     pause_sound(sound->sound);
     free_sound(sound->sound);
+}
+
+void left_mouse_pressed(bool pressed) {
+    if (pressed && started_game) {
+        activate_ability(player->primary);
+    }
+}
+
+void right_mouse_pressed(bool pressed) {
+    if (pressed && started_game) {
+        activate_ability(player->secondary);
+    }
 }
 
 

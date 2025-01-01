@@ -33,6 +33,8 @@
 // overdose_on_...
 // commit_sudoku
 
+#define float_equal(a, b) in_range(a, b - EPSILON, b + EPSILON)
+
 #define commit_sudoku() *(int *)NULL = 42
 
 #define init_grid(type, rows, cols, default, result) do { \
@@ -69,6 +71,108 @@ typedef struct Pixel {
 
 const double DEG_TO_RAD = PI / 180;
 const double RAD_TO_DEG = 180 / PI;
+
+double lerp(double a, double b, double w) {
+    return a + (b - a) * w;
+}
+
+double inverse_lerp(double a, double b, double mid) {
+    return (mid - a) / (b - a);
+}
+
+
+void hsv_to_rgb(double h, double s, double v, int *r_out, int *g_out, int *b_out) {
+
+    double r = 0, g = 0, b = 0;
+
+    h = fmod(h, 360);
+
+    if (h < 60) {
+        r = 1;
+        g = lerp(0, 1, h / 60);
+        b = 0;
+    } else if (h < 120) {
+        g = 1;
+        b = 0;
+        r = lerp(1, 0, (h - 60) / 60);
+    } else if (h < 180) {
+        r = 0;
+        g = 1;
+        b = lerp(0, 1, (h - 120) / 60);
+    } else if (h < 240) {
+        r = 0;
+        b = 1;
+        g = lerp(1, 0, (h - 180) / 60);
+    } else if (h < 300) {
+        g = 0;
+        b = 1;
+        r = lerp(0, 1, (h - 240) / 60);
+    } else {
+        r = 1;
+        g = 0;
+        b = lerp(1, 0, (h - 300) / 60);
+    }
+
+
+    r = lerp(r, 1, 1 - s);
+    g = lerp(g, 1, 1 - s);
+    b = lerp(b, 1, 1 - s);
+
+    r *= v;
+    g *= v;
+    b *= v;
+
+    *r_out = r * 255;
+    *g_out = g * 255;
+    *b_out = b * 255;
+}
+
+void rgb_to_hsv(int r, int g, int b, double *h_out, double *s_out, double *v_out) {
+    double h, s, v;
+
+
+    double dr = (double)r / 255, dg = (double)g / 255, db = (double)b / 255;
+    
+    double max_val = max(dr, max(dg, db));
+    double min_val = min(dr, min(dg, db));
+
+    s = (max_val - min_val) / max_val;
+    v = max_val;
+
+    double r2 = (dr) / v;
+    double g2 = (dg) / v;
+    double b2 = (db) / v;
+
+    r2 = (r2 - 1 + s) / s;
+    g2 = (g2 - 1 + s) / s;
+    b2 = (b2 - 1 + s) / s;
+
+    if (float_equal(r2, 1) && float_equal(b2, 0)) {
+        h = inverse_lerp(0, 1, g2) * 60;
+
+    } else if (float_equal(g2, 1) && float_equal(b2, 0)) {
+        h = inverse_lerp(1, 0, r2) * 60 + 60;
+
+    } else if (float_equal(r2, 0) && float_equal(g2, 1)) {
+        h = inverse_lerp(0, 1, b2) * 60 + 120;
+
+    } else if (float_equal(r2, 0) && float_equal(b2, 1)) {
+        h = inverse_lerp(1, 0, g2) * 60 + 180;
+
+    } else if (float_equal(g2, 0) && float_equal(b2, 1)) {
+        h = inverse_lerp(0, 1, r2) * 60 + 240;
+
+    } else {
+        h = inverse_lerp(1, 0, b2) * 60 + 300;
+    }
+
+    *h_out = h;
+    *s_out = s;
+    *v_out = v;
+
+}
+
+
 
 v2 get_screen_size() {
     SDL_DisplayMode mode;
@@ -217,13 +321,6 @@ double deg_to_rad(double degrees) {
     return degrees * DEG_TO_RAD;
 }
 
-double lerp(double a, double b, double w) {
-    return a + (b - a) * w;
-}
-
-double inverse_lerp(double a, double b, double mid) {
-    return (mid - a) / (b - a);
-}
 
 #ifndef IS_POINT_IN_RECT_FUNC
 #define IS_POINT_IN_RECT_FUNC
