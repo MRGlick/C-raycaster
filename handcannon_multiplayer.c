@@ -3881,7 +3881,7 @@ void make_ui() {
     UILabel *mm_title = UI_alloc(UILabel);
     mm_title->alignment_x = ALIGNMENT_CENTER;
     mm_title->alignment_y = ALIGNMENT_CENTER;
-    UILabel_set_text(mm_title, StringRef("Handcannon"));
+    UILabel_set_text(mm_title, StringRef("Handshooter"));
     mm_title->font_size = 64;
     UI_set_size(mm_title, V2(WINDOW_WIDTH, WINDOW_HEIGHT / 5));
     UI_center_around_pos(mm_title, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 5));
