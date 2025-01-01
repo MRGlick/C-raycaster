@@ -289,10 +289,13 @@ DEF_STRUCT(Node, NODE, {
         double height;
     });
 
+        DEF_STRUCT(SpatialSound, SPATIAL_SOUND, {
+            WorldNode world_node;
+            Sound *sound;
+        })
+
         DEF_STRUCT(Entity, ENTITY, {
             WorldNode world_node;
-            // v2 pos, size;
-            // double height;
             bool affected_by_light;
             SDL_Color color;
         });

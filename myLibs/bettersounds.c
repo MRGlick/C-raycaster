@@ -133,6 +133,25 @@ Sound *create_sound(const char *filename) {
     return sound;
 }
 
+void free_sound(Sound *sound) {
+
+    int idx = -1;
+    for (int i = 0; i < array_length(BS_active_sounds); i++) {
+        if (BS_active_sounds == sound) {
+            idx = i;
+            break;
+        }
+    }
+
+    if (idx != -1) {
+        array_remove(BS_active_sounds, idx);
+    }
+
+    SDL_FreeWAV(sound->data);
+
+    free(sound);
+}
+
 Sound *play_sound(Sound *sound) {
     sound->active = true;
     sound->current_sample = 0;
