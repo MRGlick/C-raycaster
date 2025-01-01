@@ -281,6 +281,16 @@ DEF_STRUCT(Node, NODE, {
     });
 
     END_STRUCT(DIR_SPRITE);
+    
+    DEF_STRUCT(SpatialSound, SPATIAL_SOUND, {
+        Node node;
+        double falloff_min_radius;
+        double falloff_max_radius;
+
+        double volume;
+
+        Sound *sound;
+    });
 
     DEF_STRUCT(WorldNode, WORLD_NODE, {
         Node node;
@@ -289,10 +299,6 @@ DEF_STRUCT(Node, NODE, {
         double height;
     });
 
-        DEF_STRUCT(SpatialSound, SPATIAL_SOUND, {
-            WorldNode world_node;
-            Sound *sound;
-        })
 
         DEF_STRUCT(Entity, ENTITY, {
             WorldNode world_node;
@@ -531,7 +537,11 @@ typedef struct Room {
 
 // #FUNC
 
+void SpatialSound_delete(SpatialSound *sound);
 
+void SpatialSound_tick(SpatialSound *sound, double delta);
+
+SpatialSound SpatialSound_new(Sound *sound);
 
 String get_public_ip();
 
@@ -3241,6 +3251,7 @@ Ability ability_secondary_shoot_create() {
 void ability_secondary_shoot_activate(Ability *ability) {
 
     shakeCamera(35, 15, true, 10);
+    rapidfire_sound->volume_multiplier = 0.3;
     play_sound(rapidfire_sound);
 
     Ability *rapid_fire = (Ability *)ability;
@@ -5104,13 +5115,24 @@ Projectile *create_bomb_projectile(v2 pos, v2 start_vel) {
 
     Node_add_child(projectile, collider);
 
+
+    Sound *hiss = create_sound("Sounds/bomb_hiss.wav");
+
+    SpatialSound *hiss_sound = alloc(SpatialSound, SPATIAL_SOUND, hiss);
+    hiss_sound->falloff_min_radius = 0;
+    hiss_sound->falloff_max_radius = 150;
+
+    Node_add_child(projectile, hiss_sound);
+    play_sound(hiss_sound->sound);
+
+
     projectile->type = PROJ_BOMB;
 
     projectile->height_accel = PROJECTILE_GRAVITY;
     projectile->bounciness = 1.0;
     projectile->destroy_on_floor = true;
     projectile->entity.world_node.pos = pos;
-    projectile->vel = v2_add(start_vel, v2_mul(player->vel, to_vec(0.5)));
+    projectile->vel = v2_add(start_vel, v2_mul(player->vel, to_vec(0.002)));
     projectile->height_vel = (is_player_on_floor()? 0 : player->height_vel * 0.5) + player->pitch * -3;
     projectile->entity.world_node.size = to_vec(8000);
     projectile->on_destruction = bomb_on_destroy;
@@ -5403,6 +5425,25 @@ Projectile *create_forcefield_projectile() {
     // particle_spawner->height_radial_accel = 50 * XY_TO_HEIGHT;
     Node_add_child(projectile, particle_spawner);
 
+
+    Sound *ambience = create_sound("Sounds/forcefield_ambience.wav");
+
+    SpatialSound *ambience_sound = alloc(SpatialSound, SPATIAL_SOUND, ambience);
+
+    ambience_sound->falloff_max_radius = 80;
+    ambience_sound->falloff_min_radius = 10;
+
+    ambience_sound->volume = 0.4;
+
+    ambience_sound->sound->loop = true;
+
+    play_sound(ambience_sound->sound);
+
+    Node_add_child(projectile, ambience_sound);
+
+
+
+
     return projectile;
 }
 
@@ -5449,6 +5490,14 @@ void projectile_forcefield_on_tick(Projectile *projectile, double delta) {
         }
        
     });
+
+
+    SpatialSound *ambience = get_child_by_type(projectile, SPATIAL_SOUND);
+
+    ambience->volume = 0.7 * projectile->life_timer / projectile->life_time;
+
+
+
 }
 
 Node Node_new() {
@@ -6740,6 +6789,50 @@ String get_public_ip() {
     return ip;
 }
 
+
+SpatialSound SpatialSound_new(Sound *sound) {
+    SpatialSound s = {0};
+    s.node = new(Node, NODE);
+    s.sound = sound;
+
+    s.falloff_min_radius = 10;
+    s.falloff_max_radius = 130;
+    s.volume = 1;
+
+    node(&s)->on_tick = SpatialSound_tick; 
+    node(&s)->on_delete = SpatialSound_delete;
+
+    return s;
+}
+
+void SpatialSound_tick(SpatialSound *sound, double delta) {
+
+    if (!sound->sound->active
+        || !instanceof(node(sound)->parent->type, WORLD_NODE)) return;
+
+    WorldNode *parent = node(sound)->parent;
+
+    double dist_sqr = v2_distance_squared(player->world_node.pos, parent->pos);
+    double min_rad_sqr = sound->falloff_min_radius * sound->falloff_min_radius;
+    double max_rad_sqr = sound->falloff_max_radius * sound->falloff_max_radius;
+
+    if (dist_sqr < min_rad_sqr) {
+        sound->sound->volume_multiplier = sound->volume;
+    } else if (dist_sqr < max_rad_sqr) {
+
+        double dist_idx = inverse_lerp(min_rad_sqr, max_rad_sqr, dist_sqr);
+
+        sound->sound->volume_multiplier = sound->volume * lerp(sound->volume, 0, dist_idx * dist_idx);
+    } else {
+        sound->sound->volume_multiplier = 0;
+    }
+
+}
+
+void SpatialSound_delete(SpatialSound *sound) {
+    pause_sound(sound->sound);
+    free_sound(sound->sound);
+}
 
 
 // #END

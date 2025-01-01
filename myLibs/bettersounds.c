@@ -137,7 +137,7 @@ void free_sound(Sound *sound) {
 
     int idx = -1;
     for (int i = 0; i < array_length(BS_active_sounds); i++) {
-        if (BS_active_sounds == sound) {
+        if (BS_active_sounds[i] == sound) {
             idx = i;
             break;
         }
