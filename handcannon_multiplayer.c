@@ -3804,46 +3804,53 @@ void make_ui() {
     };
 
 
-    fps_label = UI_alloc(UILabel);
-
-    UILabel_set_text(fps_label, StringRef("FPS: 60"));
-    fps_label->font_size = 20;
-    UI_set_size(fps_label, V2(WINDOW_WIDTH / 4, WINDOW_HEIGHT / 10));
-    UI_set_global_pos(fps_label, V2(WINDOW_WIDTH * 0.03, WINDOW_HEIGHT * 0.2));
-    UI_add_child(UI_get_root(), fps_label);
-
-
-    pause_menu = UI_alloc(UIComponent);
-
-    UI_set_size(pause_menu, (v2){WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2});
-    UI_set_pos(pause_menu, (v2){WINDOW_WIDTH / 4, WINDOW_HEIGHT / 4});
-
-    pause_menu->default_style = (UIStyle){.bg_color = Color(0, 0, 0, 125), .fg_color = Color(255, 255, 255, 255)};
-    
-    UILabel *paused_label = UI_alloc(UILabel);
-    UI_add_child(pause_menu, paused_label);
-    
-    UILabel_set_text(paused_label, String("Paused!"));
-    UILabel_set_alignment(paused_label, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
-    UI_set_pos(paused_label, (v2){0, 50});
-    UI_set_size(paused_label, (v2){WINDOW_WIDTH / 2, WINDOW_WIDTH / 16});
-
-    UIButton *continue_button = UI_alloc(UIButton);
-    UI_add_child(pause_menu, continue_button);
+    fps_label = UI_alloc(
+        UILabel,
+        fps_label,
+        fps_label->font_size = 20; 
+        fps_label->alignment_x = ALIGNMENT_LEFT;
+        UILabel_set_text(fps_label, StringRef("FPS: 60"));
+        UI_set_size(fps_label, V2(WINDOW_WIDTH / 4, WINDOW_HEIGHT / 10));
+        UI_set_global_pos(fps_label, V2(WINDOW_WIDTH * 0.03, WINDOW_HEIGHT * 0.2));
+        UI_add_child(UI_get_root(), fps_label);
+    );
     
     
-    UI_set_size(continue_button, v2_div(UI_get_size(paused_label), (v2){2, 1}));
-    UI_center_around_pos(continue_button, (v2){WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2 + 50});
-    UILabel_set_alignment(continue_button, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
-    UILabel_set_text(continue_button, String("Continue"));
 
-    continue_button->custom_on_click = _continue_button_pressed;
-
+    UIStyle pause_menu_style = {.bg_color = Color(0, 0, 0, 125), .fg_color = Color(255, 255, 255, 255)};
     UIStyle default_style = (UIStyle){.bg_color = Color(0, 0, 0, 175), .fg_color = Color(255, 255, 255, 255)};
 
-    UI_set(UIComponent, continue_button, default_style, default_style);
+    pause_menu = UI_alloc(
+        UIComponent,
+        pause_menu,
+        UI_set_size(pause_menu, (v2){WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2});
+        UI_set_pos(pause_menu, (v2){WINDOW_WIDTH / 4, WINDOW_HEIGHT / 4});
+        pause_menu->default_style = pause_menu_style;
+        ,
 
-    public_code_label = UI_alloc(UILabel);
+        UI_alloc(
+            UILabel,
+            paused_label,
+            UILabel_set_text(paused_label, String("Paused!"));
+            UILabel_set_alignment(paused_label, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
+            UI_set_pos(paused_label, (v2){0, 50});
+            UI_set_size(paused_label, (v2){WINDOW_WIDTH / 2, WINDOW_WIDTH / 16});
+        ),
+
+        UI_alloc(
+            UIButton,
+            cont_button,
+            UI_set_size(cont_button, v2_div(UI_get_size(cont_button), (v2){2, 1}));
+            UI_center_around_pos(cont_button, (v2){WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2 + 50});
+            UILabel_set_alignment(cont_button, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
+            UILabel_set_text(cont_button, String("Continue"));
+
+            cont_button->custom_on_click = _continue_button_pressed;
+            UI_get_comp(cont_button)->default_style = default_style;
+        )
+    );
+
+    public_code_label = UI_alloc(UILabel, pcl);
     UILabel_set_alignment(public_code_label, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
     UI_get_comp(public_code_label)->default_style = code_labels_default;
     public_code_label->font_size = 16;
@@ -3854,7 +3861,7 @@ void make_ui() {
     
     UI_set_global_pos(public_code_label, V2(0, 0)); // after adding so it would account for the pause menu's pos
 
-    UIButton *copy_public_code_button = UI_alloc(UIButton);
+    UIButton *copy_public_code_button = UI_alloc(UIButton, cpcb);
     copy_public_code_button->custom_on_click = _copy_public_code_pressed;
     copy_public_code_button->label.font_size = 16;
     UI_get_comp(copy_public_code_button)->default_style = copy_button_default;
@@ -3868,7 +3875,7 @@ void make_ui() {
     
 
 
-    local_code_label = UI_alloc(UILabel);
+    local_code_label = UI_alloc(UILabel, lcl);
     UILabel_set_alignment(local_code_label, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
     UI_get_comp(local_code_label)->default_style = code_labels_default;
     local_code_label->font_size = 16;
@@ -3879,7 +3886,7 @@ void make_ui() {
     
     UI_set_global_pos(local_code_label, V2(0, WINDOW_HEIGHT / 10));
 
-    UIButton *copy_local_code_button = UI_alloc(UIButton);
+    UIButton *copy_local_code_button = UI_alloc(UIButton, clcb);
     UI_get_comp(copy_local_code_button)->default_style = copy_button_default;
     copy_local_code_button->hover_style = copy_button_hover;
     copy_local_code_button->pressed_style = copy_button_pressed;
@@ -3897,17 +3904,17 @@ void make_ui() {
 
     // #MM -----------------------------------------------
 
-    main_menu = UI_alloc(UIComponent);
+    main_menu = UI_alloc(UIComponent, mm);
 
     UI_set_size(main_menu, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
 
-    UIRect *mm_bg = UI_alloc(UIRect);
+    UIRect *mm_bg = UI_alloc(UIRect, mmbg);
     mm_bg->color = Color(90, 20, 20, 255);
     UI_set_size(mm_bg, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
 
     UI_add_child(main_menu, mm_bg);
 
-    UILabel *mm_title = UI_alloc(UILabel);
+    UILabel *mm_title = UI_alloc(UILabel, mmt);
     mm_title->alignment_x = ALIGNMENT_CENTER;
     mm_title->alignment_y = ALIGNMENT_CENTER;
     UILabel_set_text(mm_title, StringRef("Handshooter"));
@@ -3918,7 +3925,7 @@ void make_ui() {
     UI_add_child(main_menu, mm_title);
 
 
-    UIButton *mm_host_button = UI_alloc(UIButton);
+    UIButton *mm_host_button = UI_alloc(UIButton, mmhb);
     mm_host_button->custom_on_click = _on_host_pressed;
     UILabel_set_text(mm_host_button, StringRef("HOST!"));
     UI_set_size(mm_host_button, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 6));
@@ -3926,7 +3933,7 @@ void make_ui() {
 
     UI_add_child(main_menu, mm_host_button);
 
-    UIButton *mm_join_button = UI_alloc(UIButton);
+    UIButton *mm_join_button = UI_alloc(UIButton, mmjb);
     mm_join_button->custom_on_click = _on_join_pressed;
     UILabel_set_text(mm_join_button, StringRef("JOIN!"));
     UI_set_size(mm_join_button, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 6));
@@ -3941,16 +3948,16 @@ void make_ui() {
 
     // #HOST MENU -------------------------------------------
 
-    host_menu = UI_alloc(UIComponent);
+    host_menu = UI_alloc(UIComponent, hm);
     UI_set_size(host_menu, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
 
-    UIRect *h_bg = UI_alloc(UIRect);
+    UIRect *h_bg = UI_alloc(UIRect, hbg);
     h_bg->color = Color(20, 20, 90, 255);
     UI_set_size(h_bg, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
 
     UI_add_child(host_menu, h_bg);
 
-    UILabel *h_title = UI_alloc(UILabel);
+    UILabel *h_title = UI_alloc(UILabel, ht);
     h_title->alignment_x = ALIGNMENT_CENTER;
     h_title->alignment_y = ALIGNMENT_CENTER;
     UILabel_set_text(h_title, StringRef("HOST"));
@@ -3960,7 +3967,7 @@ void make_ui() {
 
     UI_add_child(host_menu, h_title);
 
-    UILabel *port_label = UI_alloc(UILabel);
+    UILabel *port_label = UI_alloc(UILabel, pl);
 
     port_label->font_size = 24;
     UILabel_set_alignment(port_label, ALIGNMENT_CENTER, ALIGNMENT_TOP);
@@ -3972,7 +3979,7 @@ void make_ui() {
 
     UI_add_child(host_menu, port_label);
 
-    port_line = UI_alloc(UITextLine);
+    port_line = UI_alloc(UITextLine, pl);
     port_line->char_limit = 5;
     port_line->numbers_only = true;
     port_line->label.font_size = 20;
@@ -3982,7 +3989,7 @@ void make_ui() {
     UI_center_around_pos(port_line, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 3 / 5));
     UI_add_child(host_menu, port_line);
 
-    UIButton *h_back_button = UI_alloc(UIButton);
+    UIButton *h_back_button = UI_alloc(UIButton, hbb);
     h_back_button->custom_on_click = _back_pressed;
     UI_get_comp(h_back_button)->default_style.bg_color = Color(0, 0, 0, 0);
     UILabel_set_text(h_back_button, StringRef(" <<< "));
@@ -3992,7 +3999,7 @@ void make_ui() {
 
     UI_add_child(host_menu, h_back_button);
 
-    UIButton *play_button = UI_alloc(UIButton);
+    UIButton *play_button = UI_alloc(UIButton, pb);
     play_button->custom_on_click = _h_play_pressed;
     UI_get_comp(play_button)->default_style = (UIStyle){.bg_color = Color(5, 5, 70, 255), Color(255, 255, 255, 255)};
 
@@ -4008,15 +4015,15 @@ void make_ui() {
 
     // #JOIN MENU -------------------------------------------
 
-    join_menu = UI_alloc(UIComponent);
+    join_menu = UI_alloc(UIComponent, jm);
 
-    UIRect *j_bg = UI_alloc(UIRect);
+    UIRect *j_bg = UI_alloc(UIRect, jbg);
     j_bg->color = Color(10, 50, 10, 255);
     UI_set_size(j_bg, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
 
     UI_add_child(join_menu, j_bg);
 
-    UILabel *j_title = UI_alloc(UILabel);
+    UILabel *j_title = UI_alloc(UILabel, jt);
     UILabel_set_alignment(j_title, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
     UILabel_set_text(j_title, StringRef("Join"));
     j_title->font_size = 48;
@@ -4025,7 +4032,7 @@ void make_ui() {
 
     UI_add_child(join_menu, j_title);
 
-    ip_code_line = UI_alloc(UITextLine);
+    ip_code_line = UI_alloc(UITextLine, ipcl);
     ip_code_line->char_limit = 24;
     ip_code_line->label.font_size = 24;
     ip_code_line->label.text = StringRef("Enter Lobby Code");
@@ -4035,7 +4042,7 @@ void make_ui() {
 
     UI_add_child(join_menu, ip_code_line);
 
-    UIButton *j_back_button = UI_alloc(UIButton);
+    UIButton *j_back_button = UI_alloc(UIButton, jbb);
     UI_get_comp(j_back_button)->default_style.bg_color = Color(0, 0, 0, 0);
     j_back_button->custom_on_click = _back_pressed;
     UILabel_set_text(j_back_button, StringRef(" <<< "));
@@ -4045,7 +4052,7 @@ void make_ui() {
 
     UI_add_child(join_menu, j_back_button);
     
-    UIButton *j_play_button = UI_alloc(UIButton);
+    UIButton *j_play_button = UI_alloc(UIButton, jpb);
     j_play_button->custom_on_click = _j_play_pressed;
     UI_get_comp(j_play_button)->default_style = (UIStyle){.bg_color = Color(0, 20, 0, 255), Color(255, 255, 255, 255)};
 

@@ -11,6 +11,7 @@
 #include "arraylist.c"
 #include "mystring.c"
 #include <windows.h>
+#include <stdarg.h>
 
 #define MAX_COMPONENT_STACK_SIZE 1024
 #define DEFAULT_FONT_SIZE 30
@@ -91,7 +92,45 @@ typedef struct UITextLine {
 } UITextLine;
 
 
-#define UI_alloc(type) ({type *ptr; ptr = malloc(sizeof(type)); (*ptr) = type##_new(); ptr;})
+#define first_arg(arg1, ...) arg1
+
+#define rest_args(arg1, ...) __VA_ARGS__
+
+// Assumes all args are of the same type
+#define count_args(type, ...) (sizeof((type[]){__VA_ARGS__}) / sizeof(type))
+
+
+UIComponent UI_add_child(UIComponent *parent, UIComponent *child);
+
+// Only used for the macro. DO NOT USE. Just do a for loop or something.
+void _UI_add_children(UIComponent *comp, int num_children, ...) {
+    va_list args;
+
+    va_start(args, num_children);
+
+    va_arg(args, UIComponent *); // the first is always NULL
+
+    for (int i = 0; i < num_children; i++) {
+
+        UIComponent *current = va_arg(args, UIComponent *);
+
+        if (current == NULL) continue;
+
+        UI_add_child(comp, va_arg(args, UIComponent *));
+    }
+}
+
+
+
+#define UI_alloc(type, name, ...) ({ \
+    type *name; \
+    name = malloc(sizeof(type));  \
+    (*name) = type##_new(); \
+    first_arg(__VA_ARGS__);  \
+    int args_count__ = count_args(UIComponent *, rest_args(__VA_ARGS__)); \
+    _UI_add_children(name, args_count__, rest_args(__VA_ARGS__) + 0); \
+    name; \
+})
 
 #define UI_get_comp(comp) ((UIComponent *)comp)
 
@@ -211,7 +250,7 @@ UIStyle UIComponent_get_current_style(UIComponent *component) {
 }
 
 v2 _get_mouse_pos() {
-    
+
 
     SDL_DisplayMode mode;
     int gw, gh;
@@ -500,6 +539,14 @@ UILabel UILabel_new() {
 }
 
 UIComponent UI_add_child(UIComponent *parent, UIComponent *child) {
+
+    if (parent == NULL) {
+        commit_sudoku();
+    } else if (child == NULL) {
+        commit_sudoku();
+    }
+
+
     array_append(parent->children, child);
     child->parent = parent;
 
