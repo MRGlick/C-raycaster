@@ -53,6 +53,8 @@ typedef struct UIComponent {
 
     bool contains_mouse;
 
+    bool move_on_new_parent;
+
     GPU_Image *texture;
 
     UIStyle default_style;
@@ -108,15 +110,13 @@ void _UI_add_children(UIComponent *comp, int num_children, ...) {
 
     va_start(args, num_children);
 
-    va_arg(args, UIComponent *); // the first is always NULL
-
     for (int i = 0; i < num_children; i++) {
 
         UIComponent *current = va_arg(args, UIComponent *);
 
         if (current == NULL) continue;
 
-        UI_add_child(comp, va_arg(args, UIComponent *));
+        UI_add_child(comp, current);
     }
 }
 
@@ -131,6 +131,8 @@ void _UI_add_children(UIComponent *comp, int num_children, ...) {
     _UI_add_children(name, args_count__, rest_args(__VA_ARGS__) + 0); \
     name; \
 })
+
+//                                           its big brain time ^
 
 #define UI_get_comp(comp) ((UIComponent *)comp)
 
@@ -153,6 +155,8 @@ v2 _window_size;
 UIComponent *_current_focused_comp = NULL;
 
 // #FUNC
+
+void UI_render_text(GPU_Target *target, String text, v2 pos, v2 size, TTF_Font *f);
 
 void UITextLine_remove_char(UITextLine *text_line);
 
@@ -337,7 +341,7 @@ void _UI_mouse_motion(SDL_MouseMotionEvent event) {
     }
 }
 
-void UI_init(SDL_Window *w, v2 window_size) {
+void UI_init(SDL_Window *w, v2 window_size, String font) {
     if (_ui_initialized) {
         printf("UI already initialized! \n");
         return;
@@ -345,9 +349,14 @@ void UI_init(SDL_Window *w, v2 window_size) {
     _ui_initialized = true;
     TTF_Init();
 
-    default_font = TTF_OpenFont("FFFFORWA.TTF", DEFAULT_FONT_SIZE);
+    if (String_isnull(font)) {
+        default_font = TTF_OpenFont("FFFFORWA.TTF", DEFAULT_FONT_SIZE);
+    } else {
+        default_font = TTF_OpenFont(font.data, DEFAULT_FONT_SIZE);
+    }
 
-    root = UI_alloc(UIComponent);
+
+    root = UI_alloc(UIComponent, r);
     root->is_root = true;
 
     _window = w;
@@ -381,7 +390,7 @@ UIComponent UIComponent_new() {
     component.isbutton = false;
     component.default_style = UIStyle_new();
     component.current_style_type = STYLE_DEFAULT;
-
+    component.move_on_new_parent = true;
     component.contains_mouse = false;
 
     return component;
@@ -550,6 +559,11 @@ UIComponent UI_add_child(UIComponent *parent, UIComponent *child) {
     array_append(parent->children, child);
     child->parent = parent;
 
+    if (!child->move_on_new_parent) {
+        UI_set_global_pos(child, child->pos);
+    }
+    
+
     if (parent == root) { // QoL
         UI_update(child);
     }
@@ -668,7 +682,7 @@ void UI_handle_event(SDL_Event event) {
 
 void UILabel_set_text(UILabel *label, String text) {
     if (label->text.data != NULL && !label->text.ref) String_delete(&label->text);
-
+    
     label->text = text;
 }
 
@@ -769,6 +783,8 @@ void UI_center_around_pos(UIComponent *comp, v2 pos) {
 
 
 void UI_set_global_pos(UIComponent *comp, v2 pos) {
+
+    comp->move_on_new_parent = false;
 
     if (comp->parent == NULL) {
         comp->pos = pos;
@@ -1074,6 +1090,38 @@ void UITextLine_remove_char(UITextLine *text_line) {
     array_remove(text_line->text, text_line->cursor_pos - 1);
     text_line->cursor_pos--;
 }
+
+// Really slow, obviously
+void UI_render_text(GPU_Target *target, String text, v2 pos, v2 size, TTF_Font *f) {
+
+    TTF_Font *font = f == NULL ? default_font : f;
+
+    SDL_Surface *surface = TTF_RenderText_Blended(font, text.data, GPU_MakeColor(255, 255, 255, 255));
+
+    if (surface == NULL) {
+        printf("%s \n", TTF_GetError());
+        exit(-1);
+    }
+
+    GPU_Image *image = GPU_CopyImageFromSurface(surface);
+
+    int middle_x = pos.x + size.x / 2;
+    int middle_y = pos.y + size.y / 2;
+
+    GPU_Rect rect = {
+        .x = middle_x - surface->w / 2, 
+        .y = middle_y - surface->h / 2, 
+        .w = surface->w, 
+        .h = surface->h
+    };
+
+    GPU_BlitRect(image, NULL, target, &rect);
+
+    SDL_FreeSurface(surface);
+    GPU_FreeImage(image);
+
+}
+
 
 // #END
 

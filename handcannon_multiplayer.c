@@ -213,32 +213,32 @@ DEF_STRUCT(Animation, ANIMATION, {
 });
 
 DEF_STRUCT(WallStripe, WALL_STRIPE, {
-    v2 pos, normal; // 16, 16
-    double size; // 8
-    double brightness; // 8  // a bunch of rendering bullshit:
-    double collIdx; // 8
-    double wallWidth; // 8
-    GPU_Image *texture; // 8
-    int i; // 4
+    v2 pos, normal; // 16 -2 slots
+    GPU_Image *texture; // 8 -slot
+    double size; // 8 -slot
+    double wallWidth; // 8 -slot
+    float collIdx; // 4
+    float brightness;  // 4 -slot
+    u16 i;
 });
 
 DEF_STRUCT(Node, NODE, {
-    void (*on_render)(struct Node *);
-    void (*on_tick)(struct Node *, double);
-    void (*on_ready)(struct Node *);
-    void (*on_delete)(struct Node *);
+    void (*on_render)(struct Node *); // 8 slot 1
+    void (*on_tick)(struct Node *, double); // 8 slot 2
+    void (*on_ready)(struct Node *); // 8 slot 3
+    void (*on_delete)(struct Node *); // 8 slot 4
 
-    bool _called_ready;
+    struct Node *parent; // 8 slot 5
+    struct Node **children; // slot 6
 
-    int type;
+    u32 sync_id; // 4
+    u16 type; // 2
+    u16 size; // 2 slot 7
 
-    int sync_id;
-    int size;
+    bool _called_ready; // 1
+    bool freed, queued_for_deletion; // 2 
 
-    bool freed, queued_for_deletion;
 
-    struct Node *parent;
-    struct Node **children;
 });
     DEF_STRUCT(Line, LINE, {
         Node node;
@@ -254,13 +254,13 @@ DEF_STRUCT(Node, NODE, {
     DEF_STRUCT(Sprite, SPRITE, {
         Node node;
         GPU_Image *texture;  // not used if animated
-        bool isAnimated;
-        int current_anim_idx;
         Animation *animations;
-        SDL_Color color;
-        bool inherit_color;
         v2 scale;
-        int autoplay_anim;
+        SDL_Color color;
+        s16 current_anim_idx;
+        s16 autoplay_anim;
+        bool inherit_color;
+        bool isAnimated;
     });
 
     END_STRUCT(SPRITE);
@@ -514,7 +514,7 @@ typedef struct RenderObject {
         WallStripe stripe;
     };
     double dist_squared;
-    int type;
+    u16 type;
     bool isnull;
 } RenderObject;
 
@@ -537,6 +537,18 @@ typedef struct Room {
 } Room;
 
 // #FUNC
+
+Ability create_ability(
+    void (*activate)(struct Ability *),
+    void (*tick)(struct Ability *, double),
+    void (*before_activate)(struct Ability *),
+    int max_uses,
+    double cooldown,
+    double delay,
+    GPU_Image *icon
+);
+
+double get_player_height_dir();
 
 void left_mouse_pressed(bool pressed);
 
@@ -902,6 +914,8 @@ UILabel *public_code_label = NULL, *local_code_label = NULL;
 UILabel *fps_label = NULL;
 
 // #TEXTURES
+
+GPU_Image *ff_icon;
 GPU_Image **ff_spark_particle_anim;
 GPU_Image **switchshot_anim;
 GPU_Image *switchshot_icon;
@@ -1064,7 +1078,6 @@ bool cameraShakeFadeActive = false;
 RenderObject wallStripesToRender[RESOLUTION_X];
 v2 cameraOffset = {0, 0};
 v2 playerForward;
-char *levelToLoad = NULL;
 const double PLAYER_SHOOT_COOLDOWN = 0.5;
 // #VAR END
 
@@ -1090,15 +1103,10 @@ int main(int argc, char *argv[]) {
     GPU_SetImageFilter(hud_image, GPU_FILTER_NEAREST);
     GPU_SetBlendMode(hud_image, blend_mode);
     hud = GPU_LoadTarget(hud_image);
-    // renderer = SDL_CreateRenderer(window, -1, RENDERER_FLAGS);
-    
-    if (argc >= 2) {
-        levelToLoad = argv[1];
-    }
 
     BS_init();
 
-    UI_init(get_window(), (v2){WINDOW_WIDTH, WINDOW_HEIGHT});
+    UI_init(get_window(), (v2){WINDOW_WIDTH, WINDOW_HEIGHT}, String_null);
 
     MP_init(1155); // default port
     _MP_client_handle_recv = on_client_recv;
@@ -2087,22 +2095,22 @@ BakedLightColor get_light_color_by_pos(v2 pos, int row_offset, int col_offset) {
 void render_ability_helper(v2 pos, Ability *ability) {
     if (ability == NULL) return;
 
-    v2 size = to_vec(72);
+    v2 size = to_vec(64);
 
     GPU_Rect rect = {pos.x, pos.y, size.x, size.y};
 
+    int padding = 0;
+
     GPU_Rect frame_rect = {
-        pos.x - 3,
-        pos.y - 3,
-        size.x + 6,
-        size.y + 6
+        pos.x - padding,
+        pos.y - padding,
+        size.x + padding * 2,
+        size.y + padding * 2
     };
 
-    if (ability->texture != NULL) {
-        GPU_BlitRect(ability->texture, NULL, hud, &rect);
-    } else {
-        printf("What the hell. \n");
-    }
+    
+    GPU_BlitRect(ability->texture, NULL, hud, &rect);
+    
     double primary_progress = ability->timer == ability->cooldown? 0 : ability->timer / ability->cooldown;
 
     GPU_Rect primary_progress_rect = {
@@ -2112,20 +2120,17 @@ void render_ability_helper(v2 pos, Ability *ability) {
         size.y * primary_progress
     };
 
-    // SDL_SetRenderDrawColor(renderer, 0, 0, 0, 170);
-    
     GPU_RectangleFilled2(hud, primary_progress_rect, GPU_MakeColor(0, 0, 0, 170));
-
-
-    // SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    
     GPU_BlitRect(ability_icon_frame, NULL, hud, &frame_rect);
-}
 
-void render_ability_hud() {
-    render_ability_helper((v2){WINDOW_WIDTH * 1/16      , WINDOW_HEIGHT * 5/6}, player->primary);
-    render_ability_helper((v2){WINDOW_WIDTH * 1/16 + 80 , WINDOW_HEIGHT * 5/6}, player->secondary);
-    render_ability_helper((v2){WINDOW_WIDTH * 1/16 + 160, WINDOW_HEIGHT * 5/6}, player->utility);
-    render_ability_helper((v2){WINDOW_WIDTH * 1/16 + 240, WINDOW_HEIGHT * 5/6}, player->special);
+    if (ability->uses > 0 && ability->max_uses > 1) {
+        String use_count_text = String_from_int(ability->uses);
+        UI_render_text(hud, use_count_text, V2(pos.x, pos.y - size.y / 2), V2(size.x, size.y / 2), NULL);
+
+
+        String_delete(&use_count_text);
+    }
 }
 
 void drawSkybox() {
@@ -3203,25 +3208,19 @@ void dir_sprite_play_anim(DirSprite *dir_sprite, int anim) {
 
 Ability ability_primary_shoot_create() {
 
-    if (shoot_icon == NULL) {
-        printf("Shoot icon is null at primary shoot create. \n");
-    } else {
-        printf("It's not null. \n");
-    }
+    Ability ability = create_ability(
+        ability_shoot_activate,
+        NULL,
+        NULL,
+        1,
+        0.5,
+        0,
+        shoot_icon
+    );
+    
 
-    return (Ability) {
-        .activate = ability_shoot_activate,
-        .tick = NULL,
-        .before_activate = NULL,
-        .max_uses = 1,
-        .uses = 1,
-        .cooldown = 0.5,
-        .timer = 0.2,
-        .type = A_PRIMARY,
-        .texture = shoot_icon,
-        .delay = 0,
-        .delay_timer = -1000
-    };
+    return ability;
+
 }
 
 void default_ability_tick(Ability *ability, double delta) {
@@ -3244,22 +3243,20 @@ void default_ability_tick(Ability *ability, double delta) {
 }
 
 Ability ability_secondary_shoot_create() {
-    return (Ability) {
-        .activate = ability_secondary_shoot_activate,
-        .tick = NULL,
-        .before_activate = NULL,
-        .uses = 1,
-        .max_uses = 1,
-        .cooldown = 5,
-        .delay = 0,
-        .delay_timer = -1000,
-        .timer = 0,
-        .type = A_SECONDARY,
-        .texture = shotgun_icon,
-        // .shot_amount = 6,
-        // .shot_timer = 0.06,
-        // .shots_left = 0
-    };
+
+    Ability ability = create_ability(
+        ability_secondary_shoot_activate,
+        NULL,
+        NULL,
+        1,
+        5,
+        0,
+        shotgun_icon
+    );
+
+
+    return ability;
+
 }
 
 void ability_secondary_shoot_activate(Ability *ability) {
@@ -3588,19 +3585,18 @@ void Particle_tick(Node *node, double delta) { // #PT
 }
 
 Ability ability_dash_create() {
-    return (Ability) {
-        .activate = ability_dash_activate,
-        .tick = NULL,
-        .before_activate = ability_dash_before_activate,
-        .uses = 1,
-        .max_uses = 1,
-        .cooldown = 3,
-        .timer = 3,
-        .type = A_UTILITY,
-        .texture = dash_icon,
-        .delay = 0.1,
-        .delay_timer = -1000
-    };
+
+    Ability ability = create_ability(
+        ability_dash_activate,
+        NULL,
+        ability_dash_before_activate,
+        1,
+        3,
+        0.1,
+        dash_icon
+    );
+
+    return ability;
 }
 
 // void ability_dash_tick(Ability *ability, double delta) {
@@ -3801,6 +3797,22 @@ void make_ui() {
     code_labels_default = {
         .bg_color = Color(0, 0, 0, 150),
         .fg_color = Color(255, 255, 255, 255)
+    },
+    pause_menu_style = {
+        .bg_color = Color(0, 0, 0, 125), 
+        .fg_color = Color(255, 255, 255, 255)
+    },
+    button_default_style = {
+        .bg_color = Color(0, 0, 0, 175), 
+        .fg_color = Color(255, 255, 255, 255)
+    },
+    button_hover_style = {
+        .bg_color = Color(0, 0, 0, 220),
+        .fg_color = Color(255, 255, 255, 255)
+    },
+    play_button_style = {
+        .bg_color = Color(5, 5, 70, 255), 
+        Color(255, 255, 255, 255)
     };
 
 
@@ -3814,11 +3826,6 @@ void make_ui() {
         UI_set_global_pos(fps_label, V2(WINDOW_WIDTH * 0.03, WINDOW_HEIGHT * 0.2));
         UI_add_child(UI_get_root(), fps_label);
     );
-    
-    
-
-    UIStyle pause_menu_style = {.bg_color = Color(0, 0, 0, 125), .fg_color = Color(255, 255, 255, 255)};
-    UIStyle default_style = (UIStyle){.bg_color = Color(0, 0, 0, 175), .fg_color = Color(255, 255, 255, 255)};
 
     pause_menu = UI_alloc(
         UIComponent,
@@ -3834,184 +3841,192 @@ void make_ui() {
             UILabel_set_text(paused_label, String("Paused!"));
             UILabel_set_alignment(paused_label, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
             UI_set_pos(paused_label, (v2){0, 50});
-            UI_set_size(paused_label, (v2){WINDOW_WIDTH / 2, WINDOW_WIDTH / 16});
+            UI_set_size(paused_label, (v2){WINDOW_WIDTH / 2, WINDOW_HEIGHT / 8});
         ),
 
         UI_alloc(
             UIButton,
             cont_button,
-            UI_set_size(cont_button, v2_div(UI_get_size(cont_button), (v2){2, 1}));
+            UI_set_size(cont_button, V2(WINDOW_WIDTH / 4, WINDOW_HEIGHT / 8));
             UI_center_around_pos(cont_button, (v2){WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2 + 50});
-            UILabel_set_alignment(cont_button, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
             UILabel_set_text(cont_button, String("Continue"));
 
             cont_button->custom_on_click = _continue_button_pressed;
-            UI_get_comp(cont_button)->default_style = default_style;
+            UI_get_comp(cont_button)->default_style = button_default_style;
+            cont_button->hover_style = button_hover_style;
+        ),
+
+        public_code_label = UI_alloc(
+            UILabel, 
+            pcl,
+            pcl = UI_alloc(UILabel, pcl);
+            UILabel_set_alignment(pcl, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
+            UI_get_comp(pcl)->default_style = code_labels_default;
+            pcl->font_size = 16;
+            UILabel_set_text(pcl, StringRef(""));
+            UI_set_size(pcl, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 10));
+            UI_set_global_pos(pcl, V2(0, 0));
+        ),
+
+        UI_alloc(
+            UIButton, 
+            cpcb,
+            cpcb->custom_on_click = _copy_public_code_pressed;
+            cpcb->label.font_size = 16;
+            UI_get_comp(cpcb)->default_style = copy_button_default;
+            cpcb->hover_style = copy_button_hover;
+            cpcb->pressed_style = copy_button_pressed;
+            UILabel_set_text(cpcb, StringRef("Copy"));
+            UI_set_size(cpcb, V2(WINDOW_WIDTH / 10, WINDOW_HEIGHT / 10));
+            UI_set_global_pos(cpcb, V2(WINDOW_WIDTH / 3, 0));
+        ),
+
+        local_code_label = UI_alloc(
+            UILabel,
+            lcl,
+            UILabel_set_alignment(lcl, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
+            UI_get_comp(lcl)->default_style = code_labels_default;
+            lcl->font_size = 16;
+            UILabel_set_text(lcl, StringRef(""));
+            UI_set_size(lcl, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 10));
+            UI_set_global_pos(lcl, V2(0, WINDOW_HEIGHT / 10));
+        ),
+
+        UI_alloc(
+            UIButton,
+            clcb,
+            UI_get_comp(clcb)->default_style = copy_button_default;
+            clcb->hover_style = copy_button_hover;
+            clcb->pressed_style = copy_button_pressed;
+            clcb->custom_on_click = _copy_local_code_pressed;
+            clcb->label.font_size = 16;
+            UILabel_set_text(clcb, StringRef("Copy"));
+            UI_set_size(clcb, V2(WINDOW_WIDTH / 10, WINDOW_HEIGHT / 10));
+            UI_set_global_pos(clcb, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 10));
         )
     );
-
-    public_code_label = UI_alloc(UILabel, pcl);
-    UILabel_set_alignment(public_code_label, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
-    UI_get_comp(public_code_label)->default_style = code_labels_default;
-    public_code_label->font_size = 16;
-    UILabel_set_text(public_code_label, StringRef(""));
-
-    UI_set_size(public_code_label, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 10));
-    UI_add_child(pause_menu, public_code_label);
-    
-    UI_set_global_pos(public_code_label, V2(0, 0)); // after adding so it would account for the pause menu's pos
-
-    UIButton *copy_public_code_button = UI_alloc(UIButton, cpcb);
-    copy_public_code_button->custom_on_click = _copy_public_code_pressed;
-    copy_public_code_button->label.font_size = 16;
-    UI_get_comp(copy_public_code_button)->default_style = copy_button_default;
-    copy_public_code_button->hover_style = copy_button_hover;
-    copy_public_code_button->pressed_style = copy_button_pressed;
-    UILabel_set_text(copy_public_code_button, StringRef("Copy"));
-    UI_set_size(copy_public_code_button, V2(WINDOW_WIDTH / 10, WINDOW_HEIGHT / 10));
-    UI_add_child(pause_menu, copy_public_code_button);
-
-    UI_set_global_pos(copy_public_code_button, V2(WINDOW_WIDTH / 3, 0));
-    
-
-
-    local_code_label = UI_alloc(UILabel, lcl);
-    UILabel_set_alignment(local_code_label, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
-    UI_get_comp(local_code_label)->default_style = code_labels_default;
-    local_code_label->font_size = 16;
-    UILabel_set_text(local_code_label, StringRef(""));
-
-    UI_set_size(local_code_label, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 10));
-    UI_add_child(pause_menu, local_code_label);
-    
-    UI_set_global_pos(local_code_label, V2(0, WINDOW_HEIGHT / 10));
-
-    UIButton *copy_local_code_button = UI_alloc(UIButton, clcb);
-    UI_get_comp(copy_local_code_button)->default_style = copy_button_default;
-    copy_local_code_button->hover_style = copy_button_hover;
-    copy_local_code_button->pressed_style = copy_button_pressed;
-    copy_local_code_button->custom_on_click = _copy_local_code_pressed;
-    copy_local_code_button->label.font_size = 16;
-    UILabel_set_text(copy_local_code_button, StringRef("Copy"));
-    UI_set_size(copy_local_code_button, V2(WINDOW_WIDTH / 10, WINDOW_HEIGHT / 10));
-    UI_add_child(pause_menu, copy_local_code_button);
-
-    UI_set_global_pos(copy_local_code_button, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 10));
-    
-
     pause_menu->visible = false;
     UI_add_child(UI_get_root(), pause_menu);
 
     // #MM -----------------------------------------------
 
-    main_menu = UI_alloc(UIComponent, mm);
+    main_menu = UI_alloc(
+        UIComponent, 
+        mm,
+        UI_set_size(mm, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
+        ,
 
-    UI_set_size(main_menu, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
+        UI_alloc(
+            UIRect,
+            mmbg,
+            mmbg->color = Color(90, 20, 20, 255);
+            UI_set_size(mmbg, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
+        ),
 
-    UIRect *mm_bg = UI_alloc(UIRect, mmbg);
-    mm_bg->color = Color(90, 20, 20, 255);
-    UI_set_size(mm_bg, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
+        UI_alloc(
+            UILabel, 
+            title,
+            title->alignment_x = ALIGNMENT_CENTER;
+            title->alignment_y = ALIGNMENT_CENTER;
+            UILabel_set_text(title, StringRef("Handshooter"));
+            title->font_size = 64;
+            UI_set_size(title, V2(WINDOW_WIDTH, WINDOW_HEIGHT / 5));
+            UI_center_around_pos(title, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 5));
+        ),
 
-    UI_add_child(main_menu, mm_bg);
+        UI_alloc(
+            UIButton,
+            host_button,
+            host_button->custom_on_click = _on_host_pressed;
+            UILabel_set_text(host_button, StringRef("HOST!"));
+            UI_set_size(host_button, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 6));
+            UI_center_around_pos(host_button, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 2 / 5));
+        ),
 
-    UILabel *mm_title = UI_alloc(UILabel, mmt);
-    mm_title->alignment_x = ALIGNMENT_CENTER;
-    mm_title->alignment_y = ALIGNMENT_CENTER;
-    UILabel_set_text(mm_title, StringRef("Handshooter"));
-    mm_title->font_size = 64;
-    UI_set_size(mm_title, V2(WINDOW_WIDTH, WINDOW_HEIGHT / 5));
-    UI_center_around_pos(mm_title, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 5));
-
-    UI_add_child(main_menu, mm_title);
-
-
-    UIButton *mm_host_button = UI_alloc(UIButton, mmhb);
-    mm_host_button->custom_on_click = _on_host_pressed;
-    UILabel_set_text(mm_host_button, StringRef("HOST!"));
-    UI_set_size(mm_host_button, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 6));
-    UI_center_around_pos(mm_host_button, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 2 / 5));
-
-    UI_add_child(main_menu, mm_host_button);
-
-    UIButton *mm_join_button = UI_alloc(UIButton, mmjb);
-    mm_join_button->custom_on_click = _on_join_pressed;
-    UILabel_set_text(mm_join_button, StringRef("JOIN!"));
-    UI_set_size(mm_join_button, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 6));
-    UI_center_around_pos(mm_join_button, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 3 / 5));
-
-    UI_add_child(main_menu, mm_join_button);
-
-
+        UI_alloc(
+            UIButton,
+            jb,
+            jb->custom_on_click = _on_join_pressed;
+            UILabel_set_text(jb, StringRef("JOIN!"));
+            UI_set_size(jb, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 6));
+            UI_center_around_pos(jb, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 3 / 5));
+        )
+    );
     UI_add_child(UI_get_root(), main_menu);
-
-    main_menu->visible = true; // debug
 
     // #HOST MENU -------------------------------------------
 
-    host_menu = UI_alloc(UIComponent, hm);
-    UI_set_size(host_menu, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
+    host_menu = UI_alloc(
+        UIComponent, 
+        hm,
+        UI_set_size(hm, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
+        ,
 
-    UIRect *h_bg = UI_alloc(UIRect, hbg);
-    h_bg->color = Color(20, 20, 90, 255);
-    UI_set_size(h_bg, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
+        UI_alloc(
+            UIRect,
+            bg,
+            UI_set_size(bg, V2(WINDOW_WIDTH, WINDOW_HEIGHT));
+            bg->color = Color(20, 20, 90, 255);
+        ),
 
-    UI_add_child(host_menu, h_bg);
+        UI_alloc(
+            UILabel,
+            title,
+            title->alignment_x = ALIGNMENT_CENTER;
+            title->alignment_y = ALIGNMENT_CENTER;
+            UILabel_set_text(title, StringRef("HOST"));
+            title->font_size = 48;
+            UI_set_size(title, V2(WINDOW_WIDTH, WINDOW_HEIGHT / 5));
+            UI_center_around_pos(title, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 5));
+        ),
 
-    UILabel *h_title = UI_alloc(UILabel, ht);
-    h_title->alignment_x = ALIGNMENT_CENTER;
-    h_title->alignment_y = ALIGNMENT_CENTER;
-    UILabel_set_text(h_title, StringRef("HOST"));
-    h_title->font_size = 48;
-    UI_set_size(h_title, V2(WINDOW_WIDTH, WINDOW_HEIGHT / 5));
-    UI_center_around_pos(h_title, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 5));
+        UI_alloc(
+            UILabel,
+            port_label,
+            port_label->font_size = 24;
 
-    UI_add_child(host_menu, h_title);
+            UILabel_set_alignment(port_label, ALIGNMENT_CENTER, ALIGNMENT_TOP);
+            UILabel_set_text(port_label, StringRef("Enter an open port:"));
+            UI_set_size(port_label, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 12));
+            UI_center_around_pos(port_label, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 3 / 5 - WINDOW_HEIGHT / 10));
 
-    UILabel *port_label = UI_alloc(UILabel, pl);
+        ),
 
-    port_label->font_size = 24;
-    UILabel_set_alignment(port_label, ALIGNMENT_CENTER, ALIGNMENT_TOP);
+        port_line = UI_alloc(
+            UITextLine,
+            port,
+            port->char_limit = 5;
+            port->numbers_only = true;
+            port->label.font_size = 20;
+            UILabel_set_text(port, StringRef("...."));
+            UILabel_set_alignment(port, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
+            UI_set_size(port, V2(WINDOW_WIDTH / 4, WINDOW_HEIGHT / 12));
+            UI_center_around_pos(port, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 3 / 5));
+        ),
 
-    UILabel_set_text(port_label, StringRef("Enter an open port:"));
+        UI_alloc(
+            UIButton,
+            back,
+            back->custom_on_click = _back_pressed;
+            UI_get_comp(back)->default_style.bg_color = Color(0, 0, 0, 0);
+            UILabel_set_text(back, StringRef(" <<< "));
+            UI_set_pos(back, V2(0, 0));
+            UI_set_size(back, V2(WINDOW_WIDTH / 12, WINDOW_HEIGHT / 12));
+            back->label.font_size = 16;
+        ),
 
-    UI_set_size(port_label, V2(WINDOW_WIDTH / 3, WINDOW_HEIGHT / 12));
-    UI_center_around_pos(port_label, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 3 / 5 - WINDOW_HEIGHT / 10));
-
-    UI_add_child(host_menu, port_label);
-
-    port_line = UI_alloc(UITextLine, pl);
-    port_line->char_limit = 5;
-    port_line->numbers_only = true;
-    port_line->label.font_size = 20;
-    UILabel_set_text(port_line, StringRef("...."));
-    UILabel_set_alignment(port_line, ALIGNMENT_CENTER, ALIGNMENT_CENTER);
-    UI_set_size(port_line, V2(WINDOW_WIDTH / 4, WINDOW_HEIGHT / 12));
-    UI_center_around_pos(port_line, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 3 / 5));
-    UI_add_child(host_menu, port_line);
-
-    UIButton *h_back_button = UI_alloc(UIButton, hbb);
-    h_back_button->custom_on_click = _back_pressed;
-    UI_get_comp(h_back_button)->default_style.bg_color = Color(0, 0, 0, 0);
-    UILabel_set_text(h_back_button, StringRef(" <<< "));
-    UI_set_pos(h_back_button, V2(0, 0));
-    UI_set_size(h_back_button, V2(WINDOW_WIDTH / 12, WINDOW_HEIGHT / 12));
-    h_back_button->label.font_size = 16;
-
-    UI_add_child(host_menu, h_back_button);
-
-    UIButton *play_button = UI_alloc(UIButton, pb);
-    play_button->custom_on_click = _h_play_pressed;
-    UI_get_comp(play_button)->default_style = (UIStyle){.bg_color = Color(5, 5, 70, 255), Color(255, 255, 255, 255)};
-
-    UILabel_set_text(play_button, StringRef("Play!"));
-    UI_set_size(play_button, V2(WINDOW_WIDTH / 8, WINDOW_HEIGHT / 8));
-    UI_center_around_pos(play_button, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 7 / 9));
-    UI_add_child(host_menu, play_button);
-
-
-    UI_add_child(UI_get_root(), host_menu);
-
+        UI_alloc(
+            UIButton,
+            play,
+            play->custom_on_click = _h_play_pressed;
+            UI_get_comp(play)->default_style = play_button_style;
+            UILabel_set_text(play, StringRef("Play!"));
+            UI_set_size(play, V2(WINDOW_WIDTH / 8, WINDOW_HEIGHT / 8));
+            UI_center_around_pos(play, V2(WINDOW_WIDTH / 2, WINDOW_HEIGHT * 7 / 9));
+        )
+    );
     host_menu->visible = false;
+    UI_add_child(UI_get_root(), host_menu);
 
     // #JOIN MENU -------------------------------------------
 
@@ -4831,6 +4846,8 @@ void PlayerEntity_tick(PlayerEntity *player_entity, double delta) {
 // #TEXTURES INIT
 void init_textures() {
 
+    ff_icon = load_texture("Textures/Abilities/Icons/ff_icon.png");
+
     ff_spark_particle_anim = get_texture_files("Textures/Abilities/ForceField/spark", 2);
 
     switchshot_icon = load_texture("Textures/Abilities/Icons/switchshot_icon.png");
@@ -4847,7 +4864,7 @@ void init_textures() {
 
     hand_shoot = get_texture_files("Textures/rightHandAnim/rightHandAnim", 6);
 
-    forcefield_anim = get_texture_files("Textures/Abilities/Forcefield/forcefield", 3);
+    forcefield_anim = get_texture_files("Textures/Abilities/Forcefield/forcefield", 1);
     
 
     player_textures = get_texture_files("Textures/Player/player", 16);
@@ -5032,19 +5049,16 @@ void ability_bomb_activate() {
 }
 
 Ability ability_bomb_create() {
-    Ability ability = {
-        .activate = ability_bomb_activate,
-        .before_activate = NULL,
-        .uses = 0,
-        .max_uses = 3,
-        .cooldown = 3,
-        .delay = 0,
-        .delay_timer = 0,
-        .texture = bomb_icon,
-        .tick = NULL,
-        .timer = 3,
-        .type = A_SECONDARY
-    };
+
+    Ability ability = create_ability(
+        ability_bomb_activate,
+        NULL,
+        NULL,
+        3,
+        3,
+        0,
+        bomb_icon
+    );
 
     return ability;
 }
@@ -5151,7 +5165,7 @@ Projectile *create_bomb_projectile(v2 pos, v2 start_vel) {
 
     projectile->type = PROJ_BOMB;
 
-    projectile->height_accel = PROJECTILE_GRAVITY;
+    projectile->height_accel = PROJECTILE_GRAVITY * 0.6;
     projectile->bounciness = 1.0;
     projectile->destroy_on_floor = true;
     projectile->entity.world_node.pos = pos;
@@ -5349,19 +5363,16 @@ CollisionData get_circle_collision(CircleCollider *col1, CircleCollider *col2) {
 }
 
 Ability ability_forcefield_create() {
-    Ability ability = {
-        .activate = ability_forcefield_activate,
-        .before_activate = NULL,
-        .uses = 1,
-        .max_uses = 1,
-        .cooldown = 10,
-        .timer = 0,
-        .delay_timer = 0,
-        .delay = 0,
-        .texture = entityTexture,
-        .tick = NULL,
-        .type = A_UTILITY
-    };
+
+    Ability ability = create_ability(
+        ability_forcefield_activate,
+        NULL,
+        NULL,
+        1,
+        10,
+        0,
+        ff_icon
+    );
 
     return ability;
 }
@@ -5413,9 +5424,9 @@ Projectile *create_forcefield_projectile() {
 
 
     Sprite *sprite = alloc(Sprite, SPRITE, true);
-    Animation anim = create_animation(2, 1, forcefield_anim);
-    anim.fps = 5;
-    anim.loop = true;
+    Animation anim = create_animation(1, 1, forcefield_anim);
+    // anim.fps = 5;
+    // anim.loop = true;
     array_append(sprite->animations, anim);
     Node_add_child(projectile, sprite);
     projectile->entity.world_node.size = to_vec(8000);
@@ -6150,11 +6161,14 @@ void init_crosshair() {
     Node_add_child(root_node, cnode);
 }
 
-void _abilities_render(Node *node) {
+void _abilities_render(Node *node) {\
+
+    int spacing = 80;
+
     render_ability_helper((v2){WINDOW_WIDTH * 1/16      , WINDOW_HEIGHT * 5/6}, player->primary);
-    render_ability_helper((v2){WINDOW_WIDTH * 1/16 + 80 , WINDOW_HEIGHT * 5/6}, player->secondary);
-    render_ability_helper((v2){WINDOW_WIDTH * 1/16 + 160, WINDOW_HEIGHT * 5/6}, player->utility);
-    render_ability_helper((v2){WINDOW_WIDTH * 1/16 + 240, WINDOW_HEIGHT * 5/6}, player->special);
+    render_ability_helper((v2){WINDOW_WIDTH * 1/16 + spacing , WINDOW_HEIGHT * 5/6}, player->secondary);
+    render_ability_helper((v2){WINDOW_WIDTH * 1/16 + spacing * 2, WINDOW_HEIGHT * 5/6}, player->utility);
+    render_ability_helper((v2){WINDOW_WIDTH * 1/16 + spacing * 3, WINDOW_HEIGHT * 5/6}, player->special);
 }
 
 void init_ability_hud() {
@@ -6350,21 +6364,18 @@ Node *find_node_by_sync_id(int sync_id) {
 
 
 Ability create_switchshot_ability() {
-    Ability a = {
-        .activate = switchshot_activate,
-        .uses = 1,
-        .max_uses = 1,
-        .cooldown = 0.2,
-        .delay = 0,
-        .delay_timer = 0,
-        .texture = switchshot_icon,
-        .tick = NULL,
-        .timer = 0.2,
-        .type = A_SECONDARY,
-        .before_activate = NULL
-    };
 
-    return a;
+    Ability ability = create_ability(
+        switchshot_activate,
+        NULL,
+        NULL,
+        2,
+        2,
+        0,
+        switchshot_icon
+    );
+
+    return ability;
 }
 
 void switchshot_activate(Ability *ability) {
@@ -6869,6 +6880,35 @@ void right_mouse_pressed(bool pressed) {
     if (pressed && started_game) {
         activate_ability(player->secondary);
     }
+}
+
+double get_player_height_dir() {
+
+}
+
+
+Ability create_ability(
+    void (*activate)(struct Ability *),
+    void (*tick)(struct Ability *, double),
+    void (*before_activate)(struct Ability *),
+    int max_uses,
+    double cooldown,
+    double delay,
+    GPU_Image *icon
+) {
+    Ability ability = {0};
+    ability.activate = activate;
+    ability.tick = tick;
+    ability.before_activate = before_activate;
+    ability.max_uses = max_uses;
+    ability.uses = 0;
+    ability.cooldown = cooldown;
+    ability.timer = ability.cooldown;
+    ability.delay = delay;
+    ability.delay_timer = delay;
+    ability.texture = icon;
+
+    return ability;
 }
 
 

@@ -47,7 +47,7 @@
     } \
 } while (0)
 
-#define Color(r, g, b, a) (SDL_Color){r, g, b, a}
+#define Color(r, g, b, a) ((SDL_Color){r, g, b, a})
 
 #define foreach(vardecl, list, l, ...) for (int other_name_i_wont_use = 0; other_name_i_wont_use < l; other_name_i_wont_use++) { \
     vardecl = list[other_name_i_wont_use]; \
