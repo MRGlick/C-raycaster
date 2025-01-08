@@ -1,3 +1,4 @@
+// #TOP
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wincompatible-pointer-types"
@@ -9,7 +10,7 @@
 #include "multiplayer.c"
 #include <iphlpapi.h>
 #include "reusable_threads.c"
-
+#include "input.c"
 
 // #DEFINITIONS
 
@@ -196,6 +197,9 @@ DEF_STRUCT(Ability, ABILITY, {
     double timer;
     double delay;
     double delay_timer;
+
+    bool is_held_down;
+
     AbilityType type;
 
     GPU_Image *texture;
@@ -538,6 +542,10 @@ typedef struct Room {
 
 // #FUNC
 
+void mouse_pressed(int button_index, bool pressed);
+
+void mouse_moved(SDL_MouseMotionEvent);
+
 Ability create_ability(
     void (*activate)(struct Ability *),
     void (*tick)(struct Ability *, double),
@@ -549,10 +557,6 @@ Ability create_ability(
 );
 
 double get_player_height_dir();
-
-void left_mouse_pressed(bool pressed);
-
-void right_mouse_pressed(bool pressed);
 
 void SpatialSound_delete(SpatialSound *sound);
 
@@ -849,9 +853,7 @@ CollisionData getCircleTileCollision(CircleCollider *circle, v2 tilePos);
 
 CollisionData getCircleTileMapCollision(CircleCollider *circle);
 
-void key_pressed(SDL_Keycode key);
-
-void key_released(SDL_Keycode key);
+void key_pressed(SDL_Scancode key, bool pressed);
 
 void tick(double delta);
 
@@ -1050,12 +1052,9 @@ Tilemap *tilemap = NULL;
 
 Renderer *renderer = NULL;
 
-bool keyPressArr[26];
 bool render_debug = false;
 
 bool lock_and_hide_mouse = true;
-bool isLMouseDown = false;
-bool isRMouseDown = false;
 double startFov = 100;
 double fov = 100;
 const char *font = "font.ttf";
@@ -1083,6 +1082,9 @@ const double PLAYER_SHOOT_COOLDOWN = 0.5;
 
 // #DEBUG VAR
 
+void _quit_callback() {
+    running = false;
+}
 
 // #MAIN
 int main(int argc, char *argv[]) {
@@ -1103,6 +1105,8 @@ int main(int argc, char *argv[]) {
     GPU_SetImageFilter(hud_image, GPU_FILTER_NEAREST);
     GPU_SetBlendMode(hud_image, blend_mode);
     hud = GPU_LoadTarget(hud_image);
+
+    IN_init(key_pressed, mouse_pressed, mouse_moved, _quit_callback);
 
     BS_init();
 
@@ -1235,8 +1239,6 @@ void init() {  // #INIT
     HEIGHT_TO_XY = (double)(tileSize * 2) / get_max_height();
     XY_TO_HEIGHT = get_max_height() / (tileSize * 2);
 
-    for (int i = 0; i < 26; i++) keyPressArr[i] = false;
-
 
 
 
@@ -1259,138 +1261,59 @@ v2 get_player_forward() {
 }
 
 void handle_input(SDL_Event event) {
-    switch (event.type) {
-        case SDL_QUIT:
 
+    IN_handle_input(event);
+
+}
+
+void key_pressed(SDL_Scancode key, bool pressed) {
+    if (pressed) {
+        if (key == INPUT(F8)) {
             running = false;
-            break;
-        case SDL_KEYDOWN:
-            key_pressed(event.key.keysym.sym);
-            break;
-        case SDL_KEYUP:
-            key_released(event.key.keysym.sym);
-            break;
-        case SDL_MOUSEMOTION:
-            if (player == NULL) {
-                printf("player is null \n");
-                return;
+            return;
+        }
+        if (key == INPUT(ESCAPE)) {
+            toggle_pause();
+            return;
+        }
+        if (key == INPUT(O)) {
+            render_debug = !render_debug;
+            return;
+        }
+
+        if (key == INPUT(R)) {
+            if (player->special != NULL) {
+                activate_ability(player->special);
             }
-            if (lock_and_hide_mouse) {
-                player->angle += event.motion.xrel * X_SENSITIVITY;
-                player->handOffset.x = lerp(player->handOffset.x, -event.motion.xrel * 2, 0.06);
-                player->pitch += event.motion.yrel * Y_SENSITIVITY;
-                player->handOffset.y = lerp(player->handOffset.y, -event.motion.yrel * 2, 0.06);
-                player->pitch = clamp(player->pitch, -280, 280);
+        }
+
+        if (key == INPUT(SPACE)) {
+            if (is_player_on_floor()) {
+                player->height_vel = 370;
             }
-            break;
-        case SDL_MOUSEBUTTONDOWN:
-            if (event.button.button == SDL_BUTTON_LEFT) {
-                if (!isLMouseDown) {
-                    left_mouse_pressed(true);
-                    isLMouseDown = true;
-                }
-            }
-            if (event.button.button == SDL_BUTTON_RIGHT) {
-                if (!isRMouseDown) {
-                    isRMouseDown = true;
-                    right_mouse_pressed(true);
-                }
-            }
-            break;
-        case SDL_MOUSEBUTTONUP:
-            if (event.button.button == SDL_BUTTON_LEFT) {
-                if (isLMouseDown) {
-                    isLMouseDown = false;
-                    left_mouse_pressed(false);
-                }
-            }
-            if (event.button.button == SDL_BUTTON_RIGHT) {
-                if (isRMouseDown) {
-                    isRMouseDown = false;
-                    right_mouse_pressed(false);
-                }
-            }
-            break;
+        }
+
+        if (key == INPUT(LSHIFT)) {
+            activate_ability(player->utility);
+        }
+        if (key == INPUT(F11)) {
+            fullscreen = !fullscreen;
+            update_fullscreen();
+        }
     }
 }
 
-void key_pressed(SDL_Keycode key) {
-    if (key == SDLK_F8) {
-        running = false;
-        return;
-    }
-    if (key == SDLK_ESCAPE) {
-        toggle_pause();
-        return;
-    }
-    if (key == SDLK_o) {
-        render_debug = !render_debug;
-        return;
-    }
-
-    if (key == SDLK_LCTRL && !player->crouching) {
-        
-        player->crouching = true;
-        
-        double current_speed_sqr = v2_length_squared(player->vel);
-        double crouch_speed = 2;
-        v2 crouch_dir = playerForward;
-
-        if (current_speed_sqr < crouch_speed * crouch_speed) {
-            player->vel = v2_mul(crouch_dir, to_vec(crouch_speed));
-        }
-        
-        
-    }
-
-    if (key == SDLK_r) {
-        if (player->special != NULL) {
-            activate_ability(player->special);
-        }
-    }
-
-    if (key == SDLK_SPACE) {
-        if (is_player_on_floor()) {
-            player->height_vel = 370;
-        }
-    }
-    player->world_node.height = clamp(player->world_node.height, 0, get_max_height());
-
-    if (key == SDLK_LSHIFT) {
-        activate_ability(player->utility);
-    }
-    if (key == SDLK_F11) {
-        fullscreen = !fullscreen;
-        update_fullscreen();
-    }
-
-    if (!in_range((char)key, 'a', 'z')) return;
-
-    keyPressArr[(char)key - 'a'] = true;
-}
-
-void key_released(SDL_Keycode key) {
-    if (key == SDLK_LSHIFT) {
-        player->sprinting = false;
-    }
-    if (key == SDLK_LCTRL) {
+KeyCallback key_released(SDL_Scancode key) {
+    if (key == INPUT(LCTRL)) {
         player->crouching = false;
     }
-
-    if (!in_range((char)key, 'a', 'z')) return;
-
-    keyPressArr[(char)key - 'a'] = false;
 }
 
-bool is_key_pressed(SDL_Keycode key) {
-    return keyPressArr[(char)key - 'a'];
-}
-
-int get_key_axis(SDL_Keycode key1, SDL_Keycode key2) {
+int get_key_axis(SDL_Scancode key1, SDL_Scancode key2) {
     return (int)is_key_pressed(key2) - (int)is_key_pressed(key1);
 }
 
-v2 get_key_vector(SDL_Keycode k1, SDL_Keycode k2, SDL_Keycode k3, SDL_Keycode k4) {
+v2 get_key_vector(SDL_Scancode k1, SDL_Scancode k2, SDL_Scancode k3, SDL_Scancode k4) {
     return (v2){get_key_axis(k1, k2), get_key_axis(k3, k4)};
 }
 
@@ -1421,19 +1344,29 @@ void player_tick(Node *node, double delta) {
         player->height_vel = 0;
     }
     player->world_node.height = clamp(player->world_node.height, player->tallness * 0.8, get_max_height());
-
     // player->collider->world_node.pos = player->world_node.pos;
+    if (player->primary) player->primary->is_held_down = is_mouse_button_pressed(MOUSE(LEFT));
+    if (player->secondary) player->secondary->is_held_down = is_mouse_button_pressed(MOUSE(RIGHT));
+    if (player->utility) player->utility->is_held_down = is_key_pressed(INPUT(LSHIFT));
+    if (player->special) player->special->is_held_down = is_key_pressed(INPUT(R));
 
     ability_tick(player->primary, delta);
     ability_tick(player->secondary, delta);
     ability_tick(player->utility, delta);
     ability_tick(player->special, delta);
 
+
+
+    player->crouching = is_key_pressed(INPUT(LCTRL));
+
+
+
+
     v2 right = {1, 0};
     v2 move_dir = v2_rotate_to(right, deg_to_rad(player->angle));
     v2 move_dir_rotated = v2_rotate(move_dir, PI / 2);
 
-    v2 keyVec = get_key_vector(SDLK_s, SDLK_w, SDLK_a, SDLK_d);
+    v2 keyVec = get_key_vector(INPUT(S), INPUT(W), INPUT(A), INPUT(D));
 
     if (!v2_equal(keyVec, to_vec(0))) {
         double t = sin(mili_to_sec(SDL_GetTicks64()) * (15 + (int)player->sprinting * 5)) * 3;
@@ -6870,18 +6803,6 @@ void SpatialSound_delete(SpatialSound *sound) {
     free_sound(sound->sound);
 }
 
-void left_mouse_pressed(bool pressed) {
-    if (pressed && started_game) {
-        activate_ability(player->primary);
-    }
-}
-
-void right_mouse_pressed(bool pressed) {
-    if (pressed && started_game) {
-        activate_ability(player->secondary);
-    }
-}
-
 double get_player_height_dir() {
 
 }
@@ -6909,6 +6830,30 @@ Ability create_ability(
     ability.texture = icon;
 
     return ability;
+}
+
+
+void mouse_pressed(int button_index, bool pressed) {
+    
+    if (!started_game) return;
+
+    if (pressed) {
+        if (button_index == MOUSE(LEFT)) {
+            activate_ability(player->primary);
+        } else if (button_index == MOUSE(RIGHT)) {
+            activate_ability(player->secondary);
+        }
+    }
+}   
+
+void mouse_moved(SDL_MouseMotionEvent motion) {
+    if (lock_and_hide_mouse) {
+        player->angle += motion.xrel * X_SENSITIVITY;
+        player->handOffset.x = lerp(player->handOffset.x, -motion.xrel * 2, 0.06);
+        player->pitch += motion.yrel * Y_SENSITIVITY;
+        player->handOffset.y = lerp(player->handOffset.y, -motion.yrel * 2, 0.06);
+        player->pitch = clamp(player->pitch, -280, 280);
+    }
 }
 
 
