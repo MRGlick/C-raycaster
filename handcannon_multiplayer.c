@@ -66,6 +66,7 @@
 #define instanceof(type, parent_type) (type >= parent_type && type <= parent_type##_END)
 #define node(thing) ((Node *)thing)
 #define await(cond) while (!cond) { }
+#define struct_equal(type, s1, s2) (!strncmp(&s1, &s2, sizeof(type)))
 
 // #PACKETS
 enum PacketTypes {
@@ -257,7 +258,7 @@ DEF_STRUCT(Node, NODE, {
 
     DEF_STRUCT(Sprite, SPRITE, {
         Node node;
-        GPU_Image *texture;  // not used if animated
+        GPU_Image *texture;
         Animation *animations;
         v2 scale;
         SDL_Color color;
@@ -380,7 +381,6 @@ DEF_STRUCT(Node, NODE, {
             double height;
             double height_vel;
             double pitch;
-            bool sprinting;
             bool crouching;
             bool canShoot;
             double shootCooldown;
@@ -391,6 +391,11 @@ DEF_STRUCT(Node, NODE, {
             v2 handOffset;
             double health, maxHealth;
             double tallness;
+
+            v2 right_hand_pos, left_hand_pos;
+            double right_hand_height, left_hand_height;
+            bool hands_animated;
+
 
             Ability *primary, *secondary, *utility, *special;
 
@@ -857,8 +862,6 @@ void key_pressed(SDL_Scancode key, bool pressed);
 
 void tick(double delta);
 
-void handle_input(SDL_Event event);
-
 double mili_to_sec(u64 mili);
 
 v2 get_player_forward();
@@ -917,6 +920,7 @@ UILabel *fps_label = NULL;
 
 // #TEXTURES
 
+GPU_Image *hand_texture;
 GPU_Image *ff_icon;
 GPU_Image **ff_spark_particle_anim;
 GPU_Image **switchshot_anim;
@@ -1163,7 +1167,7 @@ int main(int argc, char *argv[]) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             UI_handle_event(event);
-            if (started_game) handle_input(event);
+            if (started_game) IN_handle_input(event);
         }
 
         u64 now = SDL_GetTicks64();
@@ -1260,12 +1264,6 @@ v2 get_player_forward() {
     return v2_rotate_to((v2){1, 0}, deg_to_rad(player->angle));
 }
 
-void handle_input(SDL_Event event) {
-
-    IN_handle_input(event);
-
-}
-
 void key_pressed(SDL_Scancode key, bool pressed) {
     if (pressed) {
         if (key == INPUT(F8)) {
@@ -1344,7 +1342,7 @@ void player_tick(Node *node, double delta) {
         player->height_vel = 0;
     }
     player->world_node.height = clamp(player->world_node.height, player->tallness * 0.8, get_max_height());
-    // player->collider->world_node.pos = player->world_node.pos;
+
     if (player->primary) player->primary->is_held_down = is_mouse_button_pressed(MOUSE(LEFT));
     if (player->secondary) player->secondary->is_held_down = is_mouse_button_pressed(MOUSE(RIGHT));
     if (player->utility) player->utility->is_held_down = is_key_pressed(INPUT(LSHIFT));
@@ -1369,7 +1367,7 @@ void player_tick(Node *node, double delta) {
     v2 keyVec = get_key_vector(INPUT(S), INPUT(W), INPUT(A), INPUT(D));
 
     if (!v2_equal(keyVec, to_vec(0))) {
-        double t = sin(mili_to_sec(SDL_GetTicks64()) * (15 + (int)player->sprinting * 5)) * 3;
+        double t = sin(mili_to_sec(SDL_GetTicks64()) * (15)) * 3;
         player->handOffset.y = t * 2.5;
     } else {
         player->handOffset.y = lerp(player->handOffset.y, 0, 0.1);
@@ -1425,6 +1423,15 @@ void player_tick(Node *node, double delta) {
    
     player->world_node.pos = v2_add(player->world_node.pos, v2_mul(player->vel, to_vec(delta)));
     
+
+    v2 right_hand_dir = v2_rotate(playerForward, PI / 4);
+    v2 left_hand_dir = v2_rotate(playerForward, -PI / 4);
+
+    player->right_hand_pos = v2_add(player->world_node.pos, v2_mul(right_hand_dir, to_vec(4)));
+    player->left_hand_pos = v2_add(player->world_node.pos, v2_mul(left_hand_dir, to_vec(4)));
+
+    player->right_hand_height = get_player_height() - 900;
+    player->left_hand_height = get_player_height() - 900;
 
 
 
@@ -1758,7 +1765,7 @@ void render_floor_and_ceiling() {
 void renderTexture(GPU_Image *texture, v2 pos, v2 size, double height, bool affected_by_light, SDL_Color custom_color) {
     
 
-    v2 screen_pos = worldToScreen(pos, height, false);
+    v2 screen_pos = worldToScreen(pos, height, true);
 
     if (v2_equal(screen_pos, OUT_OF_SCREEN_POS)) {
         return;
@@ -2108,6 +2115,20 @@ void render(double delta) {  // #RENDER
     GPU_Flip(actual_screen);
 } // #RENDER END
 
+void _left_hand_tick(Node *node, double delta) {
+    WorldNode *left_hand = node;
+
+    left_hand->pos = v2_lerp(left_hand->pos, player->left_hand_pos, delta * 144 * 0.5);
+    left_hand->height = lerp(left_hand->height, player->left_hand_height, delta * 144 * 0.5);
+}
+
+void _right_hand_tick(Node *node, double delta) {
+    WorldNode *right_hand = node;
+
+    right_hand->pos = v2_lerp(right_hand->pos, player->right_hand_pos, delta * 144 * 0.5);
+    right_hand->height = lerp(right_hand->height, player->right_hand_height, delta * 144 * 0.5);
+}
+
 // #PLAYER INIT
 void init_player(v2 pos) {
     if (player == NULL) player = malloc(sizeof(Player));
@@ -2116,7 +2137,35 @@ void init_player(v2 pos) {
     player->world_node.node.on_tick = player_tick;
     player->world_node.node.type = PLAYER;
 
+    const int hand_size = 750;
+
     Node_add_child(player, alloc(CircleCollider, CIRCLE_COLLIDER, PLAYER_COLLIDER_RADIUS));
+
+    WorldNode *hands = alloc(WorldNode, WORLD_NODE);
+
+
+    Entity *right_hand = alloc(Entity, ENTITY);
+    right_hand->affected_by_light = false;
+    right_hand->world_node.size = to_vec(hand_size);
+    node(right_hand)->on_tick = _right_hand_tick;
+
+    Sprite *hand_sprite = alloc(Sprite, SPRITE, false);
+    hand_sprite->texture = hand_texture;
+    Node_add_child(right_hand, hand_sprite);
+
+    Entity *left_hand = alloc(Entity, ENTITY);
+    left_hand->affected_by_light = false;
+    left_hand->world_node.size = to_vec(hand_size);
+    node(left_hand)->on_tick = _left_hand_tick;
+
+    Sprite *hand_sprite2 = alloc(Sprite, SPRITE, false);
+    hand_sprite2->texture = hand_texture;
+    Node_add_child(left_hand, hand_sprite2);
+
+    Node_add_child(hands, right_hand);
+    Node_add_child(hands, left_hand);
+
+    Node_add_child(player, hands);
 
 
 
@@ -2125,7 +2174,6 @@ void init_player(v2 pos) {
     player->vel = V2_ZERO;
     player->speed = 70;
     player->collSize = 7;
-    player->sprinting = false;
     player->canShoot = true;
     player->shootCooldown = PLAYER_SHOOT_COOLDOWN;
     player->shootChargeTimer = 0;
@@ -2333,11 +2381,11 @@ void spawn_ceiling_light(v2 pos) {
     int chance = randi_range(0, 2);
 
     if (chance == 0) {
-        light->color = (SDL_Color){randf_range(200, 255), randf_range(130, 160), 70};//{255, 200, 100};
+        light->color = (SDL_Color){randf_range(200, 255), randf_range(160, 200), 50};//{255, 200, 100};
     } else if (chance == 1) {
-        light->color = (SDL_Color){160, 160, 255};
+        light->color = (SDL_Color){110, 110, 255};
     } else {
-        light->color = (SDL_Color){120, 255, 120};
+        light->color = (SDL_Color){80, 255, 80};
     }
     
     light->strength = 5;
@@ -4069,7 +4117,9 @@ void generate_room_recursive(Room *room_ptr, bool visited[DUNGEON_SIZE][DUNGEON_
 
         v2 pos = v2_add(current, dir);
         if (!in_range(pos.x, 0, DUNGEON_SIZE - 1) || !in_range(pos.y, 0, DUNGEON_SIZE - 1)) continue;
-        if (visited[(int)pos.y][(int)pos.x]) continue;
+        if (visited[(int)pos.y][(int)pos.x]) {
+            return;
+        }
 
         rooms[(int)pos.y][(int)pos.x] = Room_new(pos);
         visited[(int)pos.y][(int)pos.x] = true;
@@ -4104,6 +4154,8 @@ void generate_room_recursive(Room *room_ptr, bool visited[DUNGEON_SIZE][DUNGEON_
 
 void generate_dungeon() {
     
+    Room empty_room = {0};
+
     srand(client_dungeon_seed);
 
     bool visited[DUNGEON_SIZE][DUNGEON_SIZE] = {0};
@@ -4116,9 +4168,36 @@ void generate_dungeon() {
 
     rooms[(int)start_room.room_idx.y][(int)start_room.room_idx.x] = start_room;
 
+    Room *start_room_ptr = &rooms[(int)start_room.room_idx.y][(int)start_room.room_idx.x];
     
     generate_room_recursive(&rooms[(int)start_room.room_idx.y][(int)start_room.room_idx.x], visited);
 
+
+    v2 dirs[4] = {V2_LEFT, V2_RIGHT, V2_UP, V2_DOWN};
+
+    for (int i = 0; i < 4; i++) {
+        v2 pos = v2_add(start_room.room_idx, dirs[i]);
+        if (in_range(pos.x, 0, DUNGEON_SIZE - 1) && in_range(pos.y, 0, DUNGEON_SIZE - 1)) {
+            if (!struct_equal(Room, rooms[(int)pos.y][(int)pos.x], empty_room)) {
+
+                Room *room = &rooms[(int)pos.y][(int)pos.x];
+
+                if (v2_equal(dirs[i], V2_LEFT)) {
+                    start_room_ptr->left = room;
+                    room->right = start_room_ptr;
+                } else if (v2_equal(dirs[i], V2_RIGHT)) {
+                    start_room_ptr->right = room;
+                    room->left = start_room_ptr;
+                } else if (v2_equal(dirs[i], V2_UP)) {
+                    start_room_ptr->up = room;
+                    room->down = start_room_ptr;
+                } else {
+                    start_room_ptr->down = room;
+                    room->up = start_room_ptr;
+                }
+            }
+        }
+    }
 }
 
 void load_room(Room *room_ptr) {
@@ -4247,7 +4326,10 @@ void load_room(Room *room_ptr) {
 
 }
 
+
 void _carve_path(v2 pos1, v2 pos2, bool vertical) {
+
+    //const int PATH_SIZE = 3;
 
 
     int start_row = pos1.y;
@@ -4267,34 +4349,62 @@ void _carve_path(v2 pos1, v2 pos2, bool vertical) {
 
         for (int c = current_col; c != start_col + col_dist / 2; c += dir_c) {
             current_col = c;
-            tilemap->level_tilemap[current_row][current_col] = -1;
+            for (int i = -1; i <= 1; i++) {
+                for (int j = -1; j <= 1; j++) {
+                    tilemap->level_tilemap[current_row + i][current_col + j] = -1;
+                }
+            }
         }
         for (int r = current_row; r != start_row + row_dist * dir_r; r += dir_r) {
             current_row = r;
-            tilemap->level_tilemap[current_row][current_col] = -1;
+            for (int i = -1; i <= 1; i++) {
+                for (int j = -1; j <= 1; j++) {
+                    tilemap->level_tilemap[current_row + i][current_col + j] = -1;
+                }
+            }
             
         }
         for (int c = current_col; c != start_col + (col_dist + 1) * dir_c; c += dir_c) {
             current_col = c;
-            tilemap->level_tilemap[current_row][current_col] = -1;
+            for (int i = -1; i <= 1; i++) {
+                for (int j = -1; j <= 1; j++) {
+                    tilemap->level_tilemap[current_row + i][current_col + j] = -1;
+                }
+            }
         }
 
     } else {
         for (int r = current_row; r != start_row + row_dist / 2; r += dir_r) {
             current_row = r;
-            tilemap->level_tilemap[current_row][current_col] = -1;
+            for (int i = -1; i <= 1; i++) {
+                for (int j = -1; j <= 1; j++) {
+                    tilemap->level_tilemap[current_row + i][current_col + j] = -1;
+                }
+            }
         }
         for (int c = current_col; c != start_col + col_dist * dir_c; c += dir_c) {
             current_col = c;
-            tilemap->level_tilemap[current_row][current_col] = -1;
+            for (int i = -1; i <= 1; i++) {
+                for (int j = -1; j <= 1; j++) {
+                    tilemap->level_tilemap[current_row + i][current_col + j] = -1;
+                }
+            }
         }
         for (int r = current_row; r != start_row + (row_dist + 1) * dir_r; r += dir_r) {
             current_row = r;
-            tilemap->level_tilemap[current_row][current_col] = -1;
+            for (int i = -1; i <= 1; i++) {
+                for (int j = -1; j <= 1; j++) {
+                    tilemap->level_tilemap[current_row + i][current_col + j] = -1;
+                }
+            }
         }
     }
 
-    tilemap->level_tilemap[current_row][current_col] = -1;
+    for (int i = -1; i <= 1; i++) {
+        for (int j = -1; j <= 1; j++) {
+            tilemap->level_tilemap[current_row + i][current_col + j] = -1;
+        }
+    }
 }
 
 void carve_room_paths() {
@@ -4779,6 +4889,8 @@ void PlayerEntity_tick(PlayerEntity *player_entity, double delta) {
 // #TEXTURES INIT
 void init_textures() {
 
+    hand_texture = load_texture("Textures/Player/Hands/hand.png");
+
     ff_icon = load_texture("Textures/Abilities/Icons/ff_icon.png");
 
     ff_spark_particle_anim = get_texture_files("Textures/Abilities/ForceField/spark", 2);
@@ -5248,7 +5360,8 @@ void randomize_player_abilities() {
         ability_bomb_create()
     };
     Ability utility_choices[] = {
-        ability_forcefield_create()
+        ability_forcefield_create(),
+        ability_dash_create()
     }; //
     //Ability speical_choices[] = {};
 
@@ -5889,7 +6002,7 @@ void init_hand_sprite() {
 
     Node_add_child(canvas_node, sprite);
 
-    Node_add_child(root_node, canvas_node);
+    //Node_add_child(root_node, canvas_node);
 
     hand_node = canvas_node;
 }
